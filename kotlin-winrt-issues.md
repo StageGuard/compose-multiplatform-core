@@ -9,8 +9,8 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`.
-- **Open compose-side workarounds:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`.
+- **Open upstream/plugin/runtime:** `KWINRT-040`, `KWINRT-049`, `KWINRT-052`.
+- **Open compose-side workarounds:** `KWINRT-040`, `KWINRT-049`, `KWINRT-052`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -23,6 +23,44 @@ baseline, not every retest attempt.
   `KWINRT-030`, `KWINRT-031`, `KWINRT-032`, `KWINRT-038`, `KWINRT-043`,
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, and `KWINRT-050`.
+
+## KWINRT-052: Application manifest uses wildcard processorArchitecture
+
+- **Status:** Open.
+- **Observed in:** `:compose:mpp:demo-winui:runWinRTApplicationHost` after
+  refreshing to the 2026-07-05 `skiko-winui-jvm` snapshot and current
+  kotlin-winrt runtime/plugin snapshots.
+- **Symptom:** the generated unpackaged application manifest contains
+  `<assemblyIdentity ... processorArchitecture='*'/>`. `CreateActCtxW` fails
+  while activating that manifest, and direct `mt.exe -validate_manifest`
+  reports `Attribute "processorArchitecture" is wildcarded in the definition
+  identity.` After patching that value, SxS activation still fails because the
+  generated manifest contains a `Microsoft.Web.WebView2.Core.dll` file entry
+  while the sample application layout does not stage that DLL, and because both
+  `skiko-winui.dll` and `skiko.dll` register
+  `org.jetbrains.skiko.winui.WinUISkiaHostPanel`.
+- **Expected behavior:** kotlin-winrt should emit the processor architecture
+  required by the generated application host, such as `amd64`, `arm64`, or
+  `x86`, rather than a wildcard value that the activation context rejects.
+- **compose-winui workaround:** the repository-local WinUI sample hosts patch
+  the generated `runtime-assets/*.exe.manifest` and
+  `application-layout/jvm/*.exe.manifest` files immediately before
+  `runWinRTApplicationHost`, replacing the wildcard with the current JVM
+  process architecture and removing `asmv3:file` blocks for DLLs that are not
+  staged in the generated layout or only contain activatable classes already
+  registered by an earlier file block. This is intentionally scoped to
+  generated sample-host artifacts and should be removed when kotlin-winrt emits
+  a valid manifest.
+- **Validation:** before the workaround, `mt.exe -validate_manifest` identifies
+  the wildcard processor-architecture failure, direct file-entry inspection
+  finds the missing `Microsoft.Web.WebView2.Core.dll`, and manifest inspection
+  finds the duplicate `WinUISkiaHostPanel` registration. After the workaround,
+  the MPP sample manifest has no missing file entries, no duplicate
+  activatable classes, passes `mt.exe -validate_manifest`, and the MPP sample
+  auto-exit smoke reaches window composition, Direct3D rendering, non-empty
+  draw bounds, and clean disposal. Manual RDP Chinese input validation on the
+  interactive MPP sample is normal with the refreshed value-class
+  `VirtualKey` projection.
 
 ## KWINRT-049: WinRT async cancellation upcall can crash clipboard text retrieval
 
@@ -44,24 +82,27 @@ baseline, not every retest attempt.
 
 ## KWINRT-051: VirtualKey projection throws for invalid RDP key values
 
-- **Status:** Open.
-- **Observed in:** RDP input routed through WinUI XAML `KeyDown` callbacks while
-  compose-winui has a focused text input.
-- **Symptom:** `KeyRoutedEventArgs.key` can surface an invalid ABI value such
-  as `0x100` (`WM_KEYDOWN`, not a `Windows.System.VirtualKey`) and the generated
-  `windows.system.VirtualKey.Metadata.fromAbi` path throws
+- **Status:** Closed in the kotlin-winrt value-class enum projection and the
+  republished `skiko-winui-jvm` snapshot available on 2026-07-05.
+- **Observed in:** RDP Chinese input routed through WinUI XAML `KeyDown`
+  callbacks while compose-winui has a focused text input.
+- **Symptom:** `KeyRoutedEventArgs.key` surfaced an invalid ABI value such as
+  `0xff` (`VK__none_` / reserved), and the old generated
+  `windows.system.VirtualKey.Metadata.fromAbi` enum path threw
   `IllegalStateException: Unknown Windows.System.VirtualKey ABI value` through
   the WinRT callback.
-- **Expected behavior:** invalid enum ABI values coming from native input
-  should not escape a generated event callback as an uncaught exception. The
-  projection should either provide a recoverable unknown-value shape or let the
-  caller detect the failure without tearing down the callback.
-- **compose-winui workaround:** `WinUIKeyInputAdapter` detects this exact
-  generated projection failure, marks the native key event handled, and keeps
-  other key-input exceptions on the normal diagnostic path.
-- **Validation:** focused `WinUIKeyEventProcessorTest` coverage classifies this
-  failure separately from other key failures, and
-  `:compose:ui:ui:compileKotlinWinuiJvm` passes with the workaround.
+- **Resolution:** `VirtualKey` is now projected as a value class, so
+  `Metadata.fromAbi` wraps the raw integer value instead of rejecting unknown
+  values. The compose-side `isInvalidVirtualKeyProjectionFailure()` workaround
+  and its focused tests were removed.
+- **Validation:** direct `javap` inspection of the refreshed
+  `skiko-winui-jvm-0.0.0-SNAPSHOT.jar` shows `windows.system.VirtualKey` is no
+  longer a JVM enum and `VirtualKey$Metadata.fromAbi` calls
+  `VirtualKey.constructor-impl`. A forced
+  `:compose:ui:ui:compileKotlinWinuiJvm --rerun-tasks --no-configuration-cache`
+  run passes with the refreshed dependency, `:compose:ui:ui:winuiJvmTest`
+  passes, and manual RDP Chinese input validation on the interactive MPP sample
+  is normal.
 
 ## KWINRT-050: CoreText struct ABI workaround was misattributed to kotlin-winrt
 

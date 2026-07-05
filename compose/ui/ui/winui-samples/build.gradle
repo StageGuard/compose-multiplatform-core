@@ -59,6 +59,62 @@ def composeWinUiWindowsAppSdkVersion = providers
 def gradleWrapper = rootProject.layout.projectDirectory.file(
         System.getProperty("os.name").startsWith("Windows") ? "gradlew.bat" : "gradlew"
 )
+def currentWinRTManifestProcessorArchitecture = {
+    switch (System.getProperty("os.arch").toLowerCase(Locale.ROOT)) {
+        case "amd64":
+        case "x86_64":
+            return "amd64"
+        case "aarch64":
+        case "arm64":
+            return "arm64"
+        case "x86":
+        case "i386":
+            return "x86"
+        default:
+            throw new GradleException("Unsupported WinRT application host architecture: ${System.getProperty("os.arch")}")
+    }
+}
+def patchWinRTApplicationManifestProcessorArchitecture = { File manifest ->
+    if (!manifest.isFile()) return
+    def architecture = currentWinRTManifestProcessorArchitecture()
+    def text = manifest.getText("UTF-8")
+    def patched = text
+            .replace("processorArchitecture='*'", "processorArchitecture='${architecture}'")
+            .replace("processorArchitecture=\"*\"", "processorArchitecture=\"${architecture}\"")
+    if (patched != text) {
+        manifest.setText(patched, "UTF-8")
+    }
+}
+def removeMissingWinRTApplicationManifestFiles = { File manifest ->
+    if (!manifest.isFile()) return
+    def layoutDirectory = manifest.parentFile
+    def text = manifest.getText("UTF-8")
+    def patched = text.replaceAll(/(?s)\s*<asmv3:file name='([^']+)'[^>]*>.*?<\/asmv3:file>/) {
+        fullMatch, fileName ->
+            new File(layoutDirectory, fileName).isFile() ? fullMatch : ""
+    }
+    if (patched != text) {
+        manifest.setText(patched, "UTF-8")
+    }
+}
+def removeDuplicateWinRTApplicationManifestActivatableClassFiles = { File manifest ->
+    if (!manifest.isFile()) return
+    def seenClasses = [] as Set
+    def text = manifest.getText("UTF-8")
+    def patched = text.replaceAll(/(?s)\s*<asmv3:file name='([^']+)'[^>]*>.*?<\/asmv3:file>/) {
+        fullMatch, fileName ->
+            def classes = (fullMatch =~ /<winrtv1:activatableClass name='([^']+)'/)
+                    .collect { match -> match[1] }
+            if (!classes.isEmpty() && classes.every { seenClasses.contains(it) }) {
+                return ""
+            }
+            seenClasses.addAll(classes)
+            return fullMatch
+    }
+    if (patched != text) {
+        manifest.setText(patched, "UTF-8")
+    }
+}
 
 winRT {
     application {
@@ -92,6 +148,27 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
         freeCompilerArgs.add("-Xjdk-release=25")
         freeCompilerArgs.add("-opt-in=kotlin.time.ExperimentalTime")
     }
+}
+
+def patchWinRTApplicationManifestProcessorArchitectureTask =
+        tasks.register("patchWinRTApplicationManifestProcessorArchitecture") {
+    // KWINRT-052: kotlin-winrt emits processorArchitecture='*', which CreateActCtxW rejects.
+    dependsOn("buildWinRTApplicationHost")
+    doLast {
+        [
+                layout.buildDirectory.file("kotlin-winrt/runtime-assets/${project.name}.exe.manifest"),
+                layout.buildDirectory.file("kotlin-winrt/application-layout/jvm/${project.name}.exe.manifest"),
+        ].each { manifest ->
+            def file = manifest.get().asFile
+            patchWinRTApplicationManifestProcessorArchitecture(file)
+            removeMissingWinRTApplicationManifestFiles(file)
+            removeDuplicateWinRTApplicationManifestActivatableClassFiles(file)
+        }
+    }
+}
+
+tasks.named("runWinRTApplicationHost").configure {
+    dependsOn(patchWinRTApplicationManifestProcessorArchitectureTask)
 }
 
 def registerWinUISampleTask = { String taskName, String descriptionText, String mode = null, Closure extraConfig = null ->

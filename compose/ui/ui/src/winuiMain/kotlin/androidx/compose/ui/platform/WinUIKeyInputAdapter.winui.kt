@@ -116,18 +116,9 @@ internal class WinUIKeyInputAdapter(
                             "handled=${args.handled}"
                     }
                 } catch (throwable: Throwable) {
-                    if (throwable.isInvalidVirtualKeyProjectionFailure()) {
-                        // KWINRT-051: RDP can surface WM_KEYDOWN as an invalid VirtualKey ABI value.
-                        runCatching { args.handled = true }
-                        debugKeyInput {
-                            "native event=$eventType suppressed invalid VirtualKey projection failure: " +
-                                throwable.stackTraceToString()
-                        }
-                    } else {
-                        debugKeyInput {
-                            "native event=$eventType failed before leaving WinRT callback: " +
-                                throwable.stackTraceToString()
-                        }
+                    debugKeyInput {
+                        "native event=$eventType failed before leaving WinRT callback: " +
+                            throwable.stackTraceToString()
                     }
                 }
             }
@@ -351,13 +342,6 @@ private fun Any?.debugKeyInputValue(): String =
 
 private fun Any?.debugClassNameOrNull(): String =
     this?.let { it::class.qualifiedName ?: it::class.simpleName ?: it.toString() } ?: "null"
-
-internal fun Throwable.isInvalidVirtualKeyProjectionFailure(): Boolean =
-    this is IllegalStateException &&
-        stackTrace.any { frame ->
-            frame.className == "windows.system.VirtualKey\$Metadata" &&
-                frame.methodName == "fromAbi"
-        }
 
 private fun List<Any?>.debugClassNames(): String =
     joinToString(prefix = "[", postfix = "]") { it.debugClassNameOrNull() }

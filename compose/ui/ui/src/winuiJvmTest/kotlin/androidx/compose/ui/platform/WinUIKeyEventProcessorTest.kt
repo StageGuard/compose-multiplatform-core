@@ -236,36 +236,6 @@ class WinUIKeyEventProcessorTest {
         assertEquals(false, events[3].isCtrlPressed)
     }
 
-    @Test
-    fun identifiesInvalidVirtualKeyProjectionFailures() {
-        val failure = IllegalStateException("Unknown Windows.System.VirtualKey ABI value: 256")
-        failure.stackTrace = arrayOf(
-            StackTraceElement(
-                "windows.system.VirtualKey\$Metadata",
-                "fromAbi",
-                "windows_system.kt",
-                2029,
-            ),
-        )
-
-        assertTrue(failure.isInvalidVirtualKeyProjectionFailure())
-    }
-
-    @Test
-    fun doesNotTreatOtherKeyFailuresAsInvalidVirtualKeyProjectionFailures() {
-        val failure = IllegalStateException("other key failure")
-        failure.stackTrace = arrayOf(
-            StackTraceElement(
-                "microsoft.ui.xaml.input.KeyRoutedEventArgs",
-                "getKey",
-                "microsoft_ui_xaml_input.kt",
-                2106,
-            ),
-        )
-
-        assertEquals(false, failure.isInvalidVirtualKeyProjectionFailure())
-    }
-
 }
 
 private class FakeKeyEventSource(
