@@ -24,8 +24,6 @@ import windows.applicationmodel.datatransfer.DataPackage
 import windows.applicationmodel.datatransfer.DataPackageView
 import windows.applicationmodel.datatransfer.Clipboard as WinRTClipboardClass
 import windows.applicationmodel.datatransfer.StandardDataFormats as WinRTStandardDataFormats
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 
 actual typealias NativeClipboard = IUnknownReference
 
@@ -118,9 +116,7 @@ internal class WinUIClipboard : Clipboard {
         if (runCatching { content.availableFormats.isEmpty() }.getOrDefault(true)) return null
         if (runCatching { content.contains(winUITextFormat) }.getOrDefault(false)) {
             return runCatching {
-                withContext(NonCancellable) {
-                    ClipEntry(content.getTextAsync().await())
-                }
+                ClipEntry(content.getTextAsync().await())
             }.getOrElse {
                 logClipboardReadFailure(it)
                 null

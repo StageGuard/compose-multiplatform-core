@@ -9,8 +9,8 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** `KWINRT-040`, `KWINRT-049`, `KWINRT-052`.
-- **Open compose-side workarounds:** `KWINRT-040`, `KWINRT-049`, `KWINRT-052`.
+- **Open upstream/plugin/runtime:** `KWINRT-052`.
+- **Open compose-side workarounds:** `KWINRT-052`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -22,7 +22,7 @@ baseline, not every retest attempt.
   `KWINRT-037`, `KWINRT-025`, `KWINRT-033`, `KWINRT-039`, `KWINRT-042`,
   `KWINRT-030`, `KWINRT-031`, `KWINRT-032`, `KWINRT-038`, `KWINRT-043`,
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
-  `KWINRT-048`, and `KWINRT-050`.
+  `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, and `KWINRT-051`.
 
 ## KWINRT-052: Application manifest uses wildcard processorArchitecture
 
@@ -64,7 +64,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-049: WinRT async cancellation upcall can crash clipboard text retrieval
 
-- **Status:** Open.
+- **Status:** Closed in the kotlin-winrt async await runtime consumed by the
+  2026-07-05 compose-winui validation path.
 - **Observed in:** compose-winui text input and context menu flows that end up
   reading clipboard text through `DataPackageView.getTextAsync()`.
 - **Symptom:** the JVM crashes in
@@ -73,12 +74,11 @@ baseline, not every retest attempt.
   cancelled.
 - **Expected behavior:** cancelling a clipboard read should be a normal
   coroutine cancellation, not a native access violation.
-- **compose-winui workaround:** `PlatformClipboard.winui.kt` wraps
-  `getTextAsync().await()` in `NonCancellable` so the WinRT await path is not
-  torn down by menu/input cancellation.
+- **Resolution:** compose-winui removed the `NonCancellable` wrapper around
+  `getTextAsync().await()` and now uses the generated await path directly.
 - **Validation:** with JDK 25, `:compose:ui:ui:compileKotlinWinuiJvm`,
-  focused WinUI input tests, and
-  `:compose:ui:ui:winui-samples:runWinUIViewSample` pass after the workaround.
+  `:compose:ui:ui:winuiJvmTest`, and the MPP sample validation path pass with
+  the direct await call.
 
 ## KWINRT-051: VirtualKey projection throws for invalid RDP key values
 
@@ -1368,7 +1368,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-040: KMP library authoring manifest targets the wrong JVM artifact
 
-- **Status:** Open.
+- **Status:** Closed in the kotlin-winrt Maven snapshot consumed by the
+  2026-07-05 compose-winui validation path.
 - **Observed in:** `:compose:ui:ui:winui-samples:buildWinRtApplicationHost`
   after `WinUIXamlApplication` became an authored `Application` subclass.
 - **Symptom:** the reusable KMP `:compose:ui:ui` module generates
@@ -1382,10 +1383,16 @@ baseline, not every retest attempt.
 - **Expected behavior:** for Kotlin Multiplatform JVM artifacts, kotlin-winrt
   should use the target JVM jar archive file that will be staged for runtime
   instead of falling back to `project.name.jar`.
-- **compose-winui workaround:** `compose/ui/ui/build.gradle` overrides both the
-  scanner-generated and compiler-generated authoring target artifact names to
-  `winuiJvmJar.archiveFileName`. Remove this once kotlin-winrt derives the
-  target artifact name correctly for KMP JVM targets.
+- **Resolution:** compose-winui no longer carries a target-artifact override in
+  `compose/ui/ui/build.gradle`; kotlin-winrt now derives the WinUI JVM jar name
+  for the generated authoring host metadata.
+- **Validation:** the generated
+  `build/classes/kotlin/winuiJvm/main/kotlin-winrt-authoring/ui.host.json` and
+  staged sample `runtime-assets/ui.host.json` both use
+  `targetArtifact: "ui-winuijvm-9999.0.0-SNAPSHOT.jar"` and route
+  `androidx.compose.ui.window.WinUIXamlApplication` to the same target artifact.
+  The WinUI sample host and MPP sample host reach the current validation paths
+  with this metadata.
 
 ## KWINRT-041: Dependency-owned WinRT types could link with incompatible generated shape
 
