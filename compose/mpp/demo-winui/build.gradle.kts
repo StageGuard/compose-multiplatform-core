@@ -309,6 +309,8 @@ fun Exec.configureWinUIMppSampleApplicationHost(
     requiredEvents: List<String>,
     autoExit: Boolean = true,
     autoTraverse: Boolean = false,
+    extendsContentIntoTitleBar: Boolean = false,
+    validateTitleBarInsets: Boolean = false,
 ) {
     group = "verification"
     description = taskDescription
@@ -331,6 +333,8 @@ fun Exec.configureWinUIMppSampleApplicationHost(
         val jvmOptions = mutableListOf(
             "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
             "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",
+            "-Dcompose.winui.mpp.sample.extendsContentIntoTitleBar=$extendsContentIntoTitleBar",
+            "-Dcompose.winui.mpp.sample.validateTitleBarInsets=$validateTitleBarInsets",
             "-Dcompose.winui.mpp.sample.validationReport=${report.absolutePath}",
         )
         environment("KOTLIN_WINRT_JVM_OPTIONS", jvmOptions.joinToString(separator = ";"))
@@ -817,11 +821,19 @@ tasks.register<Exec>("runWinUIMppSample") {
             "non-empty-draw-bounds",
             "autorun-start",
             "autorun-complete",
+            "window-extends-content-into-titlebar",
+            "titlebar-raw-positive",
+            "captionbar-inset-positive",
+            "systembars-inset-includes-caption",
+            "safedrawing-inset-includes-caption",
+            "topappbar-extends-below-titlebar",
             "frame-observed",
             "exit-requested",
             "window-content-disposed",
         ),
         autoTraverse = true,
+        extendsContentIntoTitleBar = true,
+        validateTitleBarInsets = true,
     )
 }
 
@@ -831,6 +843,8 @@ tasks.register<Exec>("runWinUIMppSampleInteractive") {
         reportName = "winui-mpp-sample-interactive",
         requiredEvents = emptyList(),
         autoExit = false,
+        extendsContentIntoTitleBar = true,
+        validateTitleBarInsets = true,
     )
     group = "application"
 }

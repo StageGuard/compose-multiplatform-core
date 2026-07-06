@@ -46,12 +46,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+
+internal val LocalSampleTopAppBarValidationRecorder =
+    staticCompositionLocalOf<((Int, Int) -> Unit)?> { null }
 
 sealed interface Screen {
     val title: String
@@ -184,6 +190,17 @@ private fun SelectionTopBar(
     title: String,
     back: (() -> Unit)? = null,
 ) {
+    val density = LocalDensity.current
+    val validationRecorder = LocalSampleTopAppBarValidationRecorder.current
+    val systemBarsTop = WindowInsets.systemBars.getTop(density)
+    val validationModifier = if (validationRecorder != null) {
+        Modifier.onGloballyPositioned { coordinates ->
+            validationRecorder(systemBarsTop, coordinates.size.height)
+        }
+    } else {
+        Modifier
+    }
+
     /*
      * This is recommended approach of applying multiplatform window insets to Material2 Scaffold
      * with using top app bar.
@@ -191,6 +208,7 @@ private fun SelectionTopBar(
      * out of box in android development or with Material3 Scaffold
      */
     TopAppBar(
+        modifier = validationModifier,
         contentPadding = WindowInsets.systemBars
             .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             .union(WindowInsets(left = 20.dp))

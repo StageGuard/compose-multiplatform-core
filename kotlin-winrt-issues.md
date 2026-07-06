@@ -9,8 +9,11 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** none currently tracked.
-- **Open compose-side workarounds:** none currently tracked.
+- **Open upstream/plugin/runtime:** `KWINRT-053`, `KWINRT-054`,
+  `KWINRT-055`, `KWINRT-056`, `KWINRT-057`, and `KWINRT-058`.
+- **Open compose-side workarounds:** manual WinRT Gradle task wiring in
+  `compose/ui/ui/winui-samples` and `compose/mpp/demo-winui` for
+  `KWINRT-053` through `KWINRT-058`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -24,6 +27,121 @@ baseline, not every retest attempt.
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   and `KWINRT-052`.
+
+## KWINRT-058: Project dependency WinRT identity/support artifacts require app-side validation
+
+- **Status:** Open upstream/plugin ergonomics.
+- **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` while consuming
+  `:compose:ui:ui` and other local WinUI JVM artifacts through normal
+  `project(...)` dependencies.
+- **Symptom:** the sample carries repository-local validation for
+  `generated/kotlin-winrt/identity/kotlin-winrt.json`,
+  `kotlin-winrt/type-index.tsv`,
+  `kotlin-winrt-authoring/*.host.json`,
+  `kotlin-winrt-authoring/*.winmd`, and compiler-support classes in dependency
+  jars. It also validates that local WinUI artifacts are project dependencies
+  rather than anonymous `files(...)` jars, because bypassing identity/support
+  metadata previously broke projection ownership and authoring support.
+- **Expected behavior:** kotlin-winrt should make project-dependency identity,
+  type indexes, authoring metadata, WinMDs, and compiler-support artifacts a
+  guaranteed part of the plugin contract. A normal app should be able to depend
+  on a WinRT-authoring library and build/run without app-local checks that
+  inspect dependency jars for kotlin-winrt internals.
+- **Current compose-winui action:** keep `validateWinUiKotlinWinRtKmpGraphBaseline`
+  as a regression harness for now. It should become unnecessary once the plugin
+  exposes and validates transitive WinRT metadata consistently.
+
+## KWINRT-057: Runtime assets and PRI staging still need app-local lifecycle checks
+
+- **Status:** Open upstream/plugin ergonomics.
+- **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` while staging
+  Windows App SDK runtime assets, application PRI inputs, WinUI component PRI
+  files, manifest data, and sample resources.
+- **Symptom:** the sample has to depend on `stageWinRTRuntimeAssets` and then
+  verify implementation details such as `resources.pri`, `Microsoft.UI.pri`,
+  `Microsoft.UI.Xaml.Controls.pri`, staged `Appx/...` inputs, default language
+  MUI assets, lifted WinRT registration XML, and duplicate default PRI resource
+  scanning. These checks are valuable as regression coverage, but they are also
+  guarding behavior an application plugin should own.
+- **Expected behavior:** kotlin-winrt should provide a stable app packaging
+  lifecycle for unpackaged WinUI apps: declared Windows App SDK packages and
+  app PRI inputs should stage into the application host layout automatically
+  before run tasks execute. Users should not need to manually wire staging task
+  dependencies or know the internal runtime-assets directory layout just to run
+  a sample.
+- **Current compose-winui action:** keep the packaging validation task as a
+  focused regression test. Do not spread equivalent runtime-assets/PRI staging
+  assertions into additional samples.
+
+## KWINRT-056: WinRT run host should be a first-class Gradle task
+
+- **Status:** Open upstream/plugin ergonomics.
+- **Observed in:** `compose/ui/ui/winui-samples/build.gradle` and
+  `compose/mpp/demo-winui/build.gradle.kts`.
+- **Symptom:** repository-local sample tasks are `Exec` tasks that launch a
+  nested Gradle invocation of `:...:runWinRTApplicationHost`, then parse a log
+  file to decide whether the sample passed. They also have to pass JVM options
+  through `KOTLIN_WINRT_JVM_OPTIONS` and manually set smoke-mode environment
+  variables. On memory-constrained Windows hosts, a nested smoke run without
+  explicit application JVM heap options can let the generated host JVM choose a
+  large ergonomic G1 heap, causing native memory reservation failure before the
+  sample starts.
+- **Expected behavior:** kotlin-winrt should expose a configurable run task for
+  the generated application host. A sample should be able to configure main
+  class, target/source set, args, JVM args, environment, working directory, and
+  output log directly on a typed task, without invoking Gradle from Gradle.
+- **Current compose-winui action:** keep the nested `Exec` tasks only as a
+  validation harness until a first-class run task exists.
+
+## KWINRT-055: Application-host task graph must wire generation, support merge, staging, and host build
+
+- **Status:** Open upstream/plugin ergonomics.
+- **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` and
+  `:compose:ui:ui:winui-samples:runWinUIViewSample`.
+- **Symptom:** app/sample build files manually add dependencies among
+  `generateWinRTProjections`, `mergeWinRTCompilerSupport`,
+  `stageWinRTRuntimeAssets`, `buildWinRTApplicationHost`, target compilation,
+  resources, and sample validation tasks. The wiring works, but it means a user
+  has to know kotlin-winrt's internal task ordering to run a WinUI application.
+- **Expected behavior:** requesting a generated WinRT application host or run
+  host should automatically depend on all required projection generation,
+  compiler-support merge, target compilation, resource processing, runtime
+  asset staging, and authoring-host generation tasks.
+- **Current compose-winui action:** keep explicit task dependencies in the
+  repository-local samples so validation is stable. Treat any new copy of this
+  wiring as a signal to improve kotlin-winrt plugin defaults instead.
+
+## KWINRT-054: Application-host runtime classpath should be inferred from the target
+
+- **Status:** Open upstream/plugin ergonomics.
+- **Observed in:** `:compose:mpp:demo-winui:buildWinRTApplicationHost`.
+- **Symptom:** the sample configures `BuildWinRTApplicationHostTask` manually:
+  it adds `winuiJvmRuntimeClasspath`, adds the current `winuiJvmJar`, and
+  depends on that jar task. A normal app should not have to know how to assemble
+  the runtime classpath for the generated native host.
+- **Expected behavior:** kotlin-winrt should let the build author select a JVM
+  target or source set, then infer the target runtime classpath and target jar
+  for application-host generation. The task should work for both application
+  projects and sample projects consuming project dependencies that publish
+  WinRT authoring metadata.
+- **Current compose-winui action:** keep the manual runtime classpath wiring in
+  `demo-winui` until the plugin can infer it.
+
+## KWINRT-053: Authoring scanner classpath should not be configured by applications
+
+- **Status:** Open upstream/plugin ergonomics.
+- **Observed in:** `compose/ui/ui/build.gradle` and
+  `compose/ui/ui/winui-samples/build.gradle`.
+- **Symptom:** build files declare a `winRtAuthoringScannerClasspath`
+  configuration, add `kotlin-compiler-embeddable`, and then pass that
+  configuration to `generateWinRTProjections.authoringScannerClasspath`.
+  Without this, authoring scans are not self-contained for compose-winui's
+  authored WinUI types.
+- **Expected behavior:** kotlin-winrt should configure the authoring scanner
+  classpath internally. If an override is still needed, it should be an
+  advanced escape hatch, not required boilerplate in normal app/library builds.
+- **Current compose-winui action:** keep the manual scanner classpath in the
+  modules that author WinRT types until the plugin supplies it by default.
 
 ## KWINRT-052: Application manifest uses wildcard processorArchitecture
 
@@ -490,9 +608,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-024: WinUI authored/runtime lifetime crash after full smoke
 
-- **Status:** Open in the published kotlin-winrt Maven snapshots consumed by
-  compose-winui; fixed locally in `kotlin-winrt` but not yet validated as fixed
-  from Maven artifacts.
+- **Status:** Closed in the kotlin-winrt Maven snapshots consumed by the
+  2026-07-06 compose-winui validation baseline.
 - **Observed in:** `:compose:ui:ui:winui-samples:runWinUIViewSample` with
   `external/kotlin-winrt` `1bd45755`, still reproduced after syncing
   `6b1ce387` (`Remove stale interface support merging`). The sample passes
@@ -501,6 +618,14 @@ baseline, not every retest attempt.
   session cancellation before crashing.
 - **Symptom:** the sample process exits with `NTSTATUS 0xC0000005` after logging
   `compose-winui-sample: text input session cancellation`.
+- **Resolution:** current kotlin-winrt `0.1.0-SNAPSHOT` Maven artifacts no
+  longer reproduce the teardown crash in compose-winui. With JDK 25 and
+  `-PcomposeWinUi.enableJvmTarget=true --no-configuration-cache
+  --no-configure-on-demand`, `:compose:ui:ui:compileKotlinWinuiJvm`,
+  `:compose:ui:ui:winuiJvmTest`,
+  `:compose:ui:ui:winui-samples:runWinUIViewSample`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` pass on 2026-07-06. No fresh
+  related `java.exe` / WinUI sample WER dump was present after the run.
 - **Native evidence:** latest dumps after `ad2b9df4` are
   `%LOCALAPPDATA%\CrashDumps\java.exe.46428.dmp` and
   `%LOCALAPPDATA%\CrashDumps\java.exe(1).46428.dmp`. WER reports an initial
@@ -1065,8 +1190,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-030: KMP partial dependency checker resolves kotlin-winrt identity early
 
-- **Status:** Open upstream/plugin in kotlin-winrt Maven snapshot
-  `0.1.0-SNAPSHOT` as of 2026-06-07.
+- **Status:** Closed/stale with the current kotlin-winrt Maven snapshots
+  consumed by the 2026-07-06 compose-winui validation baseline.
 - **Observed in:** `:compose:ui:ui:kmpPartiallyResolvedDependenciesChecker`
   when running `:compose:ui:ui:compileKotlinWinuiJvm` together with
   `:compose:ui:ui:winuiJvmTest` after switching compose-winui to explicit
@@ -1081,6 +1206,15 @@ baseline, not every retest attempt.
   configuration was resolved`. The stacktrace shows Kotlin's
   `KmpPartiallyResolvedDependenciesChecker` resolving the graph, then
   `addKotlinDomApiDependency` firing while Gradle is resolving dependencies.
+- **Resolution:** current compose-winui build scripts no longer carry the
+  `kmpPartiallyResolvedDependenciesChecker` workaround, and the current
+  kotlin-winrt `0.1.0-SNAPSHOT` Maven artifacts no longer reproduce the
+  early-resolution failure. On 2026-07-06,
+  `:compose:ui:ui:compileKotlinWinuiJvm`,
+  `:compose:ui:ui:winuiJvmTest`,
+  `:compose:ui:ui:winui-samples:runWinUIViewSample`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` pass with configuration cache
+  disabled.
 - **Expected behavior:** kotlin-winrt should finish configuring
   `kotlinWinRtLibraryDependencyIdentity` before other Gradle/Kotlin validation
   tasks can observe or resolve it, or should use a lazy provider path that does
@@ -1122,8 +1256,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-031: Generated authoring TypeDetails use projection-unsafe runtime casts
 
-- **Status:** Open upstream/compiler generator in kotlin-winrt Maven snapshot
-  `0.1.0-SNAPSHOT` as of 2026-06-07.
+- **Status:** Closed/stale with the current kotlin-winrt Maven snapshots
+  consumed by the 2026-07-06 compose-winui validation baseline.
 - **Observed in:** `:compose:ui:ui:compileKotlinWinuiJvm` after removing
   compose-winui's handwritten projection-unsafe casts to WinRT runtime classes.
 - **Snapshot baseline:** `winrt-runtime-jvm`
@@ -1134,6 +1268,10 @@ baseline, not every retest attempt.
   `WinRT runtime class cast to Microsoft.UI.Xaml.Controls.ContentControl is not
   projection-safe; use WinRT projection cast helpers instead`, plus equivalent
   warnings for `Control`, `FrameworkElement`, `UIElement`, and `Application`.
+- **Resolution:** the old projection-safe cast diagnostics no longer appear in
+  the 2026-07-06 compose-winui validation logs. `compileKotlinWinuiJvm`,
+  `winuiJvmTest`, the full WinUI sample, and the WinUI MPP sample all complete
+  successfully with current generated authoring sources.
 - **Evidence:** direct source search no longer finds handwritten
   `as` / `as?` casts to those WinRT runtime classes in the WinUI source or
   sample. The remaining casts are generated under
@@ -1152,8 +1290,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-032: Generated WinUI projections are final when WinMD supports subclassing
 
-- **Status:** Open upstream/generator in kotlin-winrt Maven snapshot
-  `0.1.0-SNAPSHOT` as of 2026-06-08.
+- **Status:** Closed/stale for the current compose-winui projection surface and
+  dependency graph.
 - **Observed in:** earlier `:compose:mpp:demo-winui:runWinUIMppSample` and
   `:compose:ui:ui:winui-samples:runWinRtApplicationHost` validation when
   compose-ui generated projection classes that overlapped types also generated
@@ -1167,6 +1305,14 @@ baseline, not every retest attempt.
   microsoft.ui.xaml.controls.Grid`. The native host path also fails when
   generated `Microsoft.UI.Input.InputSystemCursor` tries to inherit from final
   generated `Microsoft.UI.Input.InputCursor`.
+- **Resolution:** current compose-winui no longer reproduces the projection
+  finality/class-shadowing failure. The current dependency graph keeps
+  projection ownership compatible with `skiko-winui`, and the 2026-07-06
+  validation baseline passes `compileKotlinWinuiJvm`, `winuiJvmTest`, the full
+  WinUI sample, and the WinUI MPP sample without
+  `IncompatibleClassChangeError`. Keep `Grid` out of the compose-ui explicit
+  projection surface until a deliberate full-projection validation proves it is
+  safe.
 - **Evidence:** `javap` on the compose-ui generated `ui-winuijvm` jar shows
   `public final class microsoft.ui.xaml.controls.Grid`, while `javap` on the
   current published `skiko-winui` jar shows its generated `Grid` as non-final

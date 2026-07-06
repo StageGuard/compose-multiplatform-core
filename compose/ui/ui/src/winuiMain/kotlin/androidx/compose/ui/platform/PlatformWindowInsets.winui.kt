@@ -80,6 +80,17 @@ internal data class WinUIPlatformWindowInsets(
         right = captionBarRightPadding,
         bottom = 0,
     )
+    override val systemBars: PlatformInsets = captionBar
+
+    override fun excluding(
+        safeInsets: Boolean,
+        ime: Boolean,
+    ): PlatformWindowInsets {
+        if (!safeInsets && !ime) return this
+        if (!safeInsets) return this
+
+        return WinUIPlatformWindowInsets()
+    }
 }
 
 @InternalComposeUiApi
