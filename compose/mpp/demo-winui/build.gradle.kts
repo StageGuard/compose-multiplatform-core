@@ -81,61 +81,6 @@ val gradleWrapper = rootProject.layout.projectDirectory.file(
         "gradlew"
     }
 )
-fun currentWinRTManifestProcessorArchitecture(): String {
-    return when (System.getProperty("os.arch").lowercase()) {
-        "amd64", "x86_64" -> "amd64"
-        "aarch64", "arm64" -> "arm64"
-        "x86", "i386" -> "x86"
-        else -> error("Unsupported WinRT application host architecture: ${System.getProperty("os.arch")}")
-    }
-}
-
-fun patchWinRTApplicationManifestProcessorArchitecture(manifest: File) {
-    if (!manifest.isFile) return
-    val architecture = currentWinRTManifestProcessorArchitecture()
-    val text = manifest.readText()
-    val patched = text
-        .replace("processorArchitecture='*'", "processorArchitecture='$architecture'")
-        .replace("processorArchitecture=\"*\"", "processorArchitecture=\"$architecture\"")
-    if (patched != text) {
-        manifest.writeText(patched)
-    }
-}
-
-fun removeMissingWinRTApplicationManifestFiles(manifest: File) {
-    if (!manifest.isFile) return
-    val layoutDirectory = manifest.parentFile
-    val text = manifest.readText()
-    val fileEntry = Regex("""(?s)\s*<asmv3:file name='([^']+)'[^>]*>.*?</asmv3:file>""")
-    val patched = fileEntry.replace(text) { match ->
-        val fileName = match.groupValues[1]
-        if (layoutDirectory.resolve(fileName).isFile) match.value else ""
-    }
-    if (patched != text) {
-        manifest.writeText(patched)
-    }
-}
-
-fun removeDuplicateWinRTApplicationManifestActivatableClassFiles(manifest: File) {
-    if (!manifest.isFile) return
-    val text = manifest.readText()
-    val fileEntry = Regex("""(?s)\s*<asmv3:file name='([^']+)'[^>]*>.*?</asmv3:file>""")
-    val activatableClass = Regex("""<winrtv1:activatableClass name='([^']+)'""")
-    val seenClasses = mutableSetOf<String>()
-    val patched = fileEntry.replace(text) { match ->
-        val classes = activatableClass.findAll(match.value).map { it.groupValues[1] }.toList()
-        if (classes.isNotEmpty() && classes.all { it in seenClasses }) {
-            ""
-        } else {
-            seenClasses += classes
-            match.value
-        }
-    }
-    if (patched != text) {
-        manifest.writeText(patched)
-    }
-}
-
 val winUiMppSampleResourcesDir = layout.buildDirectory.dir("winui-mpp-sample-resources")
 val winUiMppSampleResourceFiles = listOf(
     project.file("../demo/src/commonMain/resources/RobotoFlex-VariableFont.ttf"),
@@ -345,27 +290,6 @@ tasks.named<BuildWinRTApplicationHostTask>("buildWinRTApplicationHost") {
     runtimeClasspath.from(configurations.named("winuiJvmRuntimeClasspath"))
     runtimeClasspath.from(winuiJvmJar.flatMap { it.archiveFile })
     dependsOn(winuiJvmJar)
-}
-
-val patchWinRTApplicationManifestProcessorArchitecture =
-    tasks.register("patchWinRTApplicationManifestProcessorArchitecture") {
-        // KWINRT-052: kotlin-winrt emits processorArchitecture='*', which CreateActCtxW rejects.
-        dependsOn("buildWinRTApplicationHost")
-        doLast {
-            listOf(
-                layout.buildDirectory.file("kotlin-winrt/runtime-assets/${project.name}.exe.manifest"),
-                layout.buildDirectory.file("kotlin-winrt/application-layout/jvm/${project.name}.exe.manifest"),
-            ).forEach { manifest ->
-                val file = manifest.get().asFile
-                patchWinRTApplicationManifestProcessorArchitecture(file)
-                removeMissingWinRTApplicationManifestFiles(file)
-                removeDuplicateWinRTApplicationManifestActivatableClassFiles(file)
-            }
-        }
-    }
-
-tasks.named("runWinRTApplicationHost") {
-    dependsOn(patchWinRTApplicationManifestProcessorArchitecture)
 }
 
 tasks.withType<KotlinCompile>().configureEach {

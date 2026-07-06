@@ -9,8 +9,8 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** `KWINRT-052`.
-- **Open compose-side workarounds:** `KWINRT-052`.
+- **Open upstream/plugin/runtime:** none currently tracked.
+- **Open compose-side workarounds:** none currently tracked.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -22,11 +22,14 @@ baseline, not every retest attempt.
   `KWINRT-037`, `KWINRT-025`, `KWINRT-033`, `KWINRT-039`, `KWINRT-042`,
   `KWINRT-030`, `KWINRT-031`, `KWINRT-032`, `KWINRT-038`, `KWINRT-043`,
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
-  `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, and `KWINRT-051`.
+  `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
+  and `KWINRT-052`.
 
 ## KWINRT-052: Application manifest uses wildcard processorArchitecture
 
-- **Status:** Open.
+- **Status:** Closed in the kotlin-winrt application manifest generation and
+  WinUI target runtime-asset staging consumed by the 2026-07-06 build 67 Maven
+  snapshot validation path.
 - **Observed in:** `:compose:mpp:demo-winui:runWinRTApplicationHost` after
   refreshing to the 2026-07-05 `skiko-winui-jvm` snapshot and current
   kotlin-winrt runtime/plugin snapshots.
@@ -42,25 +45,14 @@ baseline, not every retest attempt.
 - **Expected behavior:** kotlin-winrt should emit the processor architecture
   required by the generated application host, such as `amd64`, `arm64`, or
   `x86`, rather than a wildcard value that the activation context rejects.
-- **compose-winui workaround:** the repository-local WinUI sample hosts patch
-  the generated `runtime-assets/*.exe.manifest` and
-  `application-layout/jvm/*.exe.manifest` files immediately before
-  `runWinRTApplicationHost`, replacing the wildcard with the current JVM
-  process architecture and removing `asmv3:file` blocks for DLLs that are not
-  staged in the generated layout or only contain activatable classes already
-  registered by an earlier file block. This is intentionally scoped to
-  generated sample-host artifacts and should be removed when kotlin-winrt emits
-  a valid manifest.
-- **Validation:** before the workaround, `mt.exe -validate_manifest` identifies
-  the wildcard processor-architecture failure, direct file-entry inspection
-  finds the missing `Microsoft.Web.WebView2.Core.dll`, and manifest inspection
-  finds the duplicate `WinUISkiaHostPanel` registration. After the workaround,
-  the MPP sample manifest has no missing file entries, no duplicate
-  activatable classes, passes `mt.exe -validate_manifest`, and the MPP sample
-  auto-exit smoke reaches window composition, Direct3D rendering, non-empty
-  draw bounds, and clean disposal. Manual RDP Chinese input validation on the
-  interactive MPP sample is normal with the refreshed value-class
-  `VirtualKey` projection.
+- **Resolution:** compose-winui removed the repository-local sample-host
+  manifest patch tasks. The generated application manifests are now consumed
+  directly.
+- **Validation:** with the published `winrt-gradle-plugin`
+  `0.1.0-20260706.013242-67`, `stageWinRTRuntimeAssets` handles WinUI targets
+  wildcard imports and generated application manifests no longer need local
+  processor-architecture, missing-file, or duplicate-activatable-class edits
+  before `runWinRTApplicationHost`.
 
 ## KWINRT-049: WinRT async cancellation upcall can crash clipboard text retrieval
 
