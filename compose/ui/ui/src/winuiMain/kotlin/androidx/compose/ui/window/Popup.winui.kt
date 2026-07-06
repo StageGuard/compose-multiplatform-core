@@ -46,7 +46,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.round
 import windows.foundation.EventRegistrationToken
 import io.github.composefluent.winrt.runtime.asWinRT
-import microsoft.ui.xaml.DependencyProperty
 import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.CornerRadius
 import microsoft.ui.xaml.RoutedEventHandler
@@ -515,20 +514,14 @@ private fun createTransparentFlyoutPresenterStyle(): Style =
                 ?.get("DefaultFlyoutPresenterStyle")
                 ?.asWinRT<Style>()
         }.getOrNull()
-        style.setters.add(createWinUISetter(Control.backgroundProperty, TransparentBrush()))
-        style.setters.add(createWinUISetter(Control.borderBrushProperty, TransparentBrush()))
-        style.setters.add(createWinUISetter(Control.borderThicknessProperty, Thickness(0.0, 0.0, 0.0, 0.0)))
-        style.setters.add(createWinUISetter(Control.paddingProperty, Thickness(0.0, 0.0, 0.0, 0.0)))
-        style.setters.add(createWinUISetter(Control.cornerRadiusProperty, CornerRadius(0.0, 0.0, 0.0, 0.0)))
-        style.setters.add(createWinUISetter(FrameworkElement.minWidthProperty, 0.0))
-        style.setters.add(createWinUISetter(FrameworkElement.minHeightProperty, 0.0))
-        style.setters.add(createWinUISetter(UIElement.useSystemFocusVisualsProperty, false))
-    }
-
-private fun createWinUISetter(property: DependencyProperty, value: Any?): Setter =
-    Setter().also {
-        it.property = property
-        it.value = value
+        style.setters.add(Setter(Control.backgroundProperty, TransparentBrush()))
+        style.setters.add(Setter(Control.borderBrushProperty, TransparentBrush()))
+        style.setters.add(Setter(Control.borderThicknessProperty, Thickness(0.0, 0.0, 0.0, 0.0)))
+        style.setters.add(Setter(Control.paddingProperty, Thickness(0.0, 0.0, 0.0, 0.0)))
+        style.setters.add(Setter(Control.cornerRadiusProperty, CornerRadius(0.0, 0.0, 0.0, 0.0)))
+        style.setters.add(Setter(FrameworkElement.minWidthProperty, 0.0))
+        style.setters.add(Setter(FrameworkElement.minHeightProperty, 0.0))
+        style.setters.add(Setter(UIElement.useSystemFocusVisualsProperty, false))
     }
 
 private fun Constraints.finiteMaxSizeOr(fallback: IntSize): IntSize =
