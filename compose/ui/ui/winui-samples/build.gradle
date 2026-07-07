@@ -85,6 +85,12 @@ tasks.named("generateWinRTProjections").configure {
     authoringScannerClasspath.from(configurations.winRtAuthoringScannerClasspath)
 }
 
+tasks.named("runWinRTApplicationHost").configure {
+    // KWINRT-059: smoke modes and report paths are passed through
+    // KOTLIN_WINRT_JVM_OPTIONS, so the generated run task must execute each time.
+    outputs.upToDateWhen { false }
+}
+
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_25)
@@ -119,7 +125,7 @@ def registerWinUISampleTask = { String taskName, String descriptionText, String 
                 gradleWrapper.asFile.absolutePath,
                 "${project.path}:runWinRTApplicationHost",
                 "-PcomposeWinUi.enableJvmTarget=true",
-                "-Dorg.gradle.jvmargs=-Xmx1g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
+                "-Dorg.gradle.jvmargs=-Xmx2g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
                 "--no-configuration-cache",
                 "--no-configure-on-demand",
                 "--no-build-cache",

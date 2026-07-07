@@ -10,10 +10,11 @@ baseline, not every retest attempt.
 ## Current upstream triage
 
 - **Open upstream/plugin/runtime:** `KWINRT-053`, `KWINRT-054`,
-  `KWINRT-055`, `KWINRT-056`, `KWINRT-057`, and `KWINRT-058`.
+  `KWINRT-055`, `KWINRT-056`, `KWINRT-057`, `KWINRT-058`, and
+  `KWINRT-059`.
 - **Open compose-side workarounds:** manual WinRT Gradle task wiring in
   `compose/ui/ui/winui-samples` and `compose/mpp/demo-winui` for
-  `KWINRT-053` through `KWINRT-058`.
+  `KWINRT-053` through `KWINRT-059`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -27,6 +28,25 @@ baseline, not every retest attempt.
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   and `KWINRT-052`.
+
+## KWINRT-059: Application run task skips despite environment-selected sample mode
+
+- **Status:** Open upstream/plugin run-task correctness.
+- **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` after
+  refreshing kotlin-winrt and skiko snapshots.
+- **Symptom:** multiple repository-local smoke tasks invoke the same generated
+  `runWinRTApplicationHost` task with different `KOTLIN_WINRT_JVM_OPTIONS`
+  values for sample mode and validation report path. The first smoke run writes
+  its report, but later smoke tasks can see nested
+  `:...:runWinRTApplicationHost UP-TO-DATE`, so the native host is not launched
+  and the expected report is missing.
+- **Expected behavior:** a generated run task should either always execute, or
+  declare JVM options, environment, args, working directory, and other launch
+  inputs so Gradle does not reuse an incompatible previous execution.
+- **Current compose-winui action:** mark `runWinRTApplicationHost` outputs as
+  never up-to-date in the repository-local WinUI sample projects. This keeps the
+  workaround narrower than passing `--rerun-tasks` to the nested Gradle build,
+  which would force unrelated generation and compilation tasks to rerun.
 
 ## KWINRT-058: Project dependency WinRT identity/support artifacts require app-side validation
 
@@ -92,9 +112,13 @@ baseline, not every retest attempt.
   output log directly on a typed task, without invoking Gradle from Gradle.
 - **Current compose-winui action:** keep the nested `Exec` tasks only as a
   validation harness until a first-class run task exists. The repository-local
-  WinUI sample wrappers also pass a bounded nested-Gradle JVM heap and bounded
-  application-host JVM options through `KOTLIN_WINRT_JVM_OPTIONS` so validation
-  is not dependent on Windows pagefile headroom. `demo-winui` keeps its
+  WinUI sample wrappers also pass a bounded 2g nested-Gradle JVM heap and
+  bounded application-host JVM options through `KOTLIN_WINRT_JVM_OPTIONS` so
+  validation is not dependent on Windows pagefile headroom. The 2g nested heap
+  is needed by the current authored-type detail / application-host generation
+  path after refreshing kotlin-winrt and skiko snapshots; 1g fails in
+  `generateCompileKotlinWinuiJvmWinRTCompilerAuthoredTypeDetails` with
+  `Java heap space`. `demo-winui` keeps its
   application host on a small `ParallelGC` heap because `SerialGC`/Tier1 hit a
   `CoreMessagingXP!DispatcherQueue::DeferInvokeCallback` fail-fast after the
   auto-traverse shutdown path, while `winui-samples` additionally disables C2

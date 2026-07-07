@@ -274,6 +274,12 @@ tasks.named<GenerateWinRTProjectionsTask>("generateWinRTProjections") {
     sourceRoots.setFrom(project.file("../demo/src/winuiJvmMain/kotlin"))
 }
 
+tasks.named("runWinRTApplicationHost") {
+    // KWINRT-059: smoke modes and report paths are passed through
+    // KOTLIN_WINRT_JVM_OPTIONS, so the generated run task must execute each time.
+    outputs.upToDateWhen { false }
+}
+
 tasks.named("compileKotlinWinuiJvm") {
     dependsOn(localWinUiJarProjects.map { path -> "$path:winuiJvmJar" })
     dependsOn(localWinUiCompileProjects.map { path -> "$path:compileKotlinWinuiJvm" })
@@ -321,7 +327,7 @@ fun Exec.configureWinUIMppSampleApplicationHost(
         gradleWrapper.asFile.absolutePath,
         "${project.path}:runWinRTApplicationHost",
         "-PcomposeWinUi.enableJvmTarget=true",
-        "-Dorg.gradle.jvmargs=-Xmx1g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
+        "-Dorg.gradle.jvmargs=-Xmx2g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
         "--no-configuration-cache",
         "--no-configure-on-demand",
         "--no-build-cache",
