@@ -336,17 +336,19 @@
 
 - No open kotlin-winrt runtime/generator blocker currently prevents the WinUI
   JVM path from compiling and running the repository-local samples.
-- Open kotlin-winrt plugin ergonomics gaps remain tracked as `KWINRT-053`
-  through `KWINRT-058`: authoring scanner classpath defaults, application-host
-  runtime classpath inference, task graph wiring, first-class run tasks,
-  runtime assets / PRI staging lifecycle, and transitive WinRT
-  identity/support artifact validation.
+- Open kotlin-winrt plugin ergonomics gaps remain tracked as `KWINRT-056` and
+  `KWINRT-059`: first-class application run tasks and generated run-task
+  up-to-date behavior.
+- `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-057`, and `KWINRT-058`
+  are closed in the refreshed 2026-07-08 kotlin-winrt/skiko validation
+  baseline. Keep the existing scanner, task graph, packaging, and transitive
+  artifact checks as regression coverage rather than active upstream
+  workarounds.
 - The required application initialization chain remains
   `WinRtWindowsAppSdkBootstrap.initialize()` -> `RuntimeScope.initializeSingleThreaded()`
-  -> `Application.start { ... }`; repository-local samples still manually wire
-  the generated host run path through `stageWinRtRuntimeAssets`,
-  `buildWinRtAuthoringHost`, and nested `runWinRTApplicationHost` invocations
-  until kotlin-winrt owns that application lifecycle.
+  -> `Application.start { ... }`; repository-local samples still use nested
+  sample run wrappers until kotlin-winrt provides a first-class run task for
+  that application lifecycle.
 - `KWINRT-024`, `KWINRT-030`, `KWINRT-031`, and `KWINRT-032` are no longer
   reproduced by the current compose-winui validation baseline. On 2026-07-06,
   `:compose:ui:ui:compileKotlinWinuiJvm`, `:compose:ui:ui:winuiJvmTest`,

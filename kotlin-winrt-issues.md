@@ -9,12 +9,10 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** `KWINRT-053`, `KWINRT-054`,
-  `KWINRT-055`, `KWINRT-056`, `KWINRT-057`, `KWINRT-058`, and
-  `KWINRT-059`.
-- **Open compose-side workarounds:** manual WinRT Gradle task wiring in
-  `compose/ui/ui/winui-samples` and `compose/mpp/demo-winui` for
-  `KWINRT-053` through `KWINRT-059`.
+- **Open upstream/plugin/runtime:** `KWINRT-056` and `KWINRT-059`.
+- **Open compose-side workarounds:** sample run wrappers and generated run-task
+  up-to-date suppression in `compose/ui/ui/winui-samples` and
+  `compose/mpp/demo-winui` for `KWINRT-056` and `KWINRT-059`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -27,7 +25,8 @@ baseline, not every retest attempt.
   `KWINRT-030`, `KWINRT-031`, `KWINRT-032`, `KWINRT-038`, `KWINRT-043`,
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
-  and `KWINRT-052`.
+  `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-057`,
+  and `KWINRT-058`.
 
 ## KWINRT-059: Application run task skips despite environment-selected sample mode
 
@@ -50,7 +49,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-058: Project dependency WinRT identity/support artifacts require app-side validation
 
-- **Status:** Open upstream/plugin ergonomics.
+- **Status:** Closed in the refreshed kotlin-winrt/skiko snapshot validation
+  path consumed on 2026-07-08.
 - **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` while consuming
   `:compose:ui:ui` and other local WinUI JVM artifacts through normal
   `project(...)` dependencies.
@@ -67,13 +67,20 @@ baseline, not every retest attempt.
   guaranteed part of the plugin contract. A normal app should be able to depend
   on a WinRT-authoring library and build/run without app-local checks that
   inspect dependency jars for kotlin-winrt internals.
-- **Current compose-winui action:** keep `validateWinUiKotlinWinRtKmpGraphBaseline`
-  as a regression harness for now. It should become unnecessary once the plugin
-  exposes and validates transitive WinRT metadata consistently.
+- **Resolution:** project-dependency identity, type indexes, authoring metadata,
+  WinMDs, and compiler-support artifacts are present through the current
+  project dependency graph. Keep `validateWinUiKotlinWinRtKmpGraphBaseline` as
+  repository regression coverage rather than an active workaround.
+- **Validation:** with refreshed kotlin-winrt and skiko snapshots,
+  `:compose:ui:ui:compileKotlinWinuiJvm --refresh-dependencies`,
+  `:compose:ui:ui:winuiJvmTest`,
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` pass.
 
 ## KWINRT-057: Runtime assets and PRI staging still need app-local lifecycle checks
 
-- **Status:** Open upstream/plugin ergonomics.
+- **Status:** Closed in the refreshed kotlin-winrt/skiko snapshot validation
+  path consumed on 2026-07-08.
 - **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` while staging
   Windows App SDK runtime assets, application PRI inputs, WinUI component PRI
   files, manifest data, and sample resources.
@@ -89,9 +96,12 @@ baseline, not every retest attempt.
   before run tasks execute. Users should not need to manually wire staging task
   dependencies or know the internal runtime-assets directory layout just to run
   a sample.
-- **Current compose-winui action:** keep the packaging validation task as a
-  focused regression test. Do not spread equivalent runtime-assets/PRI staging
-  assertions into additional samples.
+- **Resolution:** current runtime-asset and PRI staging produces the expected
+  unpackaged WinUI application layout. Keep the packaging validation task as
+  focused regression coverage, not an active workaround.
+- **Validation:** with refreshed kotlin-winrt and skiko snapshots,
+  `:compose:mpp:demo-winui:runWinUIMppSample` passes and the packaging report
+  validates the staged Windows App SDK runtime assets and PRI inputs.
 
 ## KWINRT-056: WinRT run host should be a first-class Gradle task
 
@@ -126,7 +136,8 @@ baseline, not every retest attempt.
 
 ## KWINRT-055: Application-host task graph must wire generation, support merge, staging, and host build
 
-- **Status:** Open upstream/plugin ergonomics.
+- **Status:** Closed in the refreshed kotlin-winrt/skiko snapshot validation
+  path consumed on 2026-07-08.
 - **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSample` and
   `:compose:ui:ui:winui-samples:runWinUIViewSample`.
 - **Symptom:** app/sample build files manually add dependencies among
@@ -138,13 +149,19 @@ baseline, not every retest attempt.
   host should automatically depend on all required projection generation,
   compiler-support merge, target compilation, resource processing, runtime
   asset staging, and authoring-host generation tasks.
-- **Current compose-winui action:** keep explicit task dependencies in the
-  repository-local samples so validation is stable. Treat any new copy of this
-  wiring as a signal to improve kotlin-winrt plugin defaults instead.
+- **Resolution:** generated application-host builds now run through the required
+  projection generation, compiler-support merge, target compilation, resource
+  processing, runtime staging, and authoring-host generation path in the current
+  validation baseline. Remaining sample wrapper wiring is tracked under
+  `KWINRT-056` and `KWINRT-059`.
+- **Validation:** with refreshed kotlin-winrt and skiko snapshots,
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample` and
+  `:compose:mpp:demo-winui:runWinUIMppSample` pass.
 
 ## KWINRT-054: Application-host runtime classpath should be inferred from the target
 
-- **Status:** Open upstream/plugin ergonomics.
+- **Status:** Closed in the refreshed kotlin-winrt/skiko snapshot validation
+  path consumed on 2026-07-08.
 - **Observed in:** `:compose:mpp:demo-winui:buildWinRTApplicationHost`.
 - **Symptom:** the sample configures `BuildWinRTApplicationHostTask` manually:
   it adds `winuiJvmRuntimeClasspath`, adds the current `winuiJvmJar`, and
@@ -155,12 +172,19 @@ baseline, not every retest attempt.
   for application-host generation. The task should work for both application
   projects and sample projects consuming project dependencies that publish
   WinRT authoring metadata.
-- **Current compose-winui action:** keep the manual runtime classpath wiring in
-  `demo-winui` until the plugin can infer it.
+- **Resolution:** current application-host generation consumes the WinUI JVM
+  target runtime classpath and target jar correctly in the validated sample
+  path. Remaining sample wrapper concerns are tracked under `KWINRT-056` and
+  `KWINRT-059`.
+- **Validation:** with refreshed kotlin-winrt and skiko snapshots,
+  `:compose:mpp:demo-winui:runWinUIMppSample` passes while consuming
+  `:compose:ui:ui` and other local WinUI JVM artifacts through project
+  dependencies.
 
 ## KWINRT-053: Authoring scanner classpath should not be configured by applications
 
-- **Status:** Open upstream/plugin ergonomics.
+- **Status:** Closed in the refreshed kotlin-winrt/skiko snapshot validation
+  path consumed on 2026-07-08.
 - **Observed in:** `compose/ui/ui/build.gradle` and
   `compose/ui/ui/winui-samples/build.gradle`.
 - **Symptom:** build files declare a `winRtAuthoringScannerClasspath`
@@ -171,8 +195,14 @@ baseline, not every retest attempt.
 - **Expected behavior:** kotlin-winrt should configure the authoring scanner
   classpath internally. If an override is still needed, it should be an
   advanced escape hatch, not required boilerplate in normal app/library builds.
-- **Current compose-winui action:** keep the manual scanner classpath in the
-  modules that author WinRT types until the plugin supplies it by default.
+- **Resolution:** authoring scans complete in the current validation baseline
+  without scanner classpath failures. Remaining sample wrapper concerns are
+  tracked under `KWINRT-056` and `KWINRT-059`.
+- **Validation:** with refreshed kotlin-winrt and skiko snapshots,
+  `:compose:ui:ui:compileKotlinWinuiJvm --refresh-dependencies`,
+  `:compose:ui:ui:winuiJvmTest`,
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` pass.
 
 ## KWINRT-052: Application manifest uses wildcard processorArchitecture
 
