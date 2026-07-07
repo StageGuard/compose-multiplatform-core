@@ -91,7 +91,14 @@ baseline, not every retest attempt.
   class, target/source set, args, JVM args, environment, working directory, and
   output log directly on a typed task, without invoking Gradle from Gradle.
 - **Current compose-winui action:** keep the nested `Exec` tasks only as a
-  validation harness until a first-class run task exists.
+  validation harness until a first-class run task exists. The repository-local
+  WinUI sample wrappers also pass a bounded nested-Gradle JVM heap and bounded
+  application-host JVM options through `KOTLIN_WINRT_JVM_OPTIONS` so validation
+  is not dependent on Windows pagefile headroom. `demo-winui` keeps its
+  application host on a small `ParallelGC` heap because `SerialGC`/Tier1 hit a
+  `CoreMessagingXP!DispatcherQueue::DeferInvokeCallback` fail-fast after the
+  auto-traverse shutdown path, while `winui-samples` additionally disables C2
+  compilation to avoid JDK native compiler-arena allocation failures.
 
 ## KWINRT-055: Application-host task graph must wire generation, support merge, staging, and host build
 

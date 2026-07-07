@@ -100,6 +100,12 @@ def registerWinUISampleTask = { String taskName, String descriptionText, String 
         def sampleLog = layout.buildDirectory.file("validation/${taskName}.log")
         outputs.file(sampleLog)
         def jvmOptions = [
+                // KWINRT-056: generated host JVM args are still passed through the
+                // environment until kotlin-winrt exposes a first-class run task.
+                "-Xmx512m",
+                "-XX:+UseSerialGC",
+                "-XX:TieredStopAtLevel=1",
+                "-Dfile.encoding=UTF-8",
                 "-Dcompose.winui.sample.autoExit=true",
         ]
         if (mode != null) {
@@ -113,10 +119,12 @@ def registerWinUISampleTask = { String taskName, String descriptionText, String 
                 gradleWrapper.asFile.absolutePath,
                 "${project.path}:runWinRTApplicationHost",
                 "-PcomposeWinUi.enableJvmTarget=true",
+                "-Dorg.gradle.jvmargs=-Xmx1g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
                 "--no-configuration-cache",
                 "--no-configure-on-demand",
                 "--no-build-cache",
                 "--no-daemon",
+                "--max-workers=1",
                 "--console=plain",
         )
         doFirst {

@@ -321,16 +321,25 @@ fun Exec.configureWinUIMppSampleApplicationHost(
         gradleWrapper.asFile.absolutePath,
         "${project.path}:runWinRTApplicationHost",
         "-PcomposeWinUi.enableJvmTarget=true",
+        "-Dorg.gradle.jvmargs=-Xmx1g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
         "--no-configuration-cache",
         "--no-configure-on-demand",
         "--no-build-cache",
         "--no-daemon",
+        "--max-workers=1",
         "--console=plain",
     )
     doFirst {
         val report = reportFile.get().asFile
         report.delete()
         val jvmOptions = mutableListOf(
+            // KWINRT-056: generated host JVM args are still passed through the
+            // environment until kotlin-winrt exposes a first-class run task.
+            // Keep this MPP host on ParallelGC; SerialGC/Tier1 can hit a
+            // CoreMessaging fail-fast after the auto-traverse shutdown path.
+            "-Xmx512m",
+            "-XX:+UseParallelGC",
+            "-Dfile.encoding=UTF-8",
             "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
             "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",
             "-Dcompose.winui.mpp.sample.extendsContentIntoTitleBar=$extendsContentIntoTitleBar",
