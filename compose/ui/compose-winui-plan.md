@@ -339,6 +339,13 @@
 - Open kotlin-winrt plugin ergonomics gaps remain tracked as `KWINRT-056` and
   `KWINRT-059`: first-class application run tasks and generated run-task
   up-to-date behavior.
+- Runtime dependency auto-injection is partially usable as of the refreshed
+  2026-07-08 validation: explicit `winrt-runtime` / `winrt-runtime-jvm`
+  dependencies were removed from `compose-ui` and the repository-local WinUI
+  samples, and validation still passes. `KWINRT-060` remains open for
+  non-plugin WinUI source-set consumers such as `compose/foundation/foundation`,
+  where removing the explicit `winrt-runtime` dependency breaks compilation
+  and applying the kotlin-winrt plugin creates a Compose task cycle.
 - `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-057`, and `KWINRT-058`
   are closed in the refreshed 2026-07-08 kotlin-winrt/skiko validation
   baseline. Keep the existing scanner, task graph, packaging, and transitive

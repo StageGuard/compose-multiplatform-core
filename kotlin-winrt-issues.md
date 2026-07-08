@@ -9,10 +9,13 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** `KWINRT-056` and `KWINRT-059`.
+- **Open upstream/plugin/runtime:** `KWINRT-056`, `KWINRT-059`, and
+  `KWINRT-060`.
 - **Open compose-side workarounds:** sample run wrappers and generated run-task
   up-to-date suppression in `compose/ui/ui/winui-samples` and
-  `compose/mpp/demo-winui` for `KWINRT-056` and `KWINRT-059`.
+  `compose/mpp/demo-winui` for `KWINRT-056` and `KWINRT-059`, plus the
+  explicit `winrt-runtime` dependency in
+  `compose/foundation/foundation/build.gradle` for `KWINRT-060`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -27,6 +30,47 @@ baseline, not every retest attempt.
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-057`,
   and `KWINRT-058`.
+
+## KWINRT-060: Runtime dependency auto-injection does not cover non-plugin WinUI source-set consumers
+
+- **Status:** Open upstream/plugin integration gap.
+- **Observed in:** `:compose:foundation:foundation:compileKotlinWinuiJvm`
+  while removing compose-side explicit WinRT runtime dependencies after the
+  refreshed 2026-07-08 kotlin-winrt snapshot.
+- **Symptom:** `compose-ui`, `compose/ui/ui/winui-samples`, and
+  `compose/mpp/demo-winui` compile and run after removing their explicit
+  `winrt-runtime` / `winrt-runtime-jvm` dependencies; dependency insight still
+  shows `winrt-runtime` and `winrt-runtime-jvm` on
+  `:compose:ui:ui:winuiJvmCompileClasspath`, supplied by the plugin. However,
+  `compose/foundation/foundation` uses WinRT projected types from `winuiMain`
+  and does not apply the kotlin-winrt plugin. Removing its explicit
+  `winrt-runtime` dependency makes `compileKotlinWinuiJvm` fail with unresolved
+  `io.github.composefluent.winrt.runtime` APIs such as
+  `EventRegistrationToken`, `EventHandlerCallback`, and
+  `WinRTComposableObject`.
+- **Additional finding:** applying `io.github.composefluent.winrt` directly to
+  `compose/foundation/foundation` is not currently a safe replacement: it
+  creates a circular task graph through `generateWinRTIdentity`,
+  `generateWinRTProjections`, `compileKotlinWinuiJvm`, and upstream Compose
+  `winuiJvmJar` dependencies.
+- **Expected behavior:** a KMP module with a WinUI source set that consumes
+  WinRT projected types should have a narrow way to receive the matching
+  runtime dependency for that source set without hand-declaring
+  `winrt-runtime`, and without enabling projection/identity tasks that create
+  cycles in a layered Compose module graph.
+- **Current compose-winui action:** remove explicit runtime dependencies where
+  plugin injection is validated (`compose-ui` and repository-local samples),
+  but keep the explicit `winrt-runtime` dependency in
+  `compose/foundation/foundation` until kotlin-winrt exposes a cycle-free
+  consumer-runtime injection path.
+- **Validation:** after removing the explicit runtime dependencies from
+  `compose/ui/ui`, `compose/ui/ui/winui-samples`, and
+  `compose/mpp/demo-winui`, while keeping the foundation workaround, the
+  combined validation passes with JDK 25 and `--no-configuration-cache`:
+  `:compose:foundation:foundation:compileKotlinWinuiJvm`,
+  `:compose:ui:ui:compileKotlinWinuiJvm`, `:compose:ui:ui:winuiJvmTest`,
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample`.
 
 ## KWINRT-059: Application run task skips despite environment-selected sample mode
 

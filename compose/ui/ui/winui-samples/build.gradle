@@ -37,7 +37,6 @@ dependencies {
     implementation(project(":compose:foundation:foundation"))
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:$lifecycleVersion")
     implementation("androidx.navigationevent:navigationevent-compose:$navigationEventVersion")
-    implementation("io.github.compose-fluent:winrt-runtime-jvm:$kotlinWinRtVersion")
     implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
 }
 

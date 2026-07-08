@@ -506,7 +506,6 @@ kotlin {
                     def lifecycleVersion = project.findProperty('artifactRedirection.version.androidx.lifecycle')
                     def navigationEventVersion = project.findProperty('artifactRedirection.version.androidx.navigationevent')
                     implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
-                    implementation("io.github.compose-fluent:winrt-runtime:${kotlinWinRtVersion.get()}")
                     implementation("io.github.compose-fluent:winrt-authoring:${kotlinWinRtVersion.get()}")
                     implementation("androidx.navigationevent:navigationevent-compose:$navigationEventVersion")
                     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:$lifecycleVersion")

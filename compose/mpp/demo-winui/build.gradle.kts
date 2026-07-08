@@ -236,7 +236,6 @@ kotlin {
                 }
                 implementation("androidx.savedstate:savedstate-compose:1.4.0")
                 implementation("androidx.navigationevent:navigationevent-compose:${navigationEventVersion.get()}")
-                implementation("io.github.compose-fluent:winrt-runtime-jvm:${kotlinWinRtVersion.get()}")
                 implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
             }
         }
