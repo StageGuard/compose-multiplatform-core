@@ -29,6 +29,8 @@ import androidx.compose.ui.SessionMutex
 import androidx.compose.ui.autofill.Autofill
 import androidx.compose.ui.autofill.AutofillManager
 import androidx.compose.ui.autofill.AutofillTree
+import androidx.compose.ui.autofill.WinUIAutofill
+import androidx.compose.ui.autofill.WinUIAutofillState
 import androidx.compose.ui.draganddrop.DragAndDropManager
 import androidx.compose.ui.draganddrop.WinUIDragAndDropManager
 import androidx.compose.ui.focus.FocusDirection
@@ -170,21 +172,22 @@ internal class WinUIOwner(
     override val clipboardManager: ClipboardManager = WinUIClipboardManager(winUIClipboard)
     override val clipboard: Clipboard = winUIClipboard
     override val accessibilityManager: AccessibilityManager = WinUIAccessibilityManager()
+    override val semanticsOwner: SemanticsOwner =
+        SemanticsOwner(root, EmptySemanticsModifier(), layoutNodes)
     internal val accessibilityProvider: WinUIAccessibilityProvider
         get() = accessibilityBridge
     override val graphicsContext: GraphicsContext = WinUIGraphicsContext
     @Suppress("DEPRECATION")
     override val autofillTree: AutofillTree = AutofillTree()
+    private val winUIAutofill = WinUIAutofill(autofillTree, semanticsOwner)
     @Suppress("DEPRECATION")
-    override val autofill: Autofill? = null
-    override val autofillManager: AutofillManager? = null
+    override val autofill: Autofill = winUIAutofill
+    override val autofillManager: AutofillManager = winUIAutofill.manager
     override var density: Density by mutableStateOf(Density(1f))
         private set
     @Suppress("DEPRECATION")
     override val textInputService: TextInputService = TextInputService(WinUIPlatformTextInputService)
     override val softwareKeyboardController: SoftwareKeyboardController = WinUISoftwareKeyboardController
-    override val semanticsOwner: SemanticsOwner =
-        SemanticsOwner(root, EmptySemanticsModifier(), layoutNodes)
     private var interopViewFocusRect: Rect? = null
     override val focusOwner: FocusOwner = FocusOwnerImpl(
         WinUIEmbeddedViewPlatformFocusOwner(
@@ -235,6 +238,8 @@ internal class WinUIOwner(
         root.modifier = focusOwner.modifier.then(dragAndDropManager.modifier)
         snapshotObserver.startObserving()
         root.attach(this)
+        semanticsOwner.listeners += winUIAutofill
+        focusOwner.listeners += winUIAutofill
         measureAndLayoutDelegate.updateRootConstraints(Constraints())
     }
 
@@ -245,7 +250,10 @@ internal class WinUIOwner(
         if (root.isAttached) {
             root.detach()
         }
+        semanticsOwner.listeners -= winUIAutofill
+        focusOwner.listeners -= winUIAutofill
         releaseActivePlatformState()
+        winUIAutofill.dispose()
         cancelPointerInput()
         accessibilityBridge.dispose()
         snapshotObserver.stopObserving()
@@ -357,7 +365,9 @@ internal class WinUIOwner(
         layoutNodes[node.semanticsId] = node
     }
 
-    override fun onPostAttach(node: LayoutNode) = Unit
+    override fun onPostAttach(node: LayoutNode) {
+        winUIAutofill.onPostAttach(node)
+    }
 
     override fun onDetach(node: LayoutNode) {
         checkNotNull(layoutNodes.remove(node.semanticsId)) {
@@ -365,6 +375,7 @@ internal class WinUIOwner(
         }
         measureAndLayoutDelegate.onNodeDetached(node)
         snapshotObserver.clear(node)
+        winUIAutofill.onDetach(node)
         rectManager.remove(node)
     }
 
@@ -374,7 +385,10 @@ internal class WinUIOwner(
     override fun calculateLocalPosition(positionInWindow: Offset): Offset =
         coordinateMapper.calculateLocalPosition(positionInWindow)
 
-    override fun requestAutofill(node: LayoutNode) = Unit
+    override fun requestAutofill(node: LayoutNode) {
+        if (isShuttingDown) return
+        winUIAutofill.requestAutofill(node)
+    }
 
     override fun measureAndLayout(sendPointerUpdate: Boolean) {
         if (isShuttingDown) return
@@ -435,6 +449,7 @@ internal class WinUIOwner(
     }
 
     override fun onLayoutNodeDeactivated(layoutNode: LayoutNode) {
+        winUIAutofill.onLayoutNodeDeactivated(layoutNode)
         rectManager.remove(layoutNode)
         if (!isShuttingDown) {
             notifyInteropTreeChanged()
@@ -448,6 +463,7 @@ internal class WinUIOwner(
 
     override fun onPostLayoutNodeReused(layoutNode: LayoutNode, oldSemanticsId: Int) {
         if (isShuttingDown) return
+        winUIAutofill.onPostLayoutNodeReused(layoutNode, oldSemanticsId)
         notifyInteropTreeChanged()
     }
 
@@ -502,7 +518,13 @@ internal class WinUIOwner(
             }
             onEndApplyChangesListeners.subList(0, size).clear()
         }
+        winUIAutofill.onEndApplyChanges()
     }
+
+    internal fun winUIAutofillForTest(): WinUIAutofill = winUIAutofill
+
+    internal fun winUIAutofillStateForTest(): WinUIAutofillState =
+        winUIAutofill.stateForTest()
 
     override fun registerOnLayoutCompletedListener(listener: Owner.OnLayoutCompletedListener) {
         if (isShuttingDown) return

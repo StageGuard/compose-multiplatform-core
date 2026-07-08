@@ -36,6 +36,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.AutofillNode
 import androidx.compose.ui.autofill.FillableData
 import androidx.compose.ui.autofill.createFromBoolean
 import androidx.compose.ui.autofill.createFromDateMillis
@@ -78,6 +79,9 @@ import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.PointerInputModifierNode
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalAutofill
+import androidx.compose.ui.platform.LocalAutofillManager
+import androidx.compose.ui.platform.LocalAutofillTree
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
@@ -250,6 +254,7 @@ private fun ValidateWinUICompositionLocals(
         "WinUI LocalUriHandler did not reject a URI without a scheme."
     }
     ValidateWinUIClipboard()
+    ValidateWinUIAutofill()
     ValidateWinUIFillableData()
     if (expectWindowFocus) {
         val windowInfo = LocalWindowInfo.current
@@ -265,6 +270,48 @@ private fun ValidateWinUICompositionLocals(
             "WinUI LocalWindowInfo did not expose a positive container dp width."
         }
     }
+}
+
+@Suppress("DEPRECATION")
+@Composable
+private fun ValidateWinUIAutofill() {
+    val autofill = checkNotNull(LocalAutofill.current) {
+        "WinUI LocalAutofill was not provided by WinUIComposeView."
+    }
+    val autofillManager = checkNotNull(LocalAutofillManager.current) {
+        "WinUI LocalAutofillManager was not provided by WinUIComposeView."
+    }
+    val autofillTree = LocalAutofillTree.current
+    val autofillNode = remember {
+        AutofillNode(
+            boundingBox = ComposeRect(0f, 0f, 1f, 1f),
+            onFill = { value ->
+                WinUIAutofillSmokeState.filledValue = value
+            },
+        )
+    }
+    LaunchedEffect(autofill, autofillManager, autofillTree, autofillNode) {
+        if (WinUIAutofillSmokeState.autofillPassed) return@LaunchedEffect
+        WinUIAutofillSmokeState.autofillPassed = true
+        autofillTree += autofillNode
+        try {
+            autofill.requestAutofillForNode(autofillNode)
+            autofillTree.performAutofill(autofillNode.id, "compose-winui autofill local")
+            check(WinUIAutofillSmokeState.filledValue == "compose-winui autofill local") {
+                "WinUI LocalAutofillTree did not route a legacy autofill callback."
+            }
+            autofill.cancelAutofillForNode(autofillNode)
+            autofillManager.commit()
+            autofillManager.cancel()
+        } finally {
+            autofillTree.children.remove(autofillNode.id)
+        }
+    }
+}
+
+private object WinUIAutofillSmokeState {
+    var autofillPassed: Boolean = false
+    var filledValue: String? = null
 }
 
 private fun ValidateWinUIFillableData() {

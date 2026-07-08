@@ -74,6 +74,13 @@
   `extendsContentIntoTitleBar=true`, so titlebar inset propagation is checked
   against real sample layout rather than a standalone WinUI-only sample.
 - [x] Provide initial WinUI clipboard hooks for `LocalClipboardManager`, `LocalClipboard`, `ClipEntry`, `ClipMetadata`, and `NativeClipboard`; the synchronous `ClipboardManager` text cache is compose-winui policy, not a kotlin-winrt helper requirement.
+- [x] Provide initial WinUI Autofill hooks for `LocalAutofill`,
+  `LocalAutofillManager`, and `LocalAutofillTree`, including legacy
+  `AutofillNode` fill callbacks, semantics-based `requestAutofill`, focus /
+  semantics lifecycle tracking, `commit` / `cancel` session state, and focused
+  WinUI JVM coverage. This is the Compose platform integration layer only:
+  WinUI desktop does not currently expose an Android-style system Autofill UI
+  surface here, so compose-winui does not fake a credential suggestion popup.
 - [x] Provide initial WinUI text input and IME integration hooks, with minimal stubs only where behavior is explicitly deferred.
 - [x] Provide initial WinUI text-toolbar state tracking for copy/paste/cut/select-all/autofill menu requests.
 - [x] Provide WinUI accessibility integration hooks that can later map Compose semantics to UI Automation.
