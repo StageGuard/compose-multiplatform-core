@@ -29,10 +29,20 @@
 
 ## Gradle targets and source sets
 - [x] Add a JVM target for WinUI, for example `jvm("winuiJvm")`, configured for JDK 22 or newer because `kotlin-winrt` JVM support uses the Java Foreign Function and Memory API.
-- [ ] Add a Windows native target, `mingwX64("winuiMingw")`, after `kotlin-winrt` implements mingw support.
+- [ ] Add a Windows native target, `mingwX64("winuiMingw")`, after
+  `compileKotlinWinuiMingw` validates against refreshed kotlin-winrt/skiko
+  snapshots. The current experimental target wiring reaches Kotlin/Native
+  compilation, but the local non-refresh cache still fails with the historical
+  `KWINRT-061` broad generated-projection `overrides nothing` errors.
+  Upstream kotlin-winrt has a target-module/root identity fallback for this
+  path; compose-winui still needs a successful refreshed dependency validation
+  before marking the Mingw target usable.
 - [x] Add `winuiMain` under `skikoMain` while keeping WinUI-specific actuals selected for the current WinUI JVM compile path.
 - [x] Add `winuiJvmMain` as a dependent of `winuiMain`.
-- [ ] Add `winuiMingwMain` as a dependent of `winuiMain` after the mingw target is enabled.
+- [ ] Add `winuiMingwMain` as a dependent of `winuiMain` after the mingw
+  target is enabled without duplicate Native projection ownership. The current
+  bring-up branch has provisional source-set wiring for validation, but it is
+  not a completed implementation until `compileKotlinWinuiMingw` passes.
 - [x] Add matching test source sets for shared WinUI behavior and target-specific JVM behavior.
 - [x] Do not make `winuiMain`, `winuiJvmMain`, or `winuiMingwMain` depend on `desktopMain`, AWT, Swing, or `org.jetbrains.skiko.SkiaLayer`.
 - [x] Replace the temporary WinUI JVM compile-source bridge with a principled source-set split now that `io.github.compose-fluent:skiko-winui:0.0.0-SNAPSHOT` is resolvable, so shared Skiko scene/rendering code can be reused without compiling conflicting Skiko generic actuals. Initial Maven dependency wiring, a narrow `WinUISkikoRenderHost` adapter, and the first `WinUIComposeView` render-surface connection compile on 2026-06-02. `SKIKO-002` and `SKIKO-003` are fixed as of 2026-06-03; the 2026-07-06 validation baseline passes `compileKotlinWinuiJvm`, `winuiJvmTest`, the full repository WinUI sample, and the WinUI MPP sample.
@@ -91,7 +101,13 @@
 - [x] Define the shared `winuiMain` rendering-facing abstraction used by `WinUIComposeView` to request frames, resize, and submit drawing work.
 - [x] Add initial unit coverage for the `WinUISkikoRenderHost` adapter lifecycle: render invalidation forwarding, resize forwarding, frame-scheduler reuse, close ordering, idempotent close, suppression of post-close render/resize requests, and render diagnostics exposure.
 - [x] Implement the JVM backend in `winuiJvmMain` using `kotlin-winrt`, Windows App SDK bootstrap, DispatcherQueue, and the JVM native interop path.
-- [ ] Implement the mingwX64 backend in `winuiMingwMain` after `kotlin-winrt` provides mingw runtime actuals, using Kotlin/Native interop, COM/WinRT initialization, and native Windows APIs.
+- [ ] Implement the mingwX64 backend in `winuiMingwMain` after `kotlin-winrt`
+  validates both mingw runtime actuals and Native KMP projection ownership in
+  this repository. Upstream has addressed the dependency-owned projection
+  identity gap tracked by `KWINRT-061`, but compose-winui's refreshed
+  dependency validation is currently blocked before Kotlin/Native compilation
+  by remote Maven TLS handshake failures; the local non-refresh cache still
+  reproduces the old `overrides nothing` failure shape.
 - [x] Bind the Compose render output to a WinUI-hostable native surface or composition-backed surface owned by the WinUI target. `WinUIComposeView` now draws its root `LayoutNode` into a `skiko-winui` Skia canvas through a WinUI `Canvas` root layer, and the 2026-07-06 validation baseline covers attached Direct3D rendering, positive render sizes, matching render state size, non-empty draw bounds, and observed frames.
 - [x] Keep frame scheduling on the WinUI UI thread and ensure rendering invalidations are coalesced with Compose measure/layout work. `WinUIComposeView` now starts the Skiko frame scheduler only after the WinUI root is loaded, so unattached roots can compose and run owner/interops tests without starting presentation callbacks.
 - [x] Release native rendering resources, DispatcherQueue handles, COM references, and Windows App SDK registrations when the host is disposed.
@@ -343,16 +359,20 @@
 
 - No open kotlin-winrt runtime/generator blocker currently prevents the WinUI
   JVM path from compiling and running the repository-local samples.
-- Open kotlin-winrt plugin ergonomics gaps remain tracked as `KWINRT-056` and
-  `KWINRT-059`: first-class application run tasks and generated run-task
-  up-to-date behavior.
-- Runtime dependency auto-injection is partially usable as of the refreshed
-  2026-07-08 validation: explicit `winrt-runtime` / `winrt-runtime-jvm`
-  dependencies were removed from `compose-ui` and the repository-local WinUI
-  samples, and validation still passes. `KWINRT-060` remains open for
-  non-plugin WinUI source-set consumers such as `compose/foundation/foundation`,
-  where removing the explicit `winrt-runtime` dependency breaks compilation
-  and applying the kotlin-winrt plugin creates a Compose task cycle.
+- `KWINRT-056`, `KWINRT-059`, and `KWINRT-060` are closed in the 2026-07-09
+  compose-winui validation baseline. Repository-local WinUI sample tasks now
+  use typed kotlin-winrt application-host run tasks with declared `jvmArgs`,
+  output logs, and per-smoke report files. `compose/foundation/foundation`
+  now applies the runtime-only `io.github.compose-fluent.winrt.runtime` plugin
+  instead of declaring `winrt-runtime` manually or applying the full projection
+  plugin.
+- WinUI mingw is not yet validated. The local non-refresh 2026-07-09 bring-up
+  reaches `compileKotlinWinuiMingw`, but still fails with broad generated
+  `windows.*` / `microsoft.*` `overrides nothing` errors. A same-day
+  `--refresh-dependencies` attempt did not reach Kotlin/Native compilation
+  because remote Maven dependency resolution failed with TLS handshake errors.
+  Keep this as the active `KWINRT-061` compose-winui validation gap until a
+  refreshed dependency build passes `compileKotlinWinuiMingw`.
 - `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-057`, and `KWINRT-058`
   are closed in the refreshed 2026-07-08 kotlin-winrt/skiko validation
   baseline. Keep the existing scanner, task graph, packaging, and transitive
@@ -360,16 +380,19 @@
   workarounds.
 - The required application initialization chain remains
   `WinRtWindowsAppSdkBootstrap.initialize()` -> `RuntimeScope.initializeSingleThreaded()`
-  -> `Application.start { ... }`; repository-local samples still use nested
-  sample run wrappers until kotlin-winrt provides a first-class run task for
-  that application lifecycle.
+  -> `Application.start { ... }`; repository-local sample tasks now launch it
+  through kotlin-winrt typed run tasks rather than nested Gradle wrappers.
 - `KWINRT-024`, `KWINRT-030`, `KWINRT-031`, and `KWINRT-032` are no longer
   reproduced by the current compose-winui validation baseline. On 2026-07-06,
   `:compose:ui:ui:compileKotlinWinuiJvm`, `:compose:ui:ui:winuiJvmTest`,
   `:compose:ui:ui:winui-samples:runWinUIViewSample`, and
   `:compose:mpp:demo-winui:runWinUIMppSample` pass with
   `-PcomposeWinUi.enableJvmTarget=true --no-configuration-cache
-  --no-configure-on-demand`.
+  --no-configure-on-demand`. The 2026-07-09 baseline additionally validates
+  `:compose:foundation:foundation:compileKotlinWinuiJvm`,
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample --rerun-tasks`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` after the typed run-task and
+  runtime-only plugin migration.
 - KMP graph baseline remains important: keep testing customized source sets,
   transitive identity, support artifact merging, authored application hosts,
   and multi-module sample consumption. Do not regress to a single-module JVM

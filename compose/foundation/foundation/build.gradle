@@ -31,6 +31,7 @@ plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
     id("JetBrainsAndroidXPlugin")
+    id("io.github.compose-fluent.winrt.runtime") apply false
     alias(libs.plugins.atomicFu)
 }
 
@@ -39,13 +40,21 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
-def kotlinWinRtVersion = providers
-        .gradleProperty("kotlinWinRt.version")
-        .orElse("0.1.0-SNAPSHOT")
 def composeWinUiSkikoWinUiVersion = providers
         .gradleProperty("composeWinUi.skikoWinUiVersion")
         .orElse("0.0.0-SNAPSHOT")
+
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+    apply plugin: "io.github.compose-fluent.winrt.runtime"
+}
+
 androidXMultiplatform {
     androidLibrary {
         compileSdk = 37
@@ -56,7 +65,7 @@ androidXMultiplatform {
         }
         androidResources.enable = true
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -231,30 +240,62 @@ androidXMultiplatform {
 
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
             winuiMain {
                 dependsOn(skikoMain)
                 dependencies {
-                    // KWINRT-060: foundation consumes WinRT projected types but cannot
-                    // apply the winrt plugin yet without creating a Compose task cycle.
-                    implementation("io.github.compose-fluent:winrt-runtime:${kotlinWinRtVersion.get()}")
                     implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
                 }
             }
 
-            winuiJvmMain {
-                dependsOn(winuiMain)
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                }
             }
 
             winuiTest {
                 dependsOn(skikoTest)
             }
 
-            winuiJvmTest {
-                dependsOn(winuiTest)
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmTest {
+                    dependsOn(winuiTest)
+                }
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                }
+                winuiMingwTest {
+                    dependsOn(winuiTest)
+                }
+            }
+        }
+    }
+}
+
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+    configurations.configureEach { configuration ->
+        def lowerName = configuration.name.toLowerCase(Locale.ROOT)
+        if (lowerName.contains("winui")) {
+            configuration.attributes.attribute(
+                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                    25
+            )
+            configuration.resolutionStrategy.dependencySubstitution {
+                substitute(module("org.jetbrains.skiko:skiko"))
+                        .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
+                        .because("compose-winui uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
             }
         }
     }

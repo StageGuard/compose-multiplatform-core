@@ -15,14 +15,14 @@
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import io.github.composefluent.winrt.gradle.BuildWinRTApplicationHostTask
+import io.github.composefluent.winrt.gradle.RunWinRTApplicationHostTask
 
 plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
     id("org.jetbrains.kotlin.jvm")
     id("JetBrainsAndroidXPlugin")
-    id("io.github.composefluent.winrt")
+    id("io.github.compose-fluent.winrt")
 }
 
 dependencies {
@@ -55,9 +55,6 @@ def composeWinUiWindowsAppSdkVersion = providers
         .gradleProperty("composeWinUi.windowsAppSdkVersion")
         .orElse(providers.gradleProperty("kotlinWinRt.samples.windowsAppSdkVersion"))
         .orElse("2.1.3")
-def gradleWrapper = rootProject.layout.projectDirectory.file(
-        System.getProperty("os.name").startsWith("Windows") ? "gradlew.bat" : "gradlew"
-)
 winRT {
     application {
         mainClass = "androidx.compose.ui.winui.samples.WinUIViewSampleKt"
@@ -84,12 +81,6 @@ tasks.named("generateWinRTProjections").configure {
     authoringScannerClasspath.from(configurations.winRtAuthoringScannerClasspath)
 }
 
-tasks.named("runWinRTApplicationHost").configure {
-    // KWINRT-059: smoke modes and report paths are passed through
-    // KOTLIN_WINRT_JVM_OPTIONS, so the generated run task must execute each time.
-    outputs.upToDateWhen { false }
-}
-
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_25)
@@ -99,14 +90,11 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
 }
 
 def registerWinUISampleTask = { String taskName, String descriptionText, String mode = null, Closure extraConfig = null ->
-    tasks.register(taskName, Exec) {
+    winRT.application.runTask(taskName) { RunWinRTApplicationHostTask task ->
         group = "verification"
         description = descriptionText
         def sampleLog = layout.buildDirectory.file("validation/${taskName}.log")
-        outputs.file(sampleLog)
         def jvmOptions = [
-                // KWINRT-056: generated host JVM args are still passed through the
-                // environment until kotlin-winrt exposes a first-class run task.
                 "-Xmx512m",
                 "-XX:+UseSerialGC",
                 "-XX:TieredStopAtLevel=1",
@@ -120,25 +108,11 @@ def registerWinUISampleTask = { String taskName, String descriptionText, String 
             extraConfig.delegate = jvmOptions
             extraConfig(jvmOptions)
         }
-        commandLine(
-                gradleWrapper.asFile.absolutePath,
-                "${project.path}:runWinRTApplicationHost",
-                "-PcomposeWinUi.enableJvmTarget=true",
-                "-Dorg.gradle.jvmargs=-Xmx2g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
-                "--no-configuration-cache",
-                "--no-configure-on-demand",
-                "--no-build-cache",
-                "--no-daemon",
-                "--max-workers=1",
-                "--console=plain",
-        )
+        jvmArgs.set(jvmOptions)
+        outputLog.set(sampleLog)
         doFirst {
-            environment("KOTLIN_WINRT_JVM_OPTIONS", jvmOptions.join(";"))
             def logFile = sampleLog.get().asFile
-            logFile.parentFile.mkdirs()
             logFile.delete()
-            standardOutput = new FileOutputStream(logFile)
-            errorOutput = standardOutput
             def runtimeClasspathNames = configurations.runtimeClasspath.files.collect { it.name }
             if (!runtimeClasspathNames.any { it.contains("skiko-winui") }) {
                 throw new GradleException("WinUI sample runtime classpath does not include skiko-winui.")

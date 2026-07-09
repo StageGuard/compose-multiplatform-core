@@ -16,8 +16,9 @@
 
 import io.github.composefluent.winrt.gradle.BuildWinRTApplicationHostTask
 import io.github.composefluent.winrt.gradle.GenerateWinRTProjectionsTask
+import io.github.composefluent.winrt.gradle.RunWinRTApplicationHostTask
+import io.github.composefluent.winrt.gradle.registerWinRTApplicationHostRunTask
 import java.util.zip.ZipFile
-import org.gradle.api.tasks.Exec
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -25,7 +26,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("AndroidXComposePlugin")
     id("kotlin-multiplatform")
-    id("io.github.composefluent.winrt")
+    id("io.github.compose-fluent.winrt")
     alias(libs.plugins.kotlinSerialization)
 }
 
@@ -73,13 +74,6 @@ val localWinUiCompileProjects = listOf(
 val navigationWinUiCompileTasks = listOf(
     ":navigation:navigation-compose:compileKotlinWinuiJvm",
     ":navigation3:navigation3-ui:compileKotlinWinuiJvm",
-)
-val gradleWrapper = rootProject.layout.projectDirectory.file(
-    if (System.getProperty("os.name").startsWith("Windows")) {
-        "gradlew.bat"
-    } else {
-        "gradlew"
-    }
 )
 val winUiMppSampleResourcesDir = layout.buildDirectory.dir("winui-mpp-sample-resources")
 val winUiMppSampleResourceFiles = listOf(
@@ -273,12 +267,6 @@ tasks.named<GenerateWinRTProjectionsTask>("generateWinRTProjections") {
     sourceRoots.setFrom(project.file("../demo/src/winuiJvmMain/kotlin"))
 }
 
-tasks.named("runWinRTApplicationHost") {
-    // KWINRT-059: smoke modes and report paths are passed through
-    // KOTLIN_WINRT_JVM_OPTIONS, so the generated run task must execute each time.
-    outputs.upToDateWhen { false }
-}
-
 tasks.named("compileKotlinWinuiJvm") {
     dependsOn(localWinUiJarProjects.map { path -> "$path:winuiJvmJar" })
     dependsOn(localWinUiCompileProjects.map { path -> "$path:compileKotlinWinuiJvm" })
@@ -308,7 +296,7 @@ tasks.withType<KotlinCompile>().configureEach {
     }
 }
 
-fun Exec.configureWinUIMppSampleApplicationHost(
+fun RunWinRTApplicationHostTask.configureWinUIMppSampleApplicationHost(
     taskDescription: String,
     reportName: String,
     requiredEvents: List<String>,
@@ -321,27 +309,13 @@ fun Exec.configureWinUIMppSampleApplicationHost(
     description = taskDescription
     dependsOn("validateWinUIMppSamplePackaging")
     val reportFile = layout.buildDirectory.file("validation/$reportName-events.txt")
+    val logFile = layout.buildDirectory.file("validation/$reportName.log")
     outputs.file(reportFile)
-    commandLine(
-        gradleWrapper.asFile.absolutePath,
-        "${project.path}:runWinRTApplicationHost",
-        "-PcomposeWinUi.enableJvmTarget=true",
-        "-Dorg.gradle.jvmargs=-Xmx2g -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8",
-        "--no-configuration-cache",
-        "--no-configure-on-demand",
-        "--no-build-cache",
-        "--no-daemon",
-        "--max-workers=1",
-        "--console=plain",
-    )
-    doFirst {
-        val report = reportFile.get().asFile
-        report.delete()
-        val jvmOptions = mutableListOf(
-            // KWINRT-056: generated host JVM args are still passed through the
-            // environment until kotlin-winrt exposes a first-class run task.
-            // Keep this MPP host on ParallelGC; SerialGC/Tier1 can hit a
-            // CoreMessaging fail-fast after the auto-traverse shutdown path.
+    outputLog.set(logFile)
+    jvmArgs.set(providers.provider {
+        // Keep this MPP host on ParallelGC; SerialGC/Tier1 can hit a
+        // CoreMessaging fail-fast after the auto-traverse shutdown path.
+        listOf(
             "-Xmx512m",
             "-XX:+UseParallelGC",
             "-Dfile.encoding=UTF-8",
@@ -349,10 +323,12 @@ fun Exec.configureWinUIMppSampleApplicationHost(
             "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",
             "-Dcompose.winui.mpp.sample.extendsContentIntoTitleBar=$extendsContentIntoTitleBar",
             "-Dcompose.winui.mpp.sample.validateTitleBarInsets=$validateTitleBarInsets",
-            "-Dcompose.winui.mpp.sample.validationReport=${report.absolutePath}",
+            "-Dcompose.winui.mpp.sample.validationReport=${reportFile.get().asFile.absolutePath}",
         )
-        environment("KOTLIN_WINRT_JVM_OPTIONS", jvmOptions.joinToString(separator = ";"))
-
+    })
+    doFirst {
+        val report = reportFile.get().asFile
+        report.delete()
         val runtimeArtifacts = configurations.named("winuiJvmRuntimeClasspath").get().files
         val runtimeArtifactNames = runtimeArtifacts.map { it.name }
         val localResourceRoots = listOf(winUiMppSampleResourcesDir.get().asFile)
@@ -715,18 +691,10 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
     }
 }
 
-val validateWinUINavigationCompileOnly = tasks.register<Exec>("validateWinUINavigationCompileOnly") {
+val validateWinUINavigationCompileOnly = tasks.register("validateWinUINavigationCompileOnly") {
     group = "verification"
     description = "Compiles the Navigation Compose and Navigation3 UI WinUI JVM targets."
-    commandLine(
-        gradleWrapper.asFile.absolutePath,
-        *navigationWinUiCompileTasks.toTypedArray(),
-        "-PcomposeWinUi.enableJvmTarget=true",
-        "--no-configuration-cache",
-        "--no-configure-on-demand",
-        "--no-build-cache",
-        "--console=plain",
-    )
+    dependsOn(navigationWinUiCompileTasks)
 }
 
 tasks.register("validateWinUIMppSampleCompileOnly") {
@@ -737,7 +705,7 @@ tasks.register("validateWinUIMppSampleCompileOnly") {
     dependsOn("validateWinUiKotlinWinRtKmpGraphBaseline")
 }
 
-val smokeWinUIMppSampleLaunchWindow = tasks.register<Exec>("smokeWinUIMppSampleLaunchWindow") {
+val smokeWinUIMppSampleLaunchWindow = registerWinRTApplicationHostRunTask("smokeWinUIMppSampleLaunchWindow") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until the application window composes.",
         reportName = "winui-mpp-sample-launch-window",
@@ -749,7 +717,7 @@ val smokeWinUIMppSampleLaunchWindow = tasks.register<Exec>("smokeWinUIMppSampleL
     )
 }
 
-val smokeWinUIMppSampleRenderOutput = tasks.register<Exec>("smokeWinUIMppSampleRenderOutput") {
+val smokeWinUIMppSampleRenderOutput = registerWinRTApplicationHostRunTask("smokeWinUIMppSampleRenderOutput") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until the image viewer reaches a laid-out frame.",
         reportName = "winui-mpp-sample-render-output",
@@ -764,7 +732,7 @@ val smokeWinUIMppSampleRenderOutput = tasks.register<Exec>("smokeWinUIMppSampleR
     )
 }
 
-val smokeWinUIMppSampleInputFocus = tasks.register<Exec>("smokeWinUIMppSampleInputFocus") {
+val smokeWinUIMppSampleInputFocus = registerWinRTApplicationHostRunTask("smokeWinUIMppSampleInputFocus") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until pointer/input handlers compose on a live window.",
         reportName = "winui-mpp-sample-input-focus",
@@ -775,7 +743,7 @@ val smokeWinUIMppSampleInputFocus = tasks.register<Exec>("smokeWinUIMppSampleInp
     )
 }
 
-val smokeWinUIMppSampleResourceLoading = tasks.register<Exec>("smokeWinUIMppSampleResourceLoading") {
+val smokeWinUIMppSampleResourceLoading = registerWinRTApplicationHostRunTask("smokeWinUIMppSampleResourceLoading") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until bundled resources load through the runtime classpath.",
         reportName = "winui-mpp-sample-resource-loading",
@@ -783,7 +751,7 @@ val smokeWinUIMppSampleResourceLoading = tasks.register<Exec>("smokeWinUIMppSamp
     )
 }
 
-val smokeWinUIMppSampleShutdownDisposal = tasks.register<Exec>("smokeWinUIMppSampleShutdownDisposal") {
+val smokeWinUIMppSampleShutdownDisposal = registerWinRTApplicationHostRunTask("smokeWinUIMppSampleShutdownDisposal") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until auto-exit disposes the window content.",
         reportName = "winui-mpp-sample-shutdown-disposal",
@@ -794,7 +762,7 @@ val smokeWinUIMppSampleShutdownDisposal = tasks.register<Exec>("smokeWinUIMppSam
     )
 }
 
-val smokeWinUIMppSampleAutoTraverse = tasks.register<Exec>("smokeWinUIMppSampleAutoTraverse") {
+val smokeWinUIMppSampleAutoTraverse = registerWinRTApplicationHostRunTask("smokeWinUIMppSampleAutoTraverse") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Automatically traverses WinUI MPP sample demo screens and exercises pointer input.",
         reportName = "winui-mpp-sample-auto-traverse",
@@ -810,7 +778,7 @@ val smokeWinUIMppSampleAutoTraverse = tasks.register<Exec>("smokeWinUIMppSampleA
     )
 }
 
-tasks.register<Exec>("runWinUIMppSample") {
+registerWinRTApplicationHostRunTask("runWinUIMppSample") {
     dependsOn("validateWinUIMppSampleCompileOnly")
     dependsOn("validateWinUIMppSampleSourceIsolation")
     dependsOn("validateWinUIMppSampleApiSurface")
@@ -851,7 +819,7 @@ tasks.register<Exec>("runWinUIMppSample") {
     )
 }
 
-tasks.register<Exec>("runWinUIMppSampleInteractive") {
+registerWinRTApplicationHostRunTask("runWinUIMppSampleInteractive") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the original MPP demo through the compose-winui JVM target without auto-exit.",
         reportName = "winui-mpp-sample-interactive",
