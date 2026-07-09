@@ -27,15 +27,13 @@ pluginManagement {
     }
     resolutionStrategy {
         eachPlugin {
-            if (requested.id.id == "io.github.compose-fluent.winrt" ||
-                    requested.id.id == "io.github.compose-fluent.winrt.runtime") {
+            if (requested.id.id == "io.github.compose-fluent.winrt") {
                 useModule("io.github.compose-fluent:winrt-gradle-plugin:${requested.version ?: "0.1.0-SNAPSHOT"}")
             }
         }
     }
     plugins {
         id("io.github.compose-fluent.winrt") version "0.1.0-SNAPSHOT"
-        id("io.github.compose-fluent.winrt.runtime") version "0.1.0-SNAPSHOT"
     }
     includeBuild("androidx-settings-plugins")
 }

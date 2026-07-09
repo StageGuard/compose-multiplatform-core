@@ -14,10 +14,17 @@ baseline, not every retest attempt.
   compose-winui has not yet validated a refreshed snapshot locally because the
   `--refresh-dependencies` build is currently blocked by remote Maven TLS
   handshake failures before Kotlin/Native compilation starts.
-- **Open compose-side workarounds:** none for `KWINRT-056`, `KWINRT-059`, or
-  `KWINRT-060`. The repository-local WinUI sample run tasks now use the typed
-  kotlin-winrt run-task API, and `compose/foundation/foundation` now receives
-  WinRT runtime dependencies through the runtime-only plugin.
+- **Open upstream/plugin modeling gap:** `KWINRT-060`. The normal
+  `io.github.compose-fluent.winrt` plugin does auto-inject WinRT runtime
+  dependencies, but applying it to `compose/foundation/foundation` also wires
+  projection, identity, and application tasks that create a Compose module
+  cycle. compose-winui keeps a narrow explicit `winrt-runtime` dependency in
+  foundation as a temporary workaround; this should be removed once
+  kotlin-winrt can model consumer-only WinUI source sets through the normal
+  plugin path.
+- **Closed compose-side run-task workarounds:** `KWINRT-056` and
+  `KWINRT-059`. The repository-local WinUI sample run tasks now use the typed
+  kotlin-winrt run-task API.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -31,7 +38,7 @@ baseline, not every retest attempt.
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-056`,
-  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, and `KWINRT-060`.
+  `KWINRT-057`, `KWINRT-058`, and `KWINRT-059`.
 
 ## KWINRT-061: Native KMP projection ownership is unresolved for mingw consumers
 
@@ -90,47 +97,55 @@ baseline, not every retest attempt.
   transitive artifacts. Do not mark the compose-winui Mingw path fixed until a
   refreshed dependency build reaches and passes `compileKotlinWinuiMingw`.
 
-## KWINRT-060: Runtime dependency auto-injection does not cover non-plugin WinUI source-set consumers
+## KWINRT-060: Normal plugin runtime injection needs a consumer-only task model
 
-- **Status:** Closed in the refreshed kotlin-winrt runtime-only plugin path
-  consumed by compose-winui on 2026-07-09.
+- **Status:** Open upstream/plugin modeling gap as of 2026-07-09.
 - **Observed in:** `:compose:foundation:foundation:compileKotlinWinuiJvm`
   while removing compose-side explicit WinRT runtime dependencies after the
   refreshed 2026-07-08 kotlin-winrt snapshot.
-- **Symptom:** `compose-ui`, `compose/ui/ui/winui-samples`, and
+- **Runtime auto-injection finding:** `compose-ui`, `compose/ui/ui/winui-samples`, and
   `compose/mpp/demo-winui` compile and run after removing their explicit
   `winrt-runtime` / `winrt-runtime-jvm` dependencies; dependency insight still
   shows `winrt-runtime` and `winrt-runtime-jvm` on
-  `:compose:ui:ui:winuiJvmCompileClasspath`, supplied by the plugin. However,
-  `compose/foundation/foundation` uses WinRT projected types from `winuiMain`
-  and does not apply the kotlin-winrt plugin. Removing its explicit
-  `winrt-runtime` dependency makes `compileKotlinWinuiJvm` fail with unresolved
+  `:compose:ui:ui:winuiJvmCompileClasspath`, supplied by the normal
+  `io.github.compose-fluent.winrt` plugin. This confirms runtime injection
+  belongs to the normal plugin path, not to a separate runtime-only plugin.
+- **Consumer-module symptom:** `compose/foundation/foundation` uses WinRT
+  projected types from `winuiMain`, but it is a layered Compose library module
+  and should not own WinRT projections or application-host tasks. Removing its
+  explicit `winrt-runtime` dependency without applying the plugin makes
+  `compileKotlinWinuiJvm` fail with unresolved
   `io.github.composefluent.winrt.runtime` APIs such as
   `EventRegistrationToken`, `EventHandlerCallback`, and
   `WinRTComposableObject`.
 - **Additional finding:** applying the full `io.github.compose-fluent.winrt`
-  plugin directly to `compose/foundation/foundation` is not the right
-  replacement because it enables projection and application task wiring in a
-  layered Compose module. The dedicated
-  `io.github.compose-fluent.winrt.runtime` plugin is the intended consumer
-  path.
-- **Expected behavior:** a KMP module with a WinUI source set that consumes
-  WinRT projected types should have a narrow way to receive the matching
-  runtime dependency for that source set without hand-declaring
-  `winrt-runtime`, and without enabling projection/identity tasks that create
-  cycles in a layered Compose module graph.
-- **Resolution:** `compose/foundation/foundation` applies
-  `io.github.compose-fluent.winrt.runtime` only when a WinUI target is enabled
-  and no longer declares an explicit `winrt-runtime` dependency. The
-  runtime-only plugin injects the matching WinRT runtime without creating
-  `winRT`, projection, identity, or application tasks.
-- **Validation:** after removing explicit runtime dependencies from the WinUI
-  JVM path and using the runtime-only plugin in foundation, the combined
-  validation passes with JDK 25 and `--no-configuration-cache`:
+  plugin directly to `compose/foundation/foundation` does auto-inject the
+  runtime, but also enables projection/identity/authored-candidate/application
+  task wiring in this layered module. The resulting graph cycles through
+  `:compose:foundation:foundation:generateWinRTIdentity`,
   `:compose:foundation:foundation:compileKotlinWinuiJvm`,
-  `:compose:ui:ui:compileKotlinWinuiJvm`, `:compose:ui:ui:winuiJvmTest`,
-  `:compose:ui:ui:winui-samples:runWinUISkikoSample`, and
-  `:compose:mpp:demo-winui:runWinUIMppSample`.
+  `:compose:animation:animation:winuiJvmJar`,
+  `:compose:ui:ui:winuiJvmJar`,
+  `:compose:ui:ui:compileKotlinWinuiJvm`, and
+  `:compose:ui:ui:generateWinRTProjections`.
+- **Expected behavior:** a KMP module with a WinUI source set that consumes
+  WinRT projected types should be able to apply the normal
+  `io.github.compose-fluent.winrt` plugin, or otherwise participate in the
+  plugin-managed WinUI source-set model, and receive matching runtime
+  dependencies without hand-declaring `winrt-runtime`. That consumer path must
+  not create projection, identity, authored-candidate, application-host, or
+  packaging tasks unless the module actually declares WinRT projections or an
+  application.
+- **Current compose-winui workaround:** do not introduce or rely on
+  `io.github.compose-fluent.winrt.runtime`; runtime injection is expected to be
+  owned by the normal winrt plugin. Until kotlin-winrt has consumer-only task
+  modeling, `compose/foundation/foundation` keeps a narrow explicit
+  `winrt-runtime` dependency in `winuiMain` with a `KWINRT-060` comment.
+- **Validation:** applying the normal full plugin to foundation fails with the
+  task cycle above. With the temporary explicit runtime dependency restored,
+  `:compose:foundation:foundation:compileKotlinWinuiJvm
+  -PcomposeWinUi.enableJvmTarget=true --no-configuration-cache
+  --no-configure-on-demand` passes with JDK 25 on 2026-07-09.
 
 ## KWINRT-059: Application run task skips despite environment-selected sample mode
 
