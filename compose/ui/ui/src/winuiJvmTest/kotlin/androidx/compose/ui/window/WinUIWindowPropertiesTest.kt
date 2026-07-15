@@ -20,7 +20,9 @@ import androidx.compose.ui.ComposeFeatureFlags
 import androidx.compose.ui.LayerType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 class WinUIWindowPropertiesTest {
     @Test
@@ -89,5 +91,11 @@ class WinUIWindowPropertiesTest {
         assertNotEquals(baseline, DialogProperties(dismissOnBackPress = false))
         assertNotEquals(baseline, DialogProperties(dismissOnClickOutside = false))
         assertNotEquals(baseline, DialogProperties(usePlatformDefaultWidth = false))
+    }
+
+    @Test
+    fun dialogDefaultWidthPropertyIsExplicit() {
+        assertTrue(DialogProperties().usePlatformDefaultWidth)
+        assertFalse(DialogProperties(usePlatformDefaultWidth = false).usePlatformDefaultWidth)
     }
 }

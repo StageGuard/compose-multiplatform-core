@@ -17,9 +17,16 @@
 package androidx.compose.ui.window
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalWinUIRoot
+import androidx.compose.ui.platform.LocalWinUIWindow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -28,6 +35,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.round
+import microsoft.ui.xaml.FrameworkElement
+import microsoft.ui.xaml.RoutedEventHandler
+import microsoft.ui.xaml.Window as XamlWindow
+import windows.foundation.EventRegistrationToken
+import windows.foundation.Point
+import microsoft.ui.xaml.controls.LightDismissOverlayMode
+import microsoft.ui.xaml.controls.primitives.FlyoutPlacementMode
+import microsoft.ui.xaml.controls.primitives.FlyoutShowOptions
+import microsoft.ui.xaml.input.KeyEventHandler
+import windows.system.VirtualKey
+import androidx.compose.ui.platform.WinUIComposeView
+import kotlin.math.roundToInt
 
 @Immutable
 actual class DialogProperties actual constructor(
@@ -60,34 +80,212 @@ actual fun Dialog(
     properties: DialogProperties,
     content: @Composable () -> Unit,
 ) {
-    val currentContent by rememberUpdatedState(content)
+    val parentWindow = LocalWinUIWindow.current
+    val parentRoot = LocalWinUIRoot.current
     val containerSize = LocalWindowInfo.current.containerSize
-    Layout(
-        content = currentContent,
-        modifier = Modifier.semantics { dialog() },
-    ) { measurables, constraints ->
-        val looseConstraints = constraints.copy(minWidth = 0, minHeight = 0)
-        val placeables = measurables.map { measurable ->
-            measurable.measure(looseConstraints)
-        }
-        val contentSize = IntSize(
-            width = placeables.maxOfOrNull { it.width } ?: 0,
-            height = placeables.maxOfOrNull { it.height } ?: 0,
-        )
-        val windowSize = containerSize.takeIf { it != IntSize.Zero }
-            ?: constraints.finiteMaxSizeOr(contentSize)
-        val position = IntOffset(
-            x = ((windowSize.width - contentSize.width) / 2).coerceAtLeast(0),
-            y = ((windowSize.height - contentSize.height) / 2).coerceAtLeast(0),
-        )
+    val currentContent by rememberUpdatedState(content)
+    val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    val dialogHost = remember(parentWindow, parentRoot) {
+        WinUIDialogHost(parentWindow, parentRoot)
+    }
 
-        layout(0, 0) {
-            placeables.forEach { placeable ->
-                placeable.placeRelative(position)
+    SideEffect {
+        dialogHost.update(
+            properties = properties,
+            windowSize = containerSize,
+            onDismissRequest = currentOnDismissRequest,
+            content = currentContent,
+        )
+    }
+    DisposableEffect(dialogHost) {
+        dialogHost.setContent { dialogHost.Content() }
+        dialogHost.open()
+        onDispose { dialogHost.close() }
+    }
+}
+
+internal fun winUIDialogMaxWidth(
+    windowWidth: Int,
+    availableWidth: Int,
+    usePlatformDefaultWidth: Boolean,
+): Int {
+    if (!usePlatformDefaultWidth) return availableWidth
+    val platformWidth = (windowWidth * 0.9f).roundToInt().coerceAtMost(560)
+    return availableWidth.coerceAtMost(platformWidth.coerceAtLeast(1))
+}
+
+private class WinUIDialogHost(
+    private val parentWindow: XamlWindow?,
+    private val parentRoot: FrameworkElement?,
+) {
+    private val composeView = WinUIComposeView()
+    private val flyout = TransparentComposeFlyout(composeView.root)
+    private var properties: DialogProperties by mutableStateOf(DialogProperties())
+    private var windowSize: IntSize by mutableStateOf(IntSize.Zero)
+    private var currentContent: @Composable () -> Unit by mutableStateOf({})
+    private var onDismissRequest: (() -> Unit)? = null
+    private var shouldBeOpen = false
+    private var isOpen = false
+    private var isClosed = false
+    private val dismissalState = WinUIPopupDismissState(
+        dismissOnBackPress = true,
+        dismissOnClickOutside = true,
+        onDismissRequest = { onDismissRequest?.invoke() },
+    )
+    private var closedToken: EventRegistrationToken? = null
+    private var keyDownToken: EventRegistrationToken? = null
+    private var parentRootLoadedToken: EventRegistrationToken? = null
+
+    init {
+        composeView.setTransparentRootBackground()
+        flyout.content = composeView.root
+        flyout.areOpenCloseAnimationsEnabled = false
+        flyout.shouldConstrainToRootBounds = false
+        flyout.placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
+        flyout.showMode = microsoft.ui.xaml.controls.primitives.FlyoutShowMode.Transient
+        closedToken = flyout.closed.add { _, _ ->
+            isOpen = false
+            if (shouldBeOpen) dismissalState.onOutside()
+        }
+        keyDownToken = composeView.root.keyDown.add(KeyEventHandler { _, args ->
+            if (!args.handled && isOpen && args.key.isDialogBackKey()) {
+                if (dismissalState.onBackPress()) args.handled = true
+            }
+        })
+        parentRoot?.let { root ->
+            parentRootLoadedToken = root.loaded.add(RoutedEventHandler { _, _ -> updateFlyout() })
+        }
+    }
+
+    fun setContent(content: @Composable () -> Unit) {
+        if (!isClosed) composeView.setContent(content)
+    }
+
+    @Composable
+    fun Content() {
+        val content = currentContent
+        val targetWindowSize = windowSize
+        Layout(
+            content = content,
+            modifier = Modifier.semantics { dialog() },
+        ) { measurables, constraints ->
+            val effectiveWindowSize = targetWindowSize.takeIf { it != IntSize.Zero }
+                ?: constraints.finiteMaxSizeOr(IntSize.Zero)
+            val availableWidth = if (constraints.hasBoundedWidth) {
+                constraints.maxWidth
+            } else {
+                effectiveWindowSize.width
+            }
+            val maxWidth = winUIDialogMaxWidth(
+                windowWidth = effectiveWindowSize.width,
+                availableWidth = availableWidth,
+                usePlatformDefaultWidth = properties.usePlatformDefaultWidth,
+            )
+            val childConstraints = constraints.copy(
+                minWidth = 0,
+                minHeight = 0,
+                maxWidth = maxWidth.coerceAtLeast(0),
+                maxHeight = if (constraints.hasBoundedHeight) {
+                    constraints.maxHeight
+                } else {
+                    effectiveWindowSize.height
+                },
+            )
+            val placeables = measurables.map { measurable ->
+                measurable.measure(childConstraints)
+            }
+            val contentSize = IntSize(
+                width = placeables.maxOfOrNull { it.width } ?: 0,
+                height = placeables.maxOfOrNull { it.height } ?: 0,
+            )
+            val hostSize = IntSize(
+                width = effectiveWindowSize.width.coerceAtLeast(contentSize.width),
+                height = effectiveWindowSize.height.coerceAtLeast(contentSize.height),
+            )
+            val position = IntOffset(
+                x = ((hostSize.width - contentSize.width) / 2).coerceAtLeast(0),
+                y = ((hostSize.height - contentSize.height) / 2).coerceAtLeast(0),
+            )
+            layout(hostSize.width, hostSize.height) {
+                placeables.forEach { placeable -> placeable.placeRelative(position) }
             }
         }
     }
+
+    fun update(
+        properties: DialogProperties,
+        windowSize: IntSize,
+        onDismissRequest: () -> Unit,
+        content: @Composable () -> Unit,
+    ) {
+        this.properties = properties
+        this.windowSize = windowSize
+        this.onDismissRequest = onDismissRequest
+        this.currentContent = content
+        dismissalState.update(
+            dismissOnBackPress = properties.dismissOnBackPress,
+            dismissOnClickOutside = properties.dismissOnClickOutside,
+            onDismissRequest = onDismissRequest,
+        )
+        flyout.lightDismissOverlayMode = if (properties.dismissOnClickOutside) {
+            LightDismissOverlayMode.On
+        } else {
+            LightDismissOverlayMode.Off
+        }
+        if (windowSize != IntSize.Zero) {
+            composeView.setWindowContainerSize(windowSize)
+            composeView.rootFrameworkElement.width = windowSize.width.coerceAtLeast(1).toDouble()
+            composeView.rootFrameworkElement.height = windowSize.height.coerceAtLeast(1).toDouble()
+        }
+        updateFlyout()
+    }
+
+    fun open() {
+        if (isClosed) return
+        shouldBeOpen = true
+        updateFlyout()
+    }
+
+    fun close() {
+        if (isClosed) return
+        isClosed = true
+        shouldBeOpen = false
+        isOpen = false
+        closedToken?.let { token -> runCatching { flyout.closed.remove(token) } }
+        closedToken = null
+        keyDownToken?.let { token -> runCatching { composeView.root.keyDown.remove(token) } }
+        keyDownToken = null
+        parentRootLoadedToken?.let { token ->
+            runCatching { parentRoot?.loaded?.remove(token) }
+        }
+        parentRootLoadedToken = null
+        runCatching { flyout.hide() }
+        flyout.popupContent = null
+        composeView.dispose()
+    }
+
+    private fun updateFlyout() {
+        if (isClosed || !shouldBeOpen) return
+        val root = parentRoot ?: return
+        val xamlRoot = runCatching { root.xamlRoot }.getOrNull() ?: return
+        if (!runCatching { root.isLoaded }.getOrDefault(false)) return
+        val size = windowSize.takeIf { it != IntSize.Zero } ?: return
+        composeView.rootFrameworkElement.width = size.width.coerceAtLeast(1).toDouble()
+        composeView.rootFrameworkElement.height = size.height.coerceAtLeast(1).toDouble()
+        if (!isOpen) {
+            isOpen = true
+            flyout.xamlRoot = xamlRoot
+            val options = FlyoutShowOptions().also {
+                it.position = Point(0f, 0f)
+                it.placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
+            }
+            runCatching { flyout.showAt(root, options) }.onFailure { isOpen = false }
+        }
+    }
 }
+
+private fun VirtualKey.isDialogBackKey(): Boolean =
+    this == VirtualKey.Escape || this == VirtualKey.GoBack || this == VirtualKey.NavigationCancel
 
 private fun Constraints.finiteMaxSizeOr(fallback: IntSize): IntSize =
     IntSize(
