@@ -25,7 +25,6 @@ import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
 import microsoft.ui.xaml.XamlRoot
 import microsoft.ui.xaml.Window as XamlWindow
-import winrt.interop.WindowNative
 
 private const val DWM_BB_ENABLE = 0x00000001
 private const val DWM_BB_BLURREGION = 0x00000002
@@ -94,9 +93,6 @@ private val DwmBlurBehindRegion = DwmBlurBehindLayout.varHandle(
 private val DwmBlurBehindTransition = DwmBlurBehindLayout.varHandle(
     MemoryLayout.PathElement.groupElement("fTransitionOnMaximized"),
 )
-
-internal fun winuiWindowHwnd(window: XamlWindow): Long =
-    WindowNative.getWindowHandle(window).value
 
 internal actual fun setWindowTransparentBackdrop(
     window: XamlWindow,
