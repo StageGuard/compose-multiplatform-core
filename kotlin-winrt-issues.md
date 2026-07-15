@@ -14,9 +14,9 @@ baseline, not every retest attempt.
   compose-winui has not yet validated a refreshed snapshot locally because the
   `--refresh-dependencies` build is currently blocked by remote Maven TLS
   handshake failures before Kotlin/Native compilation starts.
-- **Open compose-winui validation gaps:** `KWINRT-061` and `KWINRT-062`.
-  `KWINRT-061` is the unresolved mingw projection-ownership validation gap;
-  `KWINRT-062` is a refreshed sample projection IID conflict.
+- **Closed upstream projection gap:** `KWINRT-062`. Snapshot
+  `0.1.0-20260715.042347-81` resolves the duplicate interface IID failure and
+  the repository-local `runWinUISkikoSample` passes end to end.
 - **Closed upstream/plugin modeling gap:** `KWINRT-060`. Snapshot
   `0.1.0-20260714.234543-80` fixes the normal library-mode task graph for
   `compose/foundation/foundation`; it now receives runtime injection through
@@ -37,31 +37,23 @@ baseline, not every retest attempt.
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-056`,
-  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, and `KWINRT-060`.
+  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, and `KWINRT-062`.
 
 ## KWINRT-062: Refreshed sample projection has conflicting interface IIDs
 
-- **Status:** Open upstream projection metadata/generator gap as of
-  2026-07-15.
-- **Observed in:** `:compose:ui:ui:winui-samples:generateWinRTProjections`
-  while running the repository-local `runWinUISkikoSample` with kotlin-winrt
-  snapshot `0.1.0-20260714.234543-80`.
-- **Symptom:** projection generation rejects two IIDs for the same interface:
-  `Microsoft.Windows.Management.Deployment.IPackageVolume` is reported with
-  `9C9710F4-795A-58B3-93F4-C991C4329C49` and
-  `27D8EE90-3542-5831-92CB-A186A0C39AF5`.
-- **Expected behavior:** the metadata/generator pipeline should resolve the
-  duplicate interface identity deterministically, or report the conflicting
-  WinMD inputs with enough ownership/source information to correct the input
-  selection. A repository sample should not need to suppress unrelated
-  Windows SDK or App SDK projection inputs to run.
-- **Current compose-winui action:** no local projection filter or IID override
-  has been added. Keep the sample failure visible until the owning metadata or
-  generator behavior is fixed upstream.
-- **Validation:** `:compose:foundation:foundation:compileKotlinWinuiJvm` and
-  `:compose:ui:ui:compileKotlinWinuiJvm` pass with snapshot 80, while
-  `:compose:ui:ui:winui-samples:runWinUISkikoSample` reaches
-  `generateWinRTProjections` and fails with the IID conflict above.
+- **Status:** Closed in kotlin-winrt snapshot
+  `0.1.0-20260715.042347-81` on 2026-07-15.
+- **Historical observation:** snapshot `0.1.0-20260714.234543-80` rejected two
+  IIDs for `Microsoft.Windows.Management.Deployment.IPackageVolume` while
+  generating the repository sample projections.
+- **Resolution:** the refreshed generator resolves the projection metadata
+  conflict without compose-side projection filters or IID overrides.
+- **Validation:**
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample
+  -PcomposeWinUi.enableJvmTarget=true --refresh-dependencies --no-daemon
+  --no-configuration-cache --no-configure-on-demand` passes end to end,
+  including compose-ui and foundation projection generation and compilation,
+  sample authoring validation, application-host build, staging, and launch.
 
 ## KWINRT-061: Native KMP projection ownership is unresolved for mingw consumers
 
@@ -162,8 +154,9 @@ baseline, not every retest attempt.
   `:compose:foundation:foundation:compileKotlinWinuiJvm` and
   `:compose:ui:ui:compileKotlinWinuiJvm` both pass with
   `--refresh-dependencies --no-daemon --no-configuration-cache
-  --no-configure-on-demand`. The repository sample proceeds past the former
-  task cycle and currently stops at the separate `KWINRT-062` IID conflict.
+  --no-configure-on-demand`. Snapshot `0.1.0-20260715.042347-81` additionally
+  passes the repository-local `runWinUISkikoSample` end to end after the
+  separate `KWINRT-062` fix.
 
 ## KWINRT-059: Application run task skips despite environment-selected sample mode
 

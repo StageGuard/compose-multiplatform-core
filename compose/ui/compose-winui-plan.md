@@ -360,9 +360,11 @@
 - `KWINRT-060` is closed in kotlin-winrt snapshot
   `0.1.0-20260714.234543-80`: `compose/foundation/foundation` applies the
   normal library-mode plugin without the former identity/projection task cycle.
-- `KWINRT-062` currently blocks the repository-local WinUI sample. The sample
-  reaches `generateWinRTProjections` but the refreshed generator reports two
-  conflicting IIDs for `Microsoft.Windows.Management.Deployment.IPackageVolume`.
+- `KWINRT-062` is closed in kotlin-winrt snapshot
+  `0.1.0-20260715.042347-81`. The repository-local `runWinUISkikoSample`
+  passes projection generation, compilation, authoring validation,
+  application-host build, staging, and launch without compose-side IID
+  filters or projection overrides.
 - `KWINRT-056` and `KWINRT-059` are closed in the 2026-07-09 compose-winui
   validation baseline. Repository-local WinUI sample tasks now use typed
   kotlin-winrt application-host run tasks with declared `jvmArgs`, output logs,
@@ -399,8 +401,9 @@
   `:compose:mpp:demo-winui:runWinUIMppSample` after the typed run-task
   migration. The 2026-07-15 snapshot 80 validation additionally passes
   `:compose:foundation:foundation:compileKotlinWinuiJvm` and
-  `:compose:ui:ui:compileKotlinWinuiJvm`; the repository sample remains blocked
-  by `KWINRT-062` during projection generation.
+  `:compose:ui:ui:compileKotlinWinuiJvm`. Snapshot 81 additionally passes the
+  repository-local `runWinUISkikoSample` end to end with refreshed
+  dependencies, closing `KWINRT-062`.
 - KMP graph baseline remains important: keep testing customized source sets,
   transitive identity, support artifact merging, authored application hosts,
   and multi-module sample consumption. Do not regress to a single-module JVM
