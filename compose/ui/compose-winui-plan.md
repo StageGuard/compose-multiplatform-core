@@ -357,20 +357,21 @@
 
 ## kotlin-winrt status
 
-- No open kotlin-winrt runtime/generator blocker currently prevents the WinUI
-  JVM path from compiling and running the repository-local samples.
+- `KWINRT-060` is closed in kotlin-winrt snapshot
+  `0.1.0-20260714.234543-80`: `compose/foundation/foundation` applies the
+  normal library-mode plugin without the former identity/projection task cycle.
+- `KWINRT-062` currently blocks the repository-local WinUI sample. The sample
+  reaches `generateWinRTProjections` but the refreshed generator reports two
+  conflicting IIDs for `Microsoft.Windows.Management.Deployment.IPackageVolume`.
 - `KWINRT-056` and `KWINRT-059` are closed in the 2026-07-09 compose-winui
   validation baseline. Repository-local WinUI sample tasks now use typed
   kotlin-winrt application-host run tasks with declared `jvmArgs`, output logs,
   and per-smoke report files.
-- `KWINRT-060` remains open as an upstream/plugin task-model gap. The normal
-  `io.github.compose-fluent.winrt` plugin does auto-inject WinRT runtime
-  dependencies, but applying it to `compose/foundation/foundation` also wires
-  projection, identity, authored-candidate, and application tasks that create a
-  Compose module cycle. `compose/foundation/foundation` therefore keeps only a
-  narrow explicit `winrt-runtime` dependency in `winuiMain` until kotlin-winrt
-  can provide the same runtime injection for consumer-only WinUI source sets
-  without projection/application task wiring.
+- `KWINRT-060` is closed. The normal `io.github.compose-fluent.winrt` plugin
+  injects runtime dependencies in library mode while skipping local
+  projection/compiler-support/authored validation work when the combined local
+  projection output is empty. `foundation` no longer declares
+  `winrt-runtime` manually and does not call `application {}`.
 - WinUI mingw is not yet validated. The local non-refresh 2026-07-09 bring-up
   reaches `compileKotlinWinuiMingw`, but still fails with broad generated
   `windows.*` / `microsoft.*` `overrides nothing` errors. A same-day
@@ -394,10 +395,12 @@
   `:compose:mpp:demo-winui:runWinUIMppSample` pass with
   `-PcomposeWinUi.enableJvmTarget=true --no-configuration-cache
   --no-configure-on-demand`. The 2026-07-09 baseline additionally validates
-  `:compose:foundation:foundation:compileKotlinWinuiJvm`,
   `:compose:ui:ui:winui-samples:runWinUISkikoSample --rerun-tasks`, and
   `:compose:mpp:demo-winui:runWinUIMppSample` after the typed run-task
-  migration and the current `KWINRT-060` explicit-runtime workaround.
+  migration. The 2026-07-15 snapshot 80 validation additionally passes
+  `:compose:foundation:foundation:compileKotlinWinuiJvm` and
+  `:compose:ui:ui:compileKotlinWinuiJvm`; the repository sample remains blocked
+  by `KWINRT-062` during projection generation.
 - KMP graph baseline remains important: keep testing customized source sets,
   transitive identity, support artifact merging, authored application hosts,
   and multi-module sample consumption. Do not regress to a single-module JVM

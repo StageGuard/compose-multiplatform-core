@@ -31,6 +31,7 @@ plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
     id("JetBrainsAndroidXPlugin")
+    id("io.github.compose-fluent.winrt") apply false
     alias(libs.plugins.atomicFu)
 }
 
@@ -49,9 +50,10 @@ def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(J
 def composeWinUiSkikoWinUiVersion = providers
         .gradleProperty("composeWinUi.skikoWinUiVersion")
         .orElse("0.0.0-SNAPSHOT")
-def kotlinWinRtVersion = providers
-        .gradleProperty("kotlinWinRt.version")
-        .orElse("0.1.0-SNAPSHOT")
+
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+    apply plugin: "io.github.compose-fluent.winrt"
+}
 
 androidXMultiplatform {
     androidLibrary {
@@ -250,11 +252,6 @@ kotlin {
             winuiMain {
                 dependsOn(skikoMain)
                 dependencies {
-                    // KWINRT-060: the normal winrt plugin auto-injects runtime,
-                    // but also wires projection/identity tasks here and creates a
-                    // Compose module cycle. Keep this narrow runtime dependency
-                    // until kotlin-winrt models consumer-only WinUI source sets.
-                    implementation("io.github.compose-fluent:winrt-runtime:${kotlinWinRtVersion.get()}")
                     implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
                 }
             }
