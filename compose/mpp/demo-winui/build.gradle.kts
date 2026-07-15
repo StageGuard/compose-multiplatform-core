@@ -622,8 +622,16 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
                 .map { it.name }
                 .toSet()
         }
+        val compilerSupportManifestPrefix =
+            "io/github/composefluent/winrt/projections/support/WinRTCompilerSupportManifest_"
+        val uiCompilerSupportManifests = uiJarEntries.filter { entry ->
+            entry.startsWith(compilerSupportManifestPrefix) && entry.endsWith(".class")
+        }
+        check(uiCompilerSupportManifests.size == 1) {
+            "compose-ui WinUI jar must contain exactly one owner-scoped kotlin-winrt " +
+                "compiler support manifest, found: $uiCompilerSupportManifests"
+        }
         val requiredUiJarEntries = listOf(
-            "io/github/composefluent/winrt/projections/support/WinRTCompilerSupportManifest.class",
             "io/github/composefluent/winrt/projections/support/WinRTAuthoringTypeDetailsRegistrar_ui.class",
             "kotlin-winrt/type-index.tsv",
             "kotlin-winrt-authoring/ui.host.json",
@@ -650,10 +658,6 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
             .get()
             .asFile
         val requiredDemoFiles = listOf(
-            demoClassesDir.resolve(
-                "io/github/composefluent/winrt/projections/support/" +
-                    "WinRTCompilerSupportManifest.class"
-            ),
             demoClassesDir.resolve("kotlin-winrt/type-index.tsv"),
             demoClassesDir.resolve("kotlin-winrt/authored-candidates.tsv"),
             demoClassesDir.resolve("kotlin-winrt-authoring/demo-winui.host.json"),

@@ -32,6 +32,7 @@ plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
     id("JetBrainsAndroidXPlugin")
+    id("io.github.compose-fluent.winrt") apply false
     alias(libs.plugins.atomicFu)
 }
 
@@ -41,6 +42,24 @@ def composeWinUiJvmTargetEnabled = providers
         .orElse(false)
         .get()
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
+def composeWinUiSkikoWinUiVersion = providers
+        .gradleProperty("composeWinUi.skikoWinUiVersion")
+        .orElse("0.0.0-SNAPSHOT")
+def composeWinUiWindowsSdkVersion = providers
+        .gradleProperty("composeWinUi.windowsSdkVersion")
+        .orElse("10.0.26100.0")
+
+if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+    apply plugin: "io.github.compose-fluent.winrt"
+
+    winRT {
+        windowsSdk(composeWinUiWindowsSdkVersion.get(), false, false)
+        type("Windows.Globalization.Calendar")
+        type("Windows.Globalization.DateTimeFormatting.DateTimeFormatter")
+        type("Windows.Globalization.NumberFormatting.DecimalFormatter")
+        type("Windows.System.UserProfile.GlobalizationPreferences")
+    }
+}
 androidXMultiplatform {
     androidLibrary {
         compileSdk = 35
@@ -208,8 +227,15 @@ kotlin {
         jvm("winuiJvm")
 
         sourceSets {
-            winuiJvmMain {
+            winuiMain {
                 dependsOn(skikoMain)
+                dependencies {
+                    implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
+                }
+            }
+
+            winuiJvmMain {
+                dependsOn(winuiMain)
             }
 
             winuiJvmTest {
@@ -240,6 +266,8 @@ tasks.withType(KotlinCompile).configureEach {
         dirToDelete.deleteDir()
     }
     if (it.name.contains("Winui")) {
+        it.exclude("**/CalendarLocale.jvmAndAndroid.kt")
+        it.exclude("**/LegacyCalendarModelImpl.jvmAndAndroid.kt")
         it.exclude("**/SkikoMenu.skiko.kt")
         it.exclude("**/ModalBottomSheet.skiko.kt")
         it.exclude("**/WideNavigationRail.skiko.kt")
