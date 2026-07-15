@@ -196,6 +196,30 @@ class WinUISourceSetIsolationTest {
         )
     }
 
+    @Test
+    fun winuiJvmWindowHandleUsesGeneratedInteropProjection() {
+        val moduleRoot = findUiModuleRoot()
+        val source = moduleRoot.resolve(
+            "src/winuiJvmMain/kotlin/androidx/compose/ui/window/WinUIWindowNative.winuiJvm.kt"
+        ).readText()
+
+        assertTrue(
+            source.contains("import winrt.interop.WindowNative") &&
+                source.contains("WindowNative.getWindowHandle(window)"),
+            "WinUI HWND lookup should use kotlin-winrt generated WindowNative interop.",
+        )
+        listOf(
+            "ComVtableInvoker",
+            "IWindowNativeIid",
+            "queryInterface(IWindowNative",
+        ).forEach { forbidden ->
+            assertFalse(
+                source.contains(forbidden),
+                "WinUI HWND lookup should not manually query IWindowNative: found $forbidden.",
+            )
+        }
+    }
+
     private fun kotlinFiles(root: Path): List<Path> {
         if (!root.exists()) return emptyList()
         Files.walk(root).use { paths ->

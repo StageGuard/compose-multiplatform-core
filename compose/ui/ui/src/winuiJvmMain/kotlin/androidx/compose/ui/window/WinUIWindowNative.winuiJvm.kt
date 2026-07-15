@@ -16,10 +16,6 @@
 
 package androidx.compose.ui.window
 
-import io.github.composefluent.winrt.runtime.ComVtableInvoker
-import io.github.composefluent.winrt.runtime.Guid
-import io.github.composefluent.winrt.runtime.HResult
-import io.github.composefluent.winrt.runtime.PlatformAbi
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -29,12 +25,12 @@ import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
 import microsoft.ui.xaml.XamlRoot
 import microsoft.ui.xaml.Window as XamlWindow
+import winrt.interop.WindowNative
 
 private const val DWM_BB_ENABLE = 0x00000001
 private const val DWM_BB_BLURREGION = 0x00000002
 private const val DWMWA_WINDOW_CORNER_PREFERENCE = 33
 private const val DWMWCP_DONOTROUND = 1
-private val IWindowNativeIid = Guid("EECDBF0E-BAE9-4CB6-A68E-9598E1CB57BB")
 
 internal val user32Lookup: SymbolLookup = SymbolLookup.libraryLookup("user32", Arena.global())
 private val dwmapiLookup: SymbolLookup = SymbolLookup.libraryLookup("dwmapi", Arena.global())
@@ -100,19 +96,7 @@ private val DwmBlurBehindTransition = DwmBlurBehindLayout.varHandle(
 )
 
 internal fun winuiWindowHwnd(window: XamlWindow): Long =
-    window.nativeObject.queryInterface(IWindowNativeIid).getOrThrow().use { windowNative ->
-        PlatformAbi.confinedScope().use { scope ->
-            val hwndOut = PlatformAbi.allocatePointerSlot(scope)
-            HResult(
-                ComVtableInvoker.invokeArgs(
-                    instance = windowNative.pointer,
-                    slot = 3,
-                    arg0 = hwndOut,
-                ),
-            ).requireSuccess("IWindowNative.WindowHandle")
-            PlatformAbi.readPointer(hwndOut).value
-        }
-}
+    WindowNative.getWindowHandle(window).value
 
 internal actual fun setWindowTransparentBackdrop(
     window: XamlWindow,
