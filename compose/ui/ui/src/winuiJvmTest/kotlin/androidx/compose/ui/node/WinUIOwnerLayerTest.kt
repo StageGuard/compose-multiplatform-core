@@ -17,9 +17,20 @@
 package androidx.compose.ui.node
 
 import androidx.compose.ui.FrameRateCategory
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.LayerOutsets
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.ReusableGraphicsLayerScope
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -119,6 +130,78 @@ class WinUIOwnerLayerTest {
         layer.updateDisplayList()
 
         assertEquals(listOf(24f, 24f), frameRateVotes)
+    }
+
+    @Test
+    fun clippedRoundedOutlineRejectsCornerHit() {
+        val layer = WinUIOwnerLayer(
+            drawBlock = { _, _ -> },
+            invalidateParentLayer = {},
+        )
+        layer.resize(IntSize(100, 100))
+
+        val scope = ReusableGraphicsLayerScope()
+        scope.clip = true
+        scope.outline = Outline.Rounded(
+            RoundRect(
+                rect = Rect(0f, 0f, 100f, 100f),
+                cornerRadius = CornerRadius(20f),
+            ),
+        )
+        layer.updateLayerProperties(scope)
+
+        assertTrue(layer.isInLayer(androidx.compose.ui.geometry.Offset(50f, 50f)))
+        assertFalse(layer.isInLayer(androidx.compose.ui.geometry.Offset(0f, 0f)))
+    }
+
+    @Test
+    fun updateLayerPropertiesPreservesGraphicsLayerValues() {
+        val layer = WinUIOwnerLayer(
+            drawBlock = { _, _ -> },
+            invalidateParentLayer = {},
+        )
+        layer.resize(IntSize(100, 100))
+        val outline = Outline.Rounded(
+            RoundRect(
+                rect = Rect(0f, 0f, 100f, 100f),
+                cornerRadius = CornerRadius(12f),
+            ),
+        )
+        val colorFilter = ColorFilter.tint(Color.Green)
+        val renderEffect = BlurEffect(2f, 3f)
+        val scope = ReusableGraphicsLayerScope().apply {
+            alpha = 0.5f
+            shadowElevation = 4f
+            ambientShadowColor = Color.Red
+            spotShadowColor = Color.Blue
+            cameraDistance = 42f
+            clip = true
+            blendMode = BlendMode.Multiply
+            compositingStrategy = CompositingStrategy.Offscreen
+            this.colorFilter = colorFilter
+            this.renderEffect = renderEffect
+            outsets = LayerOutsets(2.dp, 3.dp, 4.dp, 5.dp)
+            this.outline = outline
+        }
+
+        layer.updateLayerProperties(scope)
+
+        val state = layer.stateForTest()
+        assertEquals(0.5f, state.alpha)
+        assertEquals(4f, state.shadowElevation)
+        assertEquals(Color.Red, state.ambientShadowColor)
+        assertEquals(Color.Blue, state.spotShadowColor)
+        assertEquals(42f, state.cameraDistance)
+        assertTrue(state.clip)
+        assertEquals(BlendMode.Multiply, state.blendMode)
+        assertEquals(
+            androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen,
+            state.compositingStrategy,
+        )
+        assertEquals(colorFilter, state.colorFilter)
+        assertEquals(renderEffect, state.renderEffect)
+        assertEquals(LayerOutsets(2.dp, 3.dp, 4.dp, 5.dp), state.outsets)
+        assertEquals(outline, state.outline)
     }
 
     @Test
