@@ -22,19 +22,19 @@ import kotlin.test.assertSame
 
 class WinUIPlatformWindowInsetsTest {
     @Test
-    fun titleBarInsetsAreExposedAsCaptionAndSystemBars() {
+    fun titleBarButtonInsetsRemainSeparateFromCaptionAndSystemBars() {
         val insets = WinUIPlatformWindowInsets(
             captionBarHeight = 32,
-            captionBarLeftPadding = 96,
-            captionBarRightPadding = 140,
+            titleBarLeftInset = PlatformInsets(left = 96),
+            titleBarRightInset = PlatformInsets(right = 140),
         )
 
-        insets.captionBar.assertInsets(left = 96, top = 32, right = 140, bottom = 0)
-        assertEquals(96, insets.captionBarLeftPadding)
-        assertEquals(140, insets.captionBarRightPadding)
-        insets.systemBars.assertInsets(left = 96, top = 32, right = 140, bottom = 0)
-        insets.safeDrawing.assertInsets(left = 96, top = 32, right = 140, bottom = 0)
-        insets.safeContent.assertInsets(left = 96, top = 32, right = 140, bottom = 0)
+        insets.captionBar.assertInsets(top = 32)
+        insets.titleBarLeftInset.assertInsets(left = 96)
+        insets.titleBarRightInset.assertInsets(right = 140)
+        insets.systemBars.assertInsets(top = 32)
+        insets.safeDrawing.assertInsets(top = 32)
+        insets.safeContent.assertInsets(top = 32)
     }
 
     @Test
@@ -57,15 +57,15 @@ class WinUIPlatformWindowInsetsTest {
     fun excludingSafeInsetsRemovesCaptionBarFromSafeAndSystemInsets() {
         val insets = WinUIPlatformWindowInsets(
             captionBarHeight = 32,
-            captionBarLeftPadding = 96,
-            captionBarRightPadding = 140,
+            titleBarLeftInset = PlatformInsets(left = 96),
+            titleBarRightInset = PlatformInsets(right = 140),
         )
 
         val excluded = insets.excluding(safeInsets = true, ime = false)
 
         excluded.captionBar.assertInsets()
-        assertEquals(0, excluded.captionBarLeftPadding)
-        assertEquals(0, excluded.captionBarRightPadding)
+        excluded.titleBarLeftInset.assertInsets()
+        excluded.titleBarRightInset.assertInsets()
         excluded.systemBars.assertInsets()
         excluded.safeDrawing.assertInsets()
         excluded.safeContent.assertInsets()

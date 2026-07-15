@@ -812,6 +812,8 @@ registerWinRTApplicationHostRunTask("runWinUIMppSample") {
             "captionbar-inset-positive",
             "systembars-inset-includes-caption",
             "safedrawing-inset-includes-caption",
+            "window-insets-horizontal:0:0",
+            "titlebar-insets-horizontal:0:276",
             "topappbar-extends-below-titlebar",
             "frame-observed",
             "exit-requested",

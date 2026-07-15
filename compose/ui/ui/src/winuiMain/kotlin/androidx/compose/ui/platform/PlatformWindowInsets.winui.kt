@@ -36,8 +36,8 @@ val LocalPlatformWindowInsets = staticCompositionLocalOf<PlatformWindowInsets> {
 interface PlatformWindowInsets {
     val displayCutouts: List<Rect> get() = emptyList()
     val cutoutPath: Path? get() = null
-    val captionBarLeftPadding: Int get() = 0
-    val captionBarRightPadding: Int get() = 0
+    val titleBarLeftInset: PlatformInsets get() = PlatformInsets.Zero
+    val titleBarRightInset: PlatformInsets get() = PlatformInsets.Zero
     val captionBar: PlatformInsets get() = PlatformInsets.Zero
     val displayCutout: PlatformInsets get() = PlatformInsets.Zero
     val ime: PlatformInsets get() = PlatformInsets.Zero
@@ -71,14 +71,11 @@ internal object EmptyPlatformWindowInsets : PlatformWindowInsets
 
 internal data class WinUIPlatformWindowInsets(
     private val captionBarHeight: Int = 0,
-    override val captionBarLeftPadding: Int = 0,
-    override val captionBarRightPadding: Int = 0,
+    override val titleBarLeftInset: PlatformInsets = PlatformInsets.Zero,
+    override val titleBarRightInset: PlatformInsets = PlatformInsets.Zero,
 ) : PlatformWindowInsets {
     override val captionBar: PlatformInsets = PlatformInsets(
-        left = captionBarLeftPadding,
         top = captionBarHeight,
-        right = captionBarRightPadding,
-        bottom = 0,
     )
     override val systemBars: PlatformInsets = captionBar
 

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.titleBarLeftInset
+import androidx.compose.foundation.layout.titleBarRightInset
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +36,7 @@ import androidx.compose.ui.platform.WinUIComposeView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Application
 import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.Window
@@ -117,10 +120,16 @@ fun main(args: Array<String>) {
                 val captionBarTop = WindowInsets.captionBar.getTop(density)
                 val systemBarsTop = WindowInsets.systemBars.getTop(density)
                 val safeDrawingTop = WindowInsets.safeDrawing.getTop(density)
+                val systemBarsLeft = WindowInsets.systemBars.getLeft(density, LayoutDirection.Ltr)
+                val systemBarsRight = WindowInsets.systemBars.getRight(density, LayoutDirection.Ltr)
+                val titleBarLeft = WindowInsets.titleBarLeftInset.getLeft(density, LayoutDirection.Ltr)
+                val titleBarRight = WindowInsets.titleBarRightInset.getRight(density, LayoutDirection.Ltr)
                 SideEffect {
                     validation.record(
                         "window-insets-top:$captionBarTop:$systemBarsTop:$safeDrawingTop"
                     )
+                    validation.record("window-insets-horizontal:$systemBarsLeft:$systemBarsRight")
+                    validation.record("titlebar-insets-horizontal:$titleBarLeft:$titleBarRight")
                     if (captionBarTop > 0) {
                         validation.record("captionbar-inset-positive")
                     }

@@ -201,7 +201,7 @@ class WinUIComposeView internal constructor(
         owner.sendPointerEventForTest(
             eventType = eventType,
             position = position,
-            uptimeMillis = System.nanoTime() / 1_000_000L,
+            uptimeMillis = winUINanoTime() / 1_000_000L,
             pointerId = 1L,
             down = down,
             type = PointerType.Mouse,
@@ -399,13 +399,13 @@ class WinUIComposeView internal constructor(
 
     internal fun setWindowTitleBarInsets(
         height: Int,
-        leftPadding: Int,
-        rightPadding: Int,
+        leftInset: Int,
+        rightInset: Int,
     ) {
         platformWindowInsets = WinUIPlatformWindowInsets(
             captionBarHeight = height,
-            captionBarLeftPadding = leftPadding,
-            captionBarRightPadding = rightPadding,
+            titleBarLeftInset = PlatformInsets(left = leftInset),
+            titleBarRightInset = PlatformInsets(right = rightInset),
         )
     }
 
@@ -415,7 +415,7 @@ class WinUIComposeView internal constructor(
     }
 
     @InternalComposeUiApi
-    fun performFrameForTest(nanoTime: Long = System.nanoTime()) {
+    fun performFrameForTest(nanoTime: Long = winUINanoTime()) {
         applyOwnerChanges {
             frameRecomposer?.performFrame(nanoTime)
             owner.sendAndPerformSnapshotChanges()

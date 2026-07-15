@@ -48,6 +48,8 @@ interface PlatformWindowInsets {
      * Returns null if there are no cutouts or if the platform does not provide cutout geometry.
      */
     val cutoutPath: Path? get() = null
+    val titleBarLeftInset: PlatformInsets get() = PlatformInsets.Zero
+    val titleBarRightInset: PlatformInsets get() = PlatformInsets.Zero
     val captionBar: PlatformInsets get() = PlatformInsets.Zero
     /**
      * Represents the safe inset areas that content should observe to avoid all display cutouts.
