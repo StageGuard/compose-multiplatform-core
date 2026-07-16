@@ -46,13 +46,13 @@ class WinUIAccessibilityBridgeTest {
     }
 
     @Test
-    fun productionProviderSnapshotEnablesAutomaticFlushes() {
+    fun productionProviderAttachmentEnablesAutomaticFlushesWithoutSnapshot() {
         val scheduled = mutableListOf<() -> Unit>()
         val updates = mutableListOf<WinUIAccessibilityUpdate>()
         val bridge = createBridge(scheduled = scheduled, updates = updates)
         val owner = createSemanticsOwner()
 
-        bridge.snapshot()
+        bridge.onAccessibilityProviderAttached()
         bridge.onSemanticsChange(owner)
 
         assertTrue(bridge.stateForTest().isAccessibilityProviderAttached)
@@ -69,10 +69,38 @@ class WinUIAccessibilityBridgeTest {
         val scheduled = mutableListOf<() -> Unit>()
         val bridge = createBridge(scheduled = scheduled)
 
-        bridge.snapshot()
+        bridge.onAccessibilityProviderAttached()
 
         assertTrue(bridge.stateForTest().isAccessibilityProviderAttached)
         assertFalse(bridge.stateForTest().hasPendingFlush)
+        assertEquals(0, scheduled.size)
+    }
+
+    @Test
+    fun pendingChangeSchedulesWhenProductionProviderAttaches() {
+        val scheduled = mutableListOf<() -> Unit>()
+        val updates = mutableListOf<WinUIAccessibilityUpdate>()
+        val bridge = createBridge(scheduled = scheduled, updates = updates)
+        val owner = createSemanticsOwner()
+
+        bridge.onSemanticsChange(owner)
+        assertEquals(0, scheduled.size)
+
+        bridge.onAccessibilityProviderAttached()
+        assertEquals(1, scheduled.size)
+
+        scheduled.single().invoke()
+        assertSame(owner, updates.single().semanticsOwner)
+    }
+
+    @Test
+    fun snapshotDoesNotAttachProductionProvider() {
+        val scheduled = mutableListOf<() -> Unit>()
+        val bridge = createBridge(scheduled = scheduled)
+
+        bridge.snapshot()
+
+        assertFalse(bridge.stateForTest().isAccessibilityProviderAttached)
         assertEquals(0, scheduled.size)
     }
 
@@ -89,13 +117,43 @@ class WinUIAccessibilityBridgeTest {
             )
         val owner = createSemanticsOwner()
 
-        bridge.snapshot()
+        bridge.onAccessibilityProviderAttached()
         bridge.onSemanticsChange(owner)
         bridge.dispose()
 
         assertEquals(1, canceled.size)
         scheduled.single().invoke()
         assertEquals(0, updates.size)
+    }
+
+    @Test
+    fun detachingProductionProviderCancelsFlushButKeepsPendingChange() {
+        val scheduled = mutableListOf<() -> Unit>()
+        val canceled = mutableListOf<Any?>()
+        val updates = mutableListOf<WinUIAccessibilityUpdate>()
+        val bridge =
+            createBridge(
+                scheduled = scheduled,
+                canceled = canceled,
+                updates = updates,
+            )
+        val owner = createSemanticsOwner()
+
+        bridge.onAccessibilityProviderAttached()
+        bridge.onSemanticsChange(owner)
+        bridge.onAccessibilityProviderDetached()
+
+        assertFalse(bridge.stateForTest().isAccessibilityProviderAttached)
+        assertFalse(bridge.stateForTest().hasPendingFlush)
+        assertTrue(bridge.stateForTest().pendingSemanticsChange)
+        assertEquals(1, canceled.size)
+
+        scheduled.single().invoke()
+        assertEquals(0, updates.size)
+
+        bridge.onAccessibilityProviderAttached()
+        scheduled.last().invoke()
+        assertSame(owner, updates.single().semanticsOwner)
     }
 
     @Test

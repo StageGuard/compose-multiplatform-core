@@ -32,6 +32,6 @@ actual fun TransferableContent.hasMediaType(mediaType: MediaType): Boolean {
 
 @OptIn(InternalComposeUiApi::class)
 internal actual fun ClipEntry.readPlainText(): String? =
-    (clipMetadata as? PlatformClipMetadata)?.let { metadata ->
+    runCatching { clipMetadata as? PlatformClipMetadata }.getOrNull()?.let { metadata ->
         runCatching { metadata.readPlainText() }.getOrNull()
     }

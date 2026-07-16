@@ -17,6 +17,7 @@
 package androidx.compose.ui.window
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionContext
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.SideEffect
@@ -25,6 +26,7 @@ import androidx.compose.ui.LayerType
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCompositionContext
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -232,10 +234,15 @@ private fun WinUICanvasPopupLayout(
     ) { measurables, constraints ->
         val windowSize = containerSize.takeIf { it != IntSize.Zero }
             ?: constraints.finiteMaxSizeOr(IntSize.Zero)
+        val availableWidth = constraints.finiteMaxWidthOr(windowSize.width)
         val looseConstraints = constraints.copy(
             minWidth = 0,
             minHeight = 0,
-            maxWidth = constraints.finiteMaxWidthOr(windowSize.width),
+            maxWidth = winUIPopupMaxWidth(
+                windowWidth = windowSize.width,
+                availableWidth = availableWidth,
+                usePlatformDefaultWidth = properties.usePlatformDefaultWidth,
+            ),
             maxHeight = constraints.finiteMaxHeightOr(windowSize.height),
         )
         val placeables = measurables.map { measurable ->
@@ -296,6 +303,7 @@ private fun WinUIWindowPopupLayout(
     val layoutDirection = LocalLayoutDirection.current
     val currentContent by rememberUpdatedState(content)
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    val parentCompositionContext = rememberCompositionContext()
     val popupHost = rememberNativePopupHost(parentWindow, parentRoot)
 
     SideEffect {
@@ -310,7 +318,7 @@ private fun WinUIWindowPopupLayout(
         )
     }
     DisposableEffect(popupHost) {
-        popupHost.setContent {
+        popupHost.setContent(parentCompositionContext) {
             popupHost.Content()
         }
         popupHost.open()
@@ -358,6 +366,7 @@ private class WinUIFlyoutPopupHost(
         dismissOnClickOutside = true,
         onDismissRequest = { onDismissRequest?.invoke() },
     )
+    private var closingToken: EventRegistrationToken? = null
     private var closedToken: EventRegistrationToken? = null
     private var keyDownToken: EventRegistrationToken? = null
     private var parentRootLoadedHandler: RoutedEventHandler? = null
@@ -373,22 +382,25 @@ private class WinUIFlyoutPopupHost(
         flyout.showMode = FlyoutShowMode.Transient
         flyout.systemBackdrop = transparentBackdrop
         flyout.flyoutPresenterStyle = createTransparentFlyoutPresenterStyle()
+        closingToken = flyout.closing.add { _, args ->
+            args.cancel = dismissalState.onNativeClosing(shouldBeOpen)
+        }
         closedToken = flyout.closed.add { _, _ ->
             isOpen = false
-            if (shouldBeOpen) {
-                dismissalState.onOutside()
-            }
         }
-        keyDownToken = composeView.root.keyDown.add(KeyEventHandler { _, args ->
+        keyDownToken = composeView.root.previewKeyDown.add(KeyEventHandler { _, args ->
             if (!args.handled && properties.focusable && isOpen && args.key.isPopupBackKey()) {
-                if (dismissalState.onBackPress()) args.handled = true
+                args.handled = dismissalState.onFlyoutBackKey()
             }
         })
         registerParentRootLoadedHandler()
     }
 
-    fun setContent(content: @Composable () -> Unit) {
-        composeView.setContent(content)
+    fun setContent(
+        parentCompositionContext: CompositionContext,
+        content: @Composable () -> Unit,
+    ) {
+        composeView.setContent(parentCompositionContext, content)
     }
 
     @Composable
@@ -403,10 +415,15 @@ private class WinUIFlyoutPopupHost(
         ) { measurables, constraints ->
             val windowSize = parentWindowSize.takeIf { it != IntSize.Zero }
                 ?: constraints.finiteMaxSizeOr(IntSize.Zero)
+            val availableWidth = constraints.finiteMaxWidthOr(windowSize.width)
             val looseConstraints = constraints.copy(
                 minWidth = 0,
                 minHeight = 0,
-                maxWidth = constraints.finiteMaxWidthOr(windowSize.width),
+                maxWidth = winUIPopupMaxWidth(
+                    windowWidth = windowSize.width,
+                    availableWidth = availableWidth,
+                    usePlatformDefaultWidth = properties.usePlatformDefaultWidth,
+                ),
                 maxHeight = constraints.finiteMaxHeightOr(windowSize.height),
             )
             val placeables = measurables.map { measurable ->
@@ -432,6 +449,10 @@ private class WinUIFlyoutPopupHost(
     fun close() {
         shouldBeOpen = false
         isOpen = false
+        closingToken?.let { token ->
+            runCatching { flyout.closing.remove(token) }
+        }
+        closingToken = null
         closedToken?.let { token ->
             runCatching { flyout.closed.remove(token) }
         }
@@ -442,7 +463,7 @@ private class WinUIFlyoutPopupHost(
         parentRootLoadedToken = null
         parentRootLoadedHandler = null
         keyDownToken?.let { token ->
-            runCatching { composeView.root.keyDown.remove(token) }
+            runCatching { composeView.root.previewKeyDown.remove(token) }
         }
         keyDownToken = null
         runCatching { flyout.hide() }
@@ -559,7 +580,6 @@ internal class WinUIPopupDismissState(
     private var dismissOnBackPress = dismissOnBackPress
     private var dismissOnClickOutside = dismissOnClickOutside
     private var onDismissRequest = onDismissRequest
-    private var dismissed = false
 
     fun update(
         dismissOnBackPress: Boolean = this.dismissOnBackPress,
@@ -591,14 +611,34 @@ internal class WinUIPopupDismissState(
         return dispatchDismiss()
     }
 
+    fun onFlyoutBackKey(): Boolean {
+        onBackPress()
+        return true
+    }
+
+    fun onNativeClosing(shouldBeOpen: Boolean): Boolean {
+        if (!shouldBeOpen) return false
+        onOutside()
+        return true
+    }
+
     private fun dispatchDismiss(): Boolean {
-        if (dismissed) return false
-        dismissed = true
         val callback = onDismissRequest ?: return false
         callback()
         return true
     }
 }
+
+internal fun winUIPopupMaxWidth(
+    windowWidth: Int,
+    availableWidth: Int,
+    usePlatformDefaultWidth: Boolean,
+): Int =
+    winUIDialogMaxWidth(
+        windowWidth = windowWidth,
+        availableWidth = availableWidth,
+        usePlatformDefaultWidth = usePlatformDefaultWidth,
+    )
 
 private class WinUICanvasPopupDismissHost(
     private val root: UIElement?,

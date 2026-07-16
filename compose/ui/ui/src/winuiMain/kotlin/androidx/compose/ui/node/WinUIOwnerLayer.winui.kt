@@ -50,6 +50,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import kotlin.math.roundToInt
 
+private typealias ApplyGraphicsLayerOutsets =
+    (GraphicsLayer, Int, Int, Int, Int) -> Unit
+
+private val defaultApplyGraphicsLayerOutsets: ApplyGraphicsLayerOutsets =
+    { layer, left, top, right, bottom -> layer.setOutsets(left, top, right, bottom) }
+
 /** A WinUI-owned Compose layer backed by the regular Skia GraphicsLayer implementation. */
 internal class WinUIOwnerLayer(
     private var graphicsLayer: GraphicsLayer,
@@ -57,17 +63,20 @@ internal class WinUIOwnerLayer(
     private var drawBlock: (canvas: Canvas, parentLayer: GraphicsLayer?) -> Unit,
     private var invalidateParentLayer: () -> Unit,
     private var voteFrameRate: (Float) -> Unit = {},
+    private val applyOutsets: ApplyGraphicsLayerOutsets = defaultApplyGraphicsLayerOutsets,
 ) : OwnedLayer {
     internal constructor(
         drawBlock: (canvas: Canvas, parentLayer: GraphicsLayer?) -> Unit,
         invalidateParentLayer: () -> Unit,
         voteFrameRate: (Float) -> Unit = {},
+        applyOutsets: ApplyGraphicsLayerOutsets = defaultApplyGraphicsLayerOutsets,
     ) : this(
         graphicsLayer = WinUIGraphicsContext.createGraphicsLayer(),
         graphicsContext = WinUIGraphicsContext,
         drawBlock = drawBlock,
         invalidateParentLayer = invalidateParentLayer,
         voteFrameRate = voteFrameRate,
+        applyOutsets = applyOutsets,
     )
 
     private val matrix = Matrix()
@@ -130,14 +139,7 @@ internal class WinUIOwnerLayer(
         }
         if (maybeChangedFields and Fields.TransformOrigin != 0) {
             transformOrigin = scope.transformOrigin
-            graphicsLayer.pivotOffset = if (transformOrigin == TransformOrigin.Center) {
-                Offset.Unspecified
-            } else {
-                Offset(
-                    transformOrigin.pivotFractionX * size.width,
-                    transformOrigin.pivotFractionY * size.height,
-                )
-            }
+            updatePivotOffset()
         }
         if (maybeChangedFields and Fields.Clip != 0) {
             graphicsLayer.clip = scope.clip
@@ -162,11 +164,12 @@ internal class WinUIOwnerLayer(
         if (maybeChangedFields and Fields.Outsets != 0) {
             layerOutsets = scope.outsets
             with(density) {
-                graphicsLayer.setOutsets(
-                    left = layerOutsets.left.toPx().roundToInt(),
-                    top = layerOutsets.top.toPx().roundToInt(),
-                    right = layerOutsets.right.toPx().roundToInt(),
-                    bottom = layerOutsets.bottom.toPx().roundToInt(),
+                applyOutsets(
+                    graphicsLayer,
+                    layerOutsets.left.toPx().roundToInt(),
+                    layerOutsets.top.toPx().roundToInt(),
+                    layerOutsets.right.toPx().roundToInt(),
+                    layerOutsets.bottom.toPx().roundToInt(),
                 )
             }
         }
@@ -203,6 +206,7 @@ internal class WinUIOwnerLayer(
     override fun resize(size: IntSize) {
         if (size == this.size) return
         this.size = size
+        updatePivotOffset()
         voteFrameRate(FrameRateCategory.High.value)
         updateMatrix()
         invalidate()
@@ -344,6 +348,17 @@ internal class WinUIOwnerLayer(
         isInverseMatrixDirty = true
     }
 
+    private fun updatePivotOffset() {
+        graphicsLayer.pivotOffset = if (transformOrigin == TransformOrigin.Center) {
+            Offset.Unspecified
+        } else {
+            Offset(
+                transformOrigin.pivotFractionX * size.width,
+                transformOrigin.pivotFractionY * size.height,
+            )
+        }
+    }
+
     private fun resetLayerState() {
         position = IntOffset.Zero
         size = IntSize.Zero
@@ -383,6 +398,7 @@ internal class WinUIOwnerLayer(
         graphicsLayer.colorFilter = null
         graphicsLayer.blendMode = BlendMode.SrcOver
         graphicsLayer.compositingStrategy = LayerCompositingStrategy.Auto
+        applyOutsets(graphicsLayer, 0, 0, 0, 0)
         graphicsLayer.setRectOutline()
     }
 

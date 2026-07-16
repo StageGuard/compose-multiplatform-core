@@ -86,6 +86,20 @@ internal class WinUIAccessibilityBridge(
         accessibilityEventBatchIntervalMillis = intervalMillis.coerceAtLeast(0L)
     }
 
+    fun onAccessibilityProviderAttached() {
+        if (isDisposed || isAccessibilityProviderAttached) return
+        isAccessibilityProviderAttached = true
+        scheduleFlushIfNeeded()
+    }
+
+    fun onAccessibilityProviderDetached() {
+        if (isDisposed || !isAccessibilityProviderAttached) return
+        isAccessibilityProviderAttached = false
+        if (!isAccessibilityForcedForTesting) {
+            cancelPendingFlush()
+        }
+    }
+
     fun onSemanticsChange(semanticsOwner: SemanticsOwner) {
         if (isDisposed) return
         currentSemanticsNodesInvalidated = true
@@ -123,10 +137,8 @@ internal class WinUIAccessibilityBridge(
         isAccessibilityProviderAttached = false
     }
 
-    override fun snapshot(): WinUIAccessibilitySnapshot {
-        attachAccessibilityProvider()
-        return currentSemanticsOwner?.toWinUIAccessibilitySnapshot() ?: EmptySnapshot
-    }
+    override fun snapshot(): WinUIAccessibilitySnapshot =
+        currentSemanticsOwner?.toWinUIAccessibilitySnapshot() ?: EmptySnapshot
 
     override fun performAction(request: WinUIAccessibilityActionRequest): Boolean {
         val targetNode = currentSemanticsOwner
@@ -208,12 +220,6 @@ internal class WinUIAccessibilityBridge(
     private fun cancelPendingFlush() {
         pendingPost?.let(removePost)
         pendingPost = null
-    }
-
-    private fun attachAccessibilityProvider() {
-        if (isDisposed || isAccessibilityProviderAttached) return
-        isAccessibilityProviderAttached = true
-        scheduleFlushIfNeeded()
     }
 
     private fun isAccessibilityEnabled(): Boolean =

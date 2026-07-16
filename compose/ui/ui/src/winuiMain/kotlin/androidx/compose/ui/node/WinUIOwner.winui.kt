@@ -176,6 +176,15 @@ internal class WinUIOwner(
         SemanticsOwner(root, EmptySemanticsModifier(), layoutNodes)
     internal val accessibilityProvider: WinUIAccessibilityProvider
         get() = accessibilityBridge
+
+    internal fun onAccessibilityProviderAttached() {
+        accessibilityBridge.onAccessibilityProviderAttached()
+    }
+
+    internal fun onAccessibilityProviderDetached() {
+        accessibilityBridge.onAccessibilityProviderDetached()
+    }
+
     override val graphicsContext: GraphicsContext = WinUIGraphicsContext
     @Suppress("DEPRECATION")
     override val autofillTree: AutofillTree = AutofillTree()

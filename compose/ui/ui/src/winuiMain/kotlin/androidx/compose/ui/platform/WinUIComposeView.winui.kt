@@ -18,6 +18,7 @@ package androidx.compose.ui.platform
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Composition
+import androidx.compose.runtime.CompositionContext
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LocalHostDefaultProvider
 import androidx.compose.runtime.getValue
@@ -280,6 +281,7 @@ class WinUIComposeView internal constructor(
         get() = rootContentControl.isLoaded && !owner.isMeasureLayoutInProgress
     init {
         renderHost.setAccessibilityProvider(owner.accessibilityProvider)
+        owner.onAccessibilityProviderAttached()
         WinUIPlatformTextInputService.registerRootToScreenMapper(
             owner = this,
             mapper = ::rootPixelOffsetToScreen,
@@ -291,6 +293,7 @@ class WinUIComposeView internal constructor(
 
     private var frameRecomposer: FrameRecomposer? = null
     private var composition: Composition? = null
+    private var parentCompositionContext: CompositionContext? = null
     private var saveableState: Map<String, List<Any?>>? = null
     private var saveableStateRegistry: SaveableStateRegistry? = null
     private var content: (@Composable () -> Unit)? = null
@@ -324,11 +327,29 @@ class WinUIComposeView internal constructor(
         )
 
     fun setContent(content: @Composable () -> Unit) {
+        setContentInternal(parentCompositionContext = null, content = content)
+    }
+
+    internal fun setContent(
+        parentCompositionContext: CompositionContext,
+        content: @Composable () -> Unit,
+    ) {
+        setContentInternal(parentCompositionContext, content)
+    }
+
+    private fun setContentInternal(
+        parentCompositionContext: CompositionContext?,
+        content: @Composable () -> Unit,
+    ) {
         check(!isDisposed) {
             "Cannot set content on a disposed WinUIComposeView."
         }
+        if (composition != null && this.parentCompositionContext !== parentCompositionContext) {
+            disposeComposition()
+        }
+        this.parentCompositionContext = parentCompositionContext
         this.content = content
-        val currentComposition = composition ?: createComposition().also {
+        val currentComposition = composition ?: createComposition(parentCompositionContext).also {
             composition = it
         }
         currentComposition.setContent {
@@ -373,6 +394,7 @@ class WinUIComposeView internal constructor(
         composition = null
         frameRecomposer?.close()
         frameRecomposer = null
+        parentCompositionContext = null
         content = null
         clearLoadedRenderSchedulerRequest()
         renderHost.detachSurface()
@@ -385,18 +407,21 @@ class WinUIComposeView internal constructor(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
-        disposeComposition()
-        keyInputAdapter.dispose()
-        pointerInputAdapter.dispose()
-        dragAndDropAdapter.dispose()
-        pointerCursorAdapter.dispose()
-        retainedValuesStore.dispose()
-        architectureComponentsOwner.setLifecycleState(Lifecycle.State.DESTROYED)
-        clearXamlRootDensityObserver()
-        WinUIPlatformTextInputService.unregisterRootToScreenMapper(this)
-        owner.dispose()
-        clearLoadedRenderSchedulerRequest()
-        renderHost.close()
+        runWinUIDragAndDropCleanup(
+            { disposeComposition() },
+            { keyInputAdapter.dispose() },
+            { pointerInputAdapter.dispose() },
+            { dragAndDropAdapter.dispose() },
+            { pointerCursorAdapter.dispose() },
+            { retainedValuesStore.dispose() },
+            { architectureComponentsOwner.setLifecycleState(Lifecycle.State.DESTROYED) },
+            { clearXamlRootDensityObserver() },
+            { WinUIPlatformTextInputService.unregisterRootToScreenMapper(this) },
+            { owner.onAccessibilityProviderDetached() },
+            { owner.dispose() },
+            { clearLoadedRenderSchedulerRequest() },
+            { renderHost.close() },
+        )
     }
 
     internal fun setWindowFocused(isWindowFocused: Boolean) {
@@ -443,18 +468,21 @@ class WinUIComposeView internal constructor(
         }
     }
 
-    private fun createComposition(): Composition {
+    private fun createComposition(parentCompositionContext: CompositionContext?): Composition {
         val dispatcherQueue = requireRootDispatcherQueue()
         WinUIScheduler.register(dispatcherQueue)
         GlobalSnapshotManager.ensureStarted(dispatcherQueue)
-        val dispatcher = WinUIDispatcher(dispatcherQueue)
-        val currentFrameRecomposer = FrameRecomposer(dispatcher, ::requestRender)
-        frameRecomposer = currentFrameRecomposer
-        ownerCoroutineContext = currentFrameRecomposer.compositionContext.effectCoroutineContext
+        val compositionContext = parentCompositionContext ?: run {
+            val dispatcher = WinUIDispatcher(dispatcherQueue)
+            FrameRecomposer(dispatcher, ::requestRender).also {
+                frameRecomposer = it
+            }.compositionContext
+        }
+        ownerCoroutineContext = compositionContext.effectCoroutineContext
         val applier = UiApplier(rootNode, ::scheduleRootContentSync)
         return Composition(
             applier = applier,
-            parent = currentFrameRecomposer.compositionContext,
+            parent = compositionContext,
         )
     }
 

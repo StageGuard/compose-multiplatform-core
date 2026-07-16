@@ -25,6 +25,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.autoSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -133,6 +134,7 @@ import androidx.compose.ui.viewinterop.WinUIInteropProperties
 import androidx.compose.ui.viewinterop.WinUIView
 import androidx.compose.ui.window.Application
 import androidx.compose.ui.window.ApplicationScope
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowBackdrop
@@ -169,6 +171,8 @@ import org.jetbrains.skiko.winui.WinUIAccessibilityAction
 import org.jetbrains.skiko.winui.WinUIAccessibilityActionRequest
 import org.jetbrains.skiko.winui.WinUIAccessibilityLiveSetting
 import org.jetbrains.skiko.winui.WinUIAccessibilityNode
+
+private val LocalWindowPopupSmokeMarker = staticCompositionLocalOf { "missing" }
 
 @Composable
 fun WinUIViewSampleContent(
@@ -3240,8 +3244,11 @@ private object ComposeWinUiSmokeApp {
 private fun RunWindowPopupSmoke(applicationScope: ApplicationScope) {
     val autoExit = java.lang.Boolean.getBoolean("compose.winui.sample.autoExit")
     var popupMeasured by remember { mutableStateOf(false) }
+    var popupCompositionLocalObserved by remember { mutableStateOf(false) }
     var popupClosed by remember { mutableStateOf(false) }
-    var popupDisposed by remember { mutableStateOf(false) }
+    var dialogMeasured by remember { mutableStateOf(false) }
+    var dialogCompositionLocalObserved by remember { mutableStateOf(false) }
+    var dialogClosed by remember { mutableStateOf(false) }
     with(applicationScope) {
         Window(
             title = "compose-winui window popup smoke",
@@ -3260,33 +3267,61 @@ private fun RunWindowPopupSmoke(applicationScope: ApplicationScope) {
             ) { _, _ ->
                 layout(360, 240) {}
             }
-            if (!popupClosed) {
-                Popup {
-                    BasicText(
-                        text = "Popup",
-                        modifier = Modifier.onPlaced {
-                            popupMeasured = true
-                        },
-                    )
+            CompositionLocalProvider(LocalWindowPopupSmokeMarker provides "parent") {
+                if (!popupClosed) {
+                    Popup {
+                        val marker = LocalWindowPopupSmokeMarker.current
+                        check(marker == "parent") {
+                            "WinUI window popup did not inherit its parent composition context."
+                        }
+                        LaunchedEffect(marker) {
+                            popupCompositionLocalObserved = true
+                        }
+                        BasicText(
+                            text = "Popup",
+                            modifier = Modifier.onPlaced {
+                                popupMeasured = true
+                            },
+                        )
+                    }
+                } else if (!dialogClosed) {
+                    Dialog(onDismissRequest = {}) {
+                        val marker = LocalWindowPopupSmokeMarker.current
+                        check(marker == "parent") {
+                            "WinUI dialog did not inherit its parent composition context."
+                        }
+                        LaunchedEffect(marker) {
+                            dialogCompositionLocalObserved = true
+                        }
+                        BasicText(
+                            text = "Dialog",
+                            modifier = Modifier.onPlaced {
+                                dialogMeasured = true
+                            },
+                        )
+                    }
                 }
             }
         }
     }
-    LaunchedEffect(popupMeasured) {
-        if (popupMeasured && autoExit) {
-            withFrameNanos { }
-            popupClosed = true
-            withFrameNanos { }
-            popupDisposed = true
+    LaunchedEffect(popupMeasured, popupCompositionLocalObserved) {
+        if (popupMeasured && popupCompositionLocalObserved) {
+            if (autoExit) {
+                withFrameNanos { }
+                popupClosed = true
+            } else {
+                println("compose-winui-sample: window popup")
+            }
         }
     }
-    LaunchedEffect(popupMeasured, popupDisposed) {
-        if (popupMeasured && (!autoExit || popupDisposed)) {
+    LaunchedEffect(dialogMeasured, dialogCompositionLocalObserved) {
+        if (dialogMeasured && dialogCompositionLocalObserved && autoExit) {
+            withFrameNanos { }
+            dialogClosed = true
+            withFrameNanos { }
             delay(100)
             println("compose-winui-sample: window popup")
-            if (autoExit) {
-                applicationScope.exitApplication()
-            }
+            applicationScope.exitApplication()
         }
     }
 }

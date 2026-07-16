@@ -17,16 +17,19 @@
 package androidx.compose.ui.window
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionContext
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCompositionContext
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalWinUIRoot
 import androidx.compose.ui.platform.LocalWinUIWindow
+import androidx.compose.ui.platform.winUIPositionToComposeOffset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -34,6 +37,7 @@ import androidx.compose.ui.semantics.dialog
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.round
 import microsoft.ui.xaml.FrameworkElement
@@ -45,6 +49,7 @@ import microsoft.ui.xaml.controls.LightDismissOverlayMode
 import microsoft.ui.xaml.controls.primitives.FlyoutPlacementMode
 import microsoft.ui.xaml.controls.primitives.FlyoutShowOptions
 import microsoft.ui.xaml.input.KeyEventHandler
+import microsoft.ui.xaml.input.PointerEventHandler
 import windows.system.VirtualKey
 import androidx.compose.ui.platform.WinUIComposeView
 import kotlin.math.roundToInt
@@ -85,6 +90,7 @@ actual fun Dialog(
     val containerSize = LocalWindowInfo.current.containerSize
     val currentContent by rememberUpdatedState(content)
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    val parentCompositionContext = rememberCompositionContext()
     val dialogHost = remember(parentWindow, parentRoot) {
         WinUIDialogHost(parentWindow, parentRoot)
     }
@@ -98,7 +104,7 @@ actual fun Dialog(
         )
     }
     DisposableEffect(dialogHost) {
-        dialogHost.setContent { dialogHost.Content() }
+        dialogHost.setContent(parentCompositionContext) { dialogHost.Content() }
         dialogHost.open()
         onDispose { dialogHost.close() }
     }
@@ -127,13 +133,16 @@ private class WinUIDialogHost(
     private var shouldBeOpen = false
     private var isOpen = false
     private var isClosed = false
+    private var dialogContentBoundsInRoot = IntRect.Zero
     private val dismissalState = WinUIPopupDismissState(
         dismissOnBackPress = true,
         dismissOnClickOutside = true,
         onDismissRequest = { onDismissRequest?.invoke() },
     )
+    private var closingToken: EventRegistrationToken? = null
     private var closedToken: EventRegistrationToken? = null
     private var keyDownToken: EventRegistrationToken? = null
+    private var pointerPressedToken: EventRegistrationToken? = null
     private var parentRootLoadedToken: EventRegistrationToken? = null
 
     init {
@@ -143,13 +152,32 @@ private class WinUIDialogHost(
         flyout.shouldConstrainToRootBounds = false
         flyout.placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
         flyout.showMode = microsoft.ui.xaml.controls.primitives.FlyoutShowMode.Transient
+        closingToken = flyout.closing.add { _, args ->
+            args.cancel = dismissalState.onNativeClosing(shouldBeOpen)
+        }
         closedToken = flyout.closed.add { _, _ ->
             isOpen = false
-            if (shouldBeOpen) dismissalState.onOutside()
         }
-        keyDownToken = composeView.root.keyDown.add(KeyEventHandler { _, args ->
+        keyDownToken = composeView.root.previewKeyDown.add(KeyEventHandler { _, args ->
             if (!args.handled && isOpen && args.key.isDialogBackKey()) {
-                if (dismissalState.onBackPress()) args.handled = true
+                args.handled = dismissalState.onFlyoutBackKey()
+            }
+        })
+        pointerPressedToken = composeView.root.pointerPressed.add(PointerEventHandler { _, args ->
+            if (!args.handled && isOpen) {
+                val point = args.getCurrentPoint(composeView.root).position
+                if (
+                    dismissalState.onOutsidePointer(
+                        winUIPositionToComposeOffset(
+                            x = point.x,
+                            y = point.y,
+                            density = composeView.owner.density,
+                        ),
+                        dialogContentBoundsInRoot,
+                    )
+                ) {
+                    args.handled = true
+                }
             }
         })
         parentRoot?.let { root ->
@@ -157,8 +185,11 @@ private class WinUIDialogHost(
         }
     }
 
-    fun setContent(content: @Composable () -> Unit) {
-        if (!isClosed) composeView.setContent(content)
+    fun setContent(
+        parentCompositionContext: CompositionContext,
+        content: @Composable () -> Unit,
+    ) {
+        if (!isClosed) composeView.setContent(parentCompositionContext, content)
     }
 
     @Composable
@@ -206,6 +237,7 @@ private class WinUIDialogHost(
                 x = ((hostSize.width - contentSize.width) / 2).coerceAtLeast(0),
                 y = ((hostSize.height - contentSize.height) / 2).coerceAtLeast(0),
             )
+            dialogContentBoundsInRoot = IntRect(position, contentSize)
             layout(hostSize.width, hostSize.height) {
                 placeables.forEach { placeable -> placeable.placeRelative(position) }
             }
@@ -251,10 +283,18 @@ private class WinUIDialogHost(
         isClosed = true
         shouldBeOpen = false
         isOpen = false
+        closingToken?.let { token -> runCatching { flyout.closing.remove(token) } }
+        closingToken = null
         closedToken?.let { token -> runCatching { flyout.closed.remove(token) } }
         closedToken = null
-        keyDownToken?.let { token -> runCatching { composeView.root.keyDown.remove(token) } }
+        keyDownToken?.let { token ->
+            runCatching { composeView.root.previewKeyDown.remove(token) }
+        }
         keyDownToken = null
+        pointerPressedToken?.let { token ->
+            runCatching { composeView.root.pointerPressed.remove(token) }
+        }
+        pointerPressedToken = null
         parentRootLoadedToken?.let { token ->
             runCatching { parentRoot?.loaded?.remove(token) }
         }

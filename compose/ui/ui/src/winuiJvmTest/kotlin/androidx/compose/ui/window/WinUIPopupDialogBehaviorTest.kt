@@ -18,6 +18,11 @@ package androidx.compose.ui.window
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntRect
+import java.nio.file.Path
+import java.nio.file.Paths
+import kotlin.io.path.exists
+import kotlin.io.path.name
+import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -25,7 +30,7 @@ import kotlin.test.assertTrue
 
 class WinUIPopupDialogBehaviorTest {
     @Test
-    fun backPressUsesLatestCallbackAndIsDeliveredOnce() {
+    fun backPressUsesLatestCallbackForEachEvent() {
         var calls = emptyList<String>()
         val state = WinUIPopupDismissState(
             dismissOnBackPress = true,
@@ -35,8 +40,63 @@ class WinUIPopupDialogBehaviorTest {
         state.update(onDismissRequest = { calls += "latest" })
 
         assertTrue(state.onBackPress())
+        assertTrue(state.onBackPress())
+        assertEquals(listOf("latest", "latest"), calls)
+    }
+
+    @Test
+    fun missingCallbackDoesNotConsumeFutureDismissRequest() {
+        var calls = 0
+        val state = WinUIPopupDismissState(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            onDismissRequest = null,
+        )
+
         assertFalse(state.onBackPress())
-        assertEquals(listOf("latest"), calls)
+
+        state.update(onDismissRequest = { calls++ })
+
+        assertTrue(state.onBackPress())
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun flyoutBackKeyIsHandledEvenWhenDismissIsDisabled() {
+        var calls = 0
+        val state = WinUIPopupDismissState(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = true,
+            onDismissRequest = { calls++ },
+        )
+
+        assertTrue(state.onFlyoutBackKey())
+        assertEquals(0, calls)
+
+        state.update(dismissOnBackPress = true)
+
+        assertTrue(state.onFlyoutBackKey())
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun nativeFlyoutCloseIsCancelledWhilePopupRemainsDeclared() {
+        var calls = 0
+        val state = WinUIPopupDismissState(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            onDismissRequest = { calls++ },
+        )
+
+        assertTrue(state.onNativeClosing(shouldBeOpen = true))
+        assertEquals(0, calls)
+
+        state.update(dismissOnClickOutside = true)
+
+        assertTrue(state.onNativeClosing(shouldBeOpen = true))
+        assertEquals(1, calls)
+        assertFalse(state.onNativeClosing(shouldBeOpen = false))
+        assertEquals(1, calls)
     }
 
     @Test
@@ -68,6 +128,44 @@ class WinUIPopupDialogBehaviorTest {
     }
 
     @Test
+    fun dialogOutsidePointerUsesCenteredContentBounds() {
+        var calls = 0
+        val state = WinUIPopupDismissState(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            onDismissRequest = { calls++ },
+        )
+        val dialogContentBounds = IntRect(300, 200, 700, 600)
+
+        assertFalse(state.onOutsidePointer(Offset(500f, 400f), dialogContentBounds))
+        assertTrue(state.onOutsidePointer(Offset(100f, 100f), dialogContentBounds))
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun dialogHostRoutesPointerPressesAgainstContentBounds() {
+        val source = winUISource("Dialog.winui.kt")
+
+        assertTrue(
+            source.contains("dialogContentBoundsInRoot") &&
+                source.contains("pointerPressed.add") &&
+                source.contains("winUIPositionToComposeOffset") &&
+                source.contains("onOutsidePointer"),
+            "WinUI Dialog must route scaled pointer presses against dialog content bounds.",
+        )
+    }
+
+    @Test
+    fun bothPopupHostsApplyPlatformDefaultWidthPolicy() {
+        val source = winUISource("Popup.winui.kt")
+
+        assertTrue(
+            source.split("winUIPopupMaxWidth(").size - 1 >= 3,
+            "WinUI canvas and window popups must both apply the platform default width policy.",
+        )
+    }
+
+    @Test
     fun dialogDefaultWidthIsConstrained() {
         val unconstrained = winUIDialogMaxWidth(
             windowWidth = 1200,
@@ -83,5 +181,22 @@ class WinUIPopupDialogBehaviorTest {
         assertEquals(1200, unconstrained)
         assertTrue(constrained < unconstrained)
         assertEquals(constrained, winUIDialogMaxWidth(1200, 1200, true))
+    }
+
+    private fun winUISource(fileName: String): String =
+        findUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/window/$fileName")
+            .readText()
+
+    private fun findUiModuleRoot(): Path {
+        val start = Paths.get("").toAbsolutePath()
+        generateSequence(start) { it.parent }.forEach { candidate ->
+            val direct = candidate.resolve("src/winuiMain/kotlin")
+            if (direct.exists() && candidate.name == "ui") return candidate
+
+            val fromRepoRoot = candidate.resolve("compose/ui/ui/src/winuiMain/kotlin")
+            if (fromRepoRoot.exists()) return candidate.resolve("compose/ui/ui")
+        }
+        error("Could not find compose/ui/ui module root from $start.")
     }
 }

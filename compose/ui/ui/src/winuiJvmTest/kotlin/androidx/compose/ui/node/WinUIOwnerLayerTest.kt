@@ -18,6 +18,7 @@ package androidx.compose.ui.node
 
 import androidx.compose.ui.FrameRateCategory
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.BlendMode
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.LayerOutsets
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.ReusableGraphicsLayerScope
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -133,6 +135,30 @@ class WinUIOwnerLayerTest {
     }
 
     @Test
+    fun resizeRecomputesCustomTransformOrigin() {
+        val layer = WinUIOwnerLayer(
+            drawBlock = { _, _ -> },
+            invalidateParentLayer = {},
+        )
+        layer.resize(IntSize(100, 200))
+        layer.updateLayerProperties(
+            ReusableGraphicsLayerScope().apply {
+                scaleX = 2f
+                scaleY = 2f
+                transformOrigin = TransformOrigin(0.25f, 0.75f)
+            }
+        )
+
+        val initialPivot = Offset(25f, 150f)
+        assertEquals(initialPivot, layer.mapOffset(initialPivot, inverse = false))
+
+        layer.resize(IntSize(200, 400))
+
+        val resizedPivot = Offset(50f, 300f)
+        assertEquals(resizedPivot, layer.mapOffset(resizedPivot, inverse = false))
+    }
+
+    @Test
     fun clippedRoundedOutlineRejectsCornerHit() {
         val layer = WinUIOwnerLayer(
             drawBlock = { _, _ -> },
@@ -202,6 +228,37 @@ class WinUIOwnerLayerTest {
         assertEquals(renderEffect, state.renderEffect)
         assertEquals(LayerOutsets(2.dp, 3.dp, 4.dp, 5.dp), state.outsets)
         assertEquals(outline, state.outline)
+    }
+
+    @Test
+    fun reuseClearsGraphicsLayerOutsets() {
+        val appliedOutsets = mutableListOf<List<Int>>()
+        val layer = WinUIOwnerLayer(
+            drawBlock = { _, _ -> },
+            invalidateParentLayer = {},
+            applyOutsets = { _, left, top, right, bottom ->
+                appliedOutsets += listOf(left, top, right, bottom)
+            },
+        )
+        layer.updateLayerProperties(
+            ReusableGraphicsLayerScope().apply {
+                outsets = LayerOutsets(2.dp, 3.dp, 4.dp, 5.dp)
+            }
+        )
+        layer.destroy()
+
+        layer.reuseLayer(
+            drawBlock = { _, _ -> },
+            invalidateParentLayer = {},
+        )
+
+        assertEquals(
+            listOf(
+                listOf(2, 3, 4, 5),
+                listOf(0, 0, 0, 0),
+            ),
+            appliedOutsets,
+        )
     }
 
     @Test
