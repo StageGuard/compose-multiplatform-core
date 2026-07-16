@@ -141,6 +141,14 @@ class WinUIComposeView internal constructor(
         get() = loadedRenderSchedulerToken != null
 
     @InternalComposeUiApi
+    val isDragAndDropTransferRequiredForTest: Boolean
+        get() = owner.winUIDragAndDropManager.isRequestDragAndDropTransferRequired
+
+    @InternalComposeUiApi
+    val isDragAndDropSourceBoundToRenderSurfaceForTest: Boolean
+        get() = dragAndDropAdapter.isSourceElementForTest(renderHost.component)
+
+    @InternalComposeUiApi
     val accessibilitySnapshotForTest: WinUIAccessibilitySnapshot?
         get() = owner.accessibilityProvider.snapshot()
 
@@ -302,8 +310,14 @@ class WinUIComposeView internal constructor(
         composeEventSources = { listOf(root) },
         composeEventSubtreeSources = { listOf(renderHost.component) },
     )
-    private val pointerInputAdapter = WinUIPointerInputAdapter(renderHost.component, owner)
-    private val dragAndDropAdapter = WinUIDragAndDropAdapter(root, owner)
+    private val dragAndDropAdapter =
+        WinUIDragAndDropAdapter(root = root, source = renderHost.component, owner = owner)
+    private val pointerInputAdapter =
+        WinUIPointerInputAdapter(
+            root = renderHost.component,
+            owner = owner,
+            onSourcePointerPointChanged = dragAndDropAdapter::updateSourcePointerPoint,
+        )
 
     fun setContent(content: @Composable () -> Unit) {
         check(!isDisposed) {

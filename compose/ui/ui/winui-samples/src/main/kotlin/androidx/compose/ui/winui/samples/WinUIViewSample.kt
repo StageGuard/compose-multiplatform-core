@@ -1423,6 +1423,12 @@ private object ComposeWinUiSmokeApp {
         check(currentComposeView.root.allowDrop) {
             "WinUIComposeView did not enable root drag/drop registration."
         }
+        check(currentComposeView.isDragAndDropTransferRequiredForTest) {
+            "WinUIComposeView did not install its production drag source starter."
+        }
+        check(currentComposeView.isDragAndDropSourceBoundToRenderSurfaceForTest) {
+            "WinUIComposeView did not bind its drag source to the Compose render surface."
+        }
         currentComposeView.setContent {
             DisposableEffect(Unit) {
                 disposeEvents += "entered"
@@ -1478,6 +1484,9 @@ private object ComposeWinUiSmokeApp {
         }
         check(!currentComposeView.root.allowDrop) {
             "WinUIComposeView did not clear root drag/drop runtime state on disposal."
+        }
+        check(!currentComposeView.isDragAndDropTransferRequiredForTest) {
+            "WinUIComposeView did not clear its production drag source starter on disposal."
         }
         check(!currentComposeView.isLoadedRenderSchedulerRegistrationPendingForTest) {
             "WinUIComposeView did not clear the loaded render-scheduler registration on disposal."

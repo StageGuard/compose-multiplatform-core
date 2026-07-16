@@ -24,16 +24,20 @@ import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.RootMeasurePolicy
 import androidx.compose.ui.node.LayoutNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.WinUIOwner
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.renderWinUIDragDecoration
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
@@ -110,7 +114,7 @@ class WinUIDragAndDropManagerTest {
             assertNull(sourceOffset)
             assertEquals(0, starterCalls)
 
-            manager.setStarterForTest(
+            manager.setStarter(
                 WinUIDragAndDropStarter { transferData, decorationSize, _ ->
                     starterCalls += 1
                     starterTransferData = transferData
@@ -130,6 +134,80 @@ class WinUIDragAndDropManagerTest {
         } finally {
             owner.dispose()
         }
+    }
+
+    @Test
+    fun clearingInstalledStarterDisablesTransferRequirement() {
+        val starter = WinUIDragAndDropStarter { _, _, _ -> true }
+
+        manager.setStarter(starter)
+        assertTrue(manager.isRequestDragAndDropTransferRequired)
+
+        manager.clearStarter(starter)
+
+        assertFalse(manager.isRequestDragAndDropTransferRequired)
+    }
+
+    @Test
+    fun testStarterOverrideCanTemporarilyDisableInstalledStarter() {
+        val starter = WinUIDragAndDropStarter { _, _, _ -> true }
+
+        manager.setStarter(starter)
+        manager.setStarterForTest(null)
+
+        assertFalse(manager.isRequestDragAndDropTransferRequired)
+
+        manager.clearStarterOverrideForTest()
+
+        assertTrue(manager.isRequestDragAndDropTransferRequired)
+        manager.clearStarter(starter)
+    }
+
+    @Test
+    fun dragDecorationIsRenderedToBgraPixels() {
+        var drawCalls = 0
+
+        val decoration =
+            renderWinUIDragDecoration(
+                decorationSize = Size(2f, 1f),
+                density = Density(1f),
+            ) {
+                drawCalls += 1
+                drawRect(Color.Red)
+            }
+
+        assertEquals(1, drawCalls)
+        assertEquals(2, decoration.width)
+        assertEquals(1, decoration.height)
+        assertContentEquals(
+            byteArrayOf(
+                0,
+                0,
+                0xff.toByte(),
+                0xff.toByte(),
+                0,
+                0,
+                0xff.toByte(),
+                0xff.toByte(),
+            ),
+            decoration.bgraPixels,
+        )
+    }
+
+    @Test
+    fun dragDecorationPremultipliesSemiTransparentPixels() {
+        val decoration =
+            renderWinUIDragDecoration(
+                decorationSize = Size(1f, 1f),
+                density = Density(1f),
+            ) {
+                drawRect(Color.Red.copy(alpha = 0.5f))
+            }
+
+        assertContentEquals(
+            byteArrayOf(0, 0, 0x80.toByte(), 0x80.toByte()),
+            decoration.bgraPixels,
+        )
     }
 
     @Test

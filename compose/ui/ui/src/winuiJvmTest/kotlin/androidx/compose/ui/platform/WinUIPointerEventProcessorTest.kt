@@ -44,6 +44,24 @@ class WinUIPointerEventProcessorTest {
     }
 
     @Test
+    fun capturesDragSourcePointerBeforeComposeHandlesRenderSurfaceEvent() {
+        val processor = WinUIPointerEventProcessor()
+        val events = mutableListOf<String>()
+
+        val handled =
+            processor.process(
+                event = samplePointerEvent(),
+                onBeforeDispatch = { events += "source" },
+            ) { _, _, _, _, _, _, _, _, _, _, _, _ ->
+                events += "compose"
+                true
+            }
+
+        assertEquals(true, handled)
+        assertEquals(listOf("source", "compose"), events)
+    }
+
+    @Test
     fun dispatchesUnhandledNativeEvents() {
         val processor = WinUIPointerEventProcessor()
         var dispatchedEvent: WinUIPointerEvent? = null

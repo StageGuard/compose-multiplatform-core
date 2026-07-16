@@ -26,7 +26,12 @@ import androidx.compose.ui.platform.InspectorInfo
 internal class WinUIDragAndDropManager : DragAndDropManager {
     private val rootDragAndDropNode = DragAndDropNode()
     private val interestedTargets = mutableSetOf<DragAndDropTarget>()
-    private var starter: WinUIDragAndDropStarter? = null
+    private var installedStarter: WinUIDragAndDropStarter? = null
+    private var testStarter: WinUIDragAndDropStarter? = null
+    private var hasTestStarterOverride = false
+
+    private val starter: WinUIDragAndDropStarter?
+        get() = if (hasTestStarterOverride) testStarter else installedStarter
 
     override val modifier: Modifier = RootWinUIDragAndDropElement(rootDragAndDropNode)
     override val isRequestDragAndDropTransferRequired: Boolean
@@ -95,11 +100,26 @@ internal class WinUIDragAndDropManager : DragAndDropManager {
         interestedTargets.clear()
     }
 
+    internal fun setStarter(starter: WinUIDragAndDropStarter) {
+        installedStarter = starter
+    }
+
+    internal fun clearStarter(starter: WinUIDragAndDropStarter) {
+        if (installedStarter === starter) {
+            installedStarter = null
+        }
+    }
+
     internal fun setStarterForTest(starter: WinUIDragAndDropStarter?) {
-        this.starter = starter
+        hasTestStarterOverride = true
+        testStarter = starter
+    }
+
+    internal fun clearStarterOverrideForTest() {
+        hasTestStarterOverride = false
+        testStarter = null
     }
 }
-
 internal fun interface WinUIDragAndDropStarter {
     fun startDragAndDropTransfer(
         transferData: DragAndDropTransferData,

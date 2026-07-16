@@ -312,6 +312,61 @@ class WinUIDragAndDropAdapterTest {
         )
         assertEquals(listOf(laterFailure), failure.suppressed.toList())
     }
+
+    @Test
+    fun sourceCleanupReleasesOperationTransferAndPointerAfterFailure() {
+        val events = mutableListOf<String>()
+        val operationFailure = IllegalStateException("operation close failed")
+
+        val failure =
+            assertFailsWith<IllegalStateException> {
+                runWinUIDragSourceCleanup(
+                    closeActiveDragOperation = {
+                        events += "operation"
+                        throw operationFailure
+                    },
+                    clearPendingSourceTransfer = { events += "transfer" },
+                    clearPointerPoint = { events += "pointer" },
+                )
+            }
+
+        assertSame(operationFailure, failure)
+        assertEquals(listOf("operation", "transfer", "pointer"), events)
+    }
+
+    @Test
+    fun dragStartingWithoutComposeTransferIsIgnoredInsteadOfCanceled() {
+        assertEquals(
+            WinUIDragStartingDecision.Ignore,
+            winUIDragStartingDecision(
+                hasPendingSourceTransfer = false,
+                hasDataPackage = true,
+                populatedDataPackage = false,
+            ),
+        )
+    }
+
+    @Test
+    fun dropCompletedOnlyCleansUpComposeOwnedSourceState() {
+        assertFalse(
+            shouldHandleWinUIDropCompleted(
+                hasPendingSourceTransfer = false,
+                hasActiveDragOperation = false,
+            )
+        )
+        assertTrue(
+            shouldHandleWinUIDropCompleted(
+                hasPendingSourceTransfer = true,
+                hasActiveDragOperation = false,
+            )
+        )
+        assertTrue(
+            shouldHandleWinUIDropCompleted(
+                hasPendingSourceTransfer = false,
+                hasActiveDragOperation = true,
+            )
+        )
+    }
 }
 
 private class DropTerminationCounters(private val finishResult: Boolean = false) {

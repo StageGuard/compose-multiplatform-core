@@ -38,6 +38,7 @@ import windows.foundation.EventRegistrationToken
 internal class WinUIPointerInputAdapter(
     private val root: UIElement,
     private val owner: WinUIOwner,
+    private val onSourcePointerPointChanged: (PointerPoint?) -> Unit = {},
 ) {
     private var isDisposed = false
     private val pointerEventProcessor = WinUIPointerEventProcessor()
@@ -56,6 +57,7 @@ internal class WinUIPointerInputAdapter(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
+        onSourcePointerPointChanged(null)
         releasePointerCaptures()
         registrations.forEach { registration ->
             runCatching { registration.event.remove(registration.token) }
@@ -77,6 +79,7 @@ internal class WinUIPointerInputAdapter(
                 }
                 val handled = pointerEventProcessor.process(
                     event = pointerEvent,
+                    onBeforeDispatch = ::updateDragSourcePointer,
                     sendPointerEvent = { eventType, position, uptimeMillis, pointerId, down, type,
                             buttons, keyboardModifiers, button, scrollDelta, isInBounds,
                             nativeEvent ->
@@ -122,6 +125,7 @@ internal class WinUIPointerInputAdapter(
                     "native cancel sender=${sender?.debugClassName()} handledBefore=${args.handled}"
                 }
                 releasePointerCapture(args)
+                onSourcePointerPointChanged(null)
                 owner.cancelPointerInput()
             }
         }
@@ -135,6 +139,7 @@ internal class WinUIPointerInputAdapter(
             debugPointerInput {
                 "native captureLost sender=${sender?.debugClassName()} handledBefore=${args.handled}"
             }
+            onSourcePointerPointChanged(null)
             removeCapturedPointer(args)
         }
         return WinUIPointerEventRegistration(event, event.add(handler), handler)
@@ -167,7 +172,18 @@ internal class WinUIPointerInputAdapter(
             },
             isInBounds = eventType != PointerEventType.Exit,
             nativeEvent = args,
+            sourcePointerPoint = point,
         )
+    }
+
+    private fun updateDragSourcePointer(event: WinUIPointerEvent) {
+        when (event.eventType) {
+            PointerEventType.Press,
+            PointerEventType.Move -> onSourcePointerPointChanged(event.sourcePointerPoint)
+            PointerEventType.Release -> onSourcePointerPointChanged(null)
+            PointerEventType.Exit -> if (!event.down) onSourcePointerPointChanged(null)
+            else -> Unit
+        }
     }
 
     private fun updatePointerCapture(
@@ -231,6 +247,7 @@ private fun WinUIPointerEvent.debugString(): String =
 internal class WinUIPointerEventProcessor {
     fun process(
         event: WinUIPointerEvent,
+        onBeforeDispatch: (WinUIPointerEvent) -> Unit = {},
         sendPointerEvent: (
             PointerEventType,
             Offset,
@@ -249,6 +266,7 @@ internal class WinUIPointerEventProcessor {
         // This adapter is attached to the dedicated Skiko render surface. Routed-event handled
         // state from that surface should not suppress Compose input; WinUIView interop is hosted
         // outside this surface and remains isolated by the native XAML tree.
+        onBeforeDispatch(event)
         return sendPointerEvent(
             event.eventType,
             event.position,
@@ -279,6 +297,7 @@ internal data class WinUIPointerEvent(
     val scrollDelta: Offset,
     val isInBounds: Boolean,
     val nativeEvent: Any?,
+    val sourcePointerPoint: PointerPoint? = null,
 )
 
 internal fun winUIPositionToComposeOffset(
