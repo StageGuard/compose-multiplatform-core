@@ -263,7 +263,11 @@ kotlin {
             }
 
             winuiTest {
-                dependsOn(skikoTest)
+                // :compose:ui:ui-test does not publish a WinUI JVM variant yet, so inheriting
+                // skikoTest would make the WinUI test classpath resolve its desktop target. Keep
+                // WinUI-specific coverage here until that variant exists; the shared skikoTest
+                // suite remains covered by its existing desktop/native targets.
+                dependsOn(commonTest)
             }
 
             if (composeWinUiJvmTargetEnabled) {

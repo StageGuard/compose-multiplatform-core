@@ -17,28 +17,51 @@
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.WinUIDragAndDropManager
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.node.WinUIOwner
-import windows.foundation.EventRegistrationToken
 import io.github.composefluent.winrt.runtime.WinRTEvent
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import microsoft.ui.xaml.DragEventArgs
 import microsoft.ui.xaml.DragEventHandler
 import microsoft.ui.xaml.UIElement
+import windows.applicationmodel.datatransfer.DataPackageView
+import windows.foundation.EventRegistrationToken
 
+@OptIn(InternalComposeUiApi::class)
 internal class WinUIDragAndDropAdapter(
     private val root: UIElement,
     private val owner: WinUIOwner,
+    private val coroutineContextProvider: () -> CoroutineContext = { owner.coroutineContext },
 ) {
     private val dragAndDropManager: WinUIDragAndDropManager = owner.winUIDragAndDropManager
+    private val lifecycleJob = SupervisorJob()
     private var isDisposed = false
-    private var isDragSessionActive = false
-    private val registrations = listOf(
-        register(root.dragEnter, ::handleDragEnter),
-        register(root.dragOver, ::handleDragOver),
-        register(root.dragLeave, ::handleDragLeave),
-        register(root.drop, ::handleDrop),
-    )
+    private var eventScope: CoroutineScope? = null
+    private var activeTransfer: WinUIActiveDragTransfer? = null
+    private var pendingDrop: WinUIPendingDrop? = null
+    private val dragSession =
+        WinUIDragSessionController(
+            onStart = dragAndDropManager::onDragStarted,
+            onEnd = dragAndDropManager::onDragEnded,
+            onClearTransfer = ::clearActiveTransfer,
+        )
+    private val registrations =
+        listOf(
+            register(root.dragEnter, ::handleDragEnter),
+            register(root.dragOver, ::handleDragOver),
+            register(root.dragLeave, ::handleDragLeave),
+            register(root.drop, ::handleDrop),
+        )
 
     init {
         root.allowDrop = true
@@ -47,57 +70,131 @@ internal class WinUIDragAndDropAdapter(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
-        registrations.forEach { registration ->
-            runCatching { registration.event.remove(registration.token) }
+        val cleanupActions = buildList<() -> Unit> {
+            add(::cancelPendingDrop)
+            add { lifecycleJob.cancel() }
+            registrations.forEach { registration ->
+                add { registration.event.remove(registration.token) }
+            }
+            add { dragSession.terminate(DragAndDropEvent()) }
+            add { root.allowDrop = false }
         }
-        if (isDragSessionActive) {
-            dragAndDropManager.onDragEnded(DragAndDropEvent())
-            isDragSessionActive = false
-        }
-        root.allowDrop = false
+        runWinUIDragAndDropCleanup(*cleanupActions.toTypedArray())
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDragEnter(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        val accepted = ensureDragSessionStarted(event)
-        dragAndDropManager.onDragEntered(event)
-        return accepted
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        val accepted =
+            dispatch.withPlatformData {
+                val accepted = dragSession.ensureStarted(dispatch.event)
+                dragAndDropManager.onDragEntered(dispatch.event)
+                accepted
+            }
+        return advertiseAcceptedOperation(args, dispatch, accepted)
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDragOver(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        val accepted = ensureDragSessionStarted(event)
-        dragAndDropManager.onDragMoved(event)
-        return accepted
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        val accepted =
+            dispatch.withPlatformData {
+                val accepted = dragSession.ensureStarted(dispatch.event)
+                dragAndDropManager.onDragMoved(dispatch.event)
+                accepted
+            }
+        return advertiseAcceptedOperation(args, dispatch, accepted)
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDragLeave(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        if (isDragSessionActive) {
-            dragAndDropManager.onDragExited(event)
-            dragAndDropManager.onDragEnded(event)
-            isDragSessionActive = false
+        setAcceptedOperation(args, false)
+        if (pendingDrop != null) return true
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        dispatch.withPlatformData {
+            try {
+                if (dragSession.isActive) {
+                    dragAndDropManager.onDragExited(dispatch.event)
+                }
+            } finally {
+                dragSession.terminate(dispatch.event)
+            }
         }
         return false
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDrop(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        ensureDragSessionStarted(event)
-        val handled = dragAndDropManager.onDrop(event)
-        dragAndDropManager.onDragEnded(event)
-        isDragSessionActive = false
-        return handled
+        cancelPendingDrop()
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        val accepted = dispatch.withPlatformData { dragSession.ensureStarted(dispatch.event) }
+        if (!setAcceptedOperation(args, accepted)) {
+            abortDrop(dispatch)
+            return false
+        }
+
+        if (!dispatch.transfer.metadata.containsPlainText) {
+            return finishSynchronousDrop(args, dispatch)
+        }
+
+        val scope = eventCoroutineScope() ?: return finishSynchronousDrop(args, dispatch)
+        val deferral =
+            runCatching { args.getDeferral() }.getOrNull()
+                ?: return finishSynchronousDrop(args, dispatch)
+        startPlainTextRead(dispatch.transfer)
+        lateinit var pending: WinUIPendingDrop
+        val termination =
+            createDropTermination(
+                args = args,
+                dispatch = dispatch,
+                completeDeferral = deferral::complete,
+                onTerminated = {
+                    if (pendingDrop === pending) pendingDrop = null
+                },
+            )
+        pending = WinUIPendingDrop(termination)
+        pendingDrop = pending
+        pending.job =
+            scope.launchWinUIDropRead(
+                loadPlainText = {
+                    val plainTextRead = dispatch.transfer.plainTextRead
+                    if (plainTextRead != null) {
+                        plainTextRead.await()
+                    } else {
+                        dispatch.transfer.metadata.loadPlainText()
+                    }
+                },
+                termination = termination,
+                onHandled = {},
+            )
+        return true
     }
 
-    private fun ensureDragSessionStarted(event: DragAndDropEvent): Boolean {
-        if (isDragSessionActive) return true
-        isDragSessionActive = dragAndDropManager.onDragStarted(event)
-        return isDragSessionActive
+    private fun advertiseAcceptedOperation(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+        accepted: Boolean,
+    ): Boolean {
+        val advertised = setAcceptedOperation(args, accepted)
+        if (advertised) {
+            startPlainTextRead(dispatch.transfer)
+        } else {
+            abortDrop(dispatch)
+        }
+        return advertised
+    }
+
+    private fun setAcceptedOperation(args: DragEventArgs, accepted: Boolean): Boolean {
+        val assigned =
+            runCatching { args.acceptedOperation = winUIDragAcceptedOperation(accepted) }.isSuccess
+        return accepted && assigned
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    private fun rejectTerminalEvent(args: DragEventArgs): Boolean {
+        setAcceptedOperation(args, false)
+        dragSession.terminate(DragAndDropEvent())
+        return false
     }
 
     private fun register(
@@ -113,13 +210,139 @@ internal class WinUIDragAndDropAdapter(
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
-    private fun DragEventArgs.toComposeDragAndDropEvent(): DragAndDropEvent {
-        val position = getPosition(root)
-        return DragAndDropEvent(
-            nativeEvent = this,
-            positionInRootImpl = winUIPositionToComposeOffset(position.x, position.y, owner.density),
+    private fun DragEventArgs.toComposeDragAndDropDispatch(): WinUIComposeDragAndDropDispatch? {
+        val currentDataView = runCatching { dataView }.getOrNull() ?: return null
+        val transfer = activeTransferFor(currentDataView)
+        val position = runCatching { getPosition(root) }.getOrNull()
+        val positionInRoot =
+            if (position != null) {
+                winUIPositionToComposeOffset(position.x, position.y, owner.density)
+            } else {
+                Offset.Zero
+            }
+        val event = DragAndDropEvent(nativeEvent = this, positionInRootImpl = positionInRoot)
+        return WinUIComposeDragAndDropDispatch(
+            event = event,
+            data =
+                PlatformDragAndDropData(
+                    clipEntry = transfer.clipEntry,
+                    clipMetadata = transfer.clipEntry.clipMetadata,
+                    positionInRoot = positionInRoot,
+                ),
+            transfer = transfer,
         )
     }
+
+    private fun activeTransferFor(dataView: DataPackageView): WinUIActiveDragTransfer {
+        activeTransfer
+            ?.takeIf { it.dataView == dataView }
+            ?.let {
+                return it
+            }
+        clearActiveTransfer()
+        return WinUIActiveDragTransfer(
+                dataView = dataView,
+                metadata = WinUIDataPackageViewClipMetadata(dataView),
+            )
+            .also { transfer -> activeTransfer = transfer }
+    }
+
+    private fun startPlainTextRead(transfer: WinUIActiveDragTransfer) {
+        if (!transfer.metadata.containsPlainText || transfer.plainTextRead != null) return
+        val scope = eventCoroutineScope() ?: return
+        transfer.plainTextRead = scope.async { transfer.metadata.loadPlainText() }
+    }
+
+    private fun eventCoroutineScope(): CoroutineScope? {
+        if (isDisposed) return null
+        eventScope?.let {
+            return it
+        }
+        val context = coroutineContextProvider()
+        if (context == EmptyCoroutineContext || context[ContinuationInterceptor] == null)
+            return null
+        return CoroutineScope(context.minusKey(Job) + lifecycleJob).also { eventScope = it }
+    }
+
+    private fun finishSynchronousDrop(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+    ): Boolean = createDropTermination(args, dispatch).finish() ?: false
+
+    private fun createDropTermination(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+        completeDeferral: () -> Unit = {},
+        onTerminated: () -> Unit = {},
+    ): WinUIDropTermination =
+        WinUIDropTermination(
+            finishDrop = { dispatchDropAndTerminate(dispatch) },
+            abortDrop = { abortDrop(dispatch) },
+            publishResult = { handled -> publishDropResult(args, handled) },
+            completeDeferral = completeDeferral,
+            onTerminated = onTerminated,
+        )
+
+    private fun dispatchDropAndTerminate(dispatch: WinUIComposeDragAndDropDispatch): Boolean {
+        var handled = false
+        runWinUIDragAndDropCleanup(
+            {
+                handled =
+                    dispatch.withPlatformData { dragAndDropManager.onDrop(dispatch.event) }
+            },
+            { dispatch.withPlatformData { dragSession.terminate(dispatch.event) } },
+        )
+        return handled
+    }
+
+    private fun publishDropResult(args: DragEventArgs, handled: Boolean) {
+        runWinUIDragAndDropCleanup(
+            { args.acceptedOperation = winUIDragAcceptedOperation(handled) },
+            { args.handled = handled },
+        )
+    }
+
+    private fun abortDrop(dispatch: WinUIComposeDragAndDropDispatch) {
+        dispatch.withPlatformData { dragSession.terminate(dispatch.event) }
+    }
+
+    private fun cancelPendingDrop() {
+        val pending = pendingDrop ?: return
+        pending.termination.abort()
+        pending.job?.cancel()
+    }
+
+    private fun clearActiveTransfer() {
+        activeTransfer?.plainTextRead?.cancel()
+        activeTransfer = null
+    }
+
+    private inline fun <T> WinUIComposeDragAndDropDispatch.withPlatformData(block: () -> T): T {
+        PlatformDragAndDropEventData.set(event, data)
+        return try {
+            block()
+        } finally {
+            PlatformDragAndDropEventData.clear(event)
+        }
+    }
+}
+
+private class WinUIActiveDragTransfer(
+    val dataView: DataPackageView,
+    val metadata: WinUIDataPackageViewClipMetadata,
+) {
+    val clipEntry: ClipEntry = ClipEntry(metadata)
+    var plainTextRead: Deferred<String?>? = null
+}
+
+private data class WinUIComposeDragAndDropDispatch(
+    val event: DragAndDropEvent,
+    val data: PlatformDragAndDropData,
+    val transfer: WinUIActiveDragTransfer,
+)
+
+private class WinUIPendingDrop(val termination: WinUIDropTermination) {
+    var job: Job? = null
 }
 
 private data class WinUIDragAndDropEventRegistration(

@@ -125,6 +125,7 @@ if (composeWinUiGradlePluginAvailable) {
         type("Windows.Foundation.Collections.VectorChangedEventHandler")
         type("Windows.ApplicationModel.DataTransfer.Clipboard")
         type("Windows.ApplicationModel.DataTransfer.DataPackage")
+        type("Windows.ApplicationModel.DataTransfer.DataPackageOperation")
         type("Windows.ApplicationModel.DataTransfer.DataPackageView")
         type("Windows.ApplicationModel.DataTransfer.StandardDataFormats")
         type("Windows.System.Display.DisplayRequest")

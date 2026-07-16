@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+@file:OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -160,14 +162,10 @@ internal class WinUIClipboard : Clipboard {
 }
 
 actual class ClipEntry constructor(val nativeClipEntry: Any?) {
-    actual val clipMetadata: ClipMetadata
-        get() = ClipMetadata()
+    actual val clipMetadata: ClipMetadata = ClipMetadata(platformClipMetadataFor(nativeClipEntry))
 
     @ExperimentalComposeUiApi
-    fun getPlainText(): String? = when (val nativeClipEntry = nativeClipEntry) {
-        is String -> nativeClipEntry
-        else -> null
-    }
+    fun getPlainText(): String? = runCatching { clipMetadata.readPlainText() }.getOrNull()
 
     companion object {
         @ExperimentalComposeUiApi
@@ -176,7 +174,8 @@ actual class ClipEntry constructor(val nativeClipEntry: Any?) {
     }
 }
 
-actual class ClipMetadata
+actual class ClipMetadata internal constructor(private val platformMetadata: PlatformClipMetadata) :
+    PlatformClipMetadata by platformMetadata
 
 private var lastPlainText: String? = null
 
