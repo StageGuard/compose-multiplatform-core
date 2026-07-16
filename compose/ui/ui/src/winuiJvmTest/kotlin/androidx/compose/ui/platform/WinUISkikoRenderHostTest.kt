@@ -147,6 +147,7 @@ class WinUISkikoRenderHostTest {
 
         assertSame(provider, layer.installedAccessibilityProvider)
         assertEquals(listOf(change), layer.accessibilityChanges)
+        assertEquals(1, host.accessibilityUpdateCountForTest)
     }
 
     @Test
@@ -265,6 +266,7 @@ class WinUISkikoRenderHostTest {
 
         assertEquals(null, layer.installedAccessibilityProvider)
         assertEquals(emptyList(), layer.accessibilityChanges)
+        assertEquals(0, host.accessibilityUpdateCountForTest)
         assertEquals(1, layer.closeCount)
     }
 

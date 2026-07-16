@@ -50,6 +50,7 @@ internal class WinUISkikoRenderHost(
     private var delegatedRenderInvalidationCount = 0
     private var drawSubmissionCount = 0
     private var interopTransactionDrainCount = 0
+    private var accessibilityUpdateCount = 0
 
     val component: FrameworkElement
         get() = layer.component
@@ -75,6 +76,9 @@ internal class WinUISkikoRenderHost(
     val isFrameSchedulerStartedForTest: Boolean
         get() = frameScheduler != null
 
+    val accessibilityUpdateCountForTest: Int
+        get() = accessibilityUpdateCount
+
     val diagnosticsForTest: WinUISkikoRenderHostDiagnostics
         get() = diagnostics()
 
@@ -87,6 +91,7 @@ internal class WinUISkikoRenderHost(
     fun notifyAccessibilityChanged(update: WinUIAccessibilityUpdate) {
         if (!isClosed) {
             layer.notifyAccessibilityChanged(update)
+            accessibilityUpdateCount += 1
         }
     }
 

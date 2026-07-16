@@ -2269,18 +2269,20 @@ private object ComposeWinUiSmokeApp {
     @OptIn(InternalComposeUiApi::class)
     private suspend fun runWinUIAccessibilityProviderSmoke() {
         val currentComposeView = WinUIComposeView()
+        var accessibilityName by mutableStateOf("WinUI accessible node")
         var clicked = false
         var focusRequested = false
         var expanded = false
         var collapsed = false
         var textSet: AnnotatedString? = null
         val progressValues = mutableListOf<Float>()
+        currentComposeView.rootForTest().setAccessibilityEventBatchIntervalMillis(0L)
         currentComposeView.setWindowContainerSizeForTest(IntSize(96, 64))
         currentComposeView.setContent {
             Layout(
                 modifier = Modifier.semantics {
                     testTag = "winui-accessibility"
-                    contentDescription = "WinUI accessible node"
+                    contentDescription = accessibilityName
                     liveRegion = LiveRegionMode.Polite
                     focused = true
                     editableText = AnnotatedString("initial")
@@ -2396,6 +2398,24 @@ private object ComposeWinUiSmokeApp {
         }
         check(progressValues == listOf(0.7f, 0.3f)) {
             "WinUI accessibility provider progress actions produced $progressValues."
+        }
+        awaitCondition("WinUI accessibility initial production update") {
+            currentComposeView.accessibilityUpdateCountForTest > 0
+        }
+        val initialAccessibilityUpdateCount = currentComposeView.accessibilityUpdateCountForTest
+        accessibilityName = "WinUI accessible node updated"
+        awaitCondition("WinUI accessibility changed production update") {
+            currentComposeView.accessibilityUpdateCountForTest > initialAccessibilityUpdateCount
+        }
+        val updatedNode = checkNotNull(
+            currentComposeView.accessibilitySnapshotForTest
+                ?.root
+                ?.findAccessibilityNode("winui-accessibility")
+        ) {
+            "WinUI accessibility provider lost the updated semantics node."
+        }
+        check(updatedNode.info.name == "WinUI accessible node updated") {
+            "WinUI accessibility production update exposed ${updatedNode.info.name}."
         }
         currentComposeView.dispose()
         println("compose-winui-sample: accessibility provider")

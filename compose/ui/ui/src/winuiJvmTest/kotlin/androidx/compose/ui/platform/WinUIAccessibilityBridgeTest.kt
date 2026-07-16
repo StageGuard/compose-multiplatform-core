@@ -46,6 +46,59 @@ class WinUIAccessibilityBridgeTest {
     }
 
     @Test
+    fun productionProviderSnapshotEnablesAutomaticFlushes() {
+        val scheduled = mutableListOf<() -> Unit>()
+        val updates = mutableListOf<WinUIAccessibilityUpdate>()
+        val bridge = createBridge(scheduled = scheduled, updates = updates)
+        val owner = createSemanticsOwner()
+
+        bridge.snapshot()
+        bridge.onSemanticsChange(owner)
+
+        assertTrue(bridge.stateForTest().isAccessibilityProviderAttached)
+        assertEquals(1, scheduled.size)
+
+        scheduled.single().invoke()
+
+        assertEquals(1, updates.size)
+        assertSame(owner, updates.single().semanticsOwner)
+    }
+
+    @Test
+    fun productionProviderAttachmentWithoutPendingChangesDoesNotSchedule() {
+        val scheduled = mutableListOf<() -> Unit>()
+        val bridge = createBridge(scheduled = scheduled)
+
+        bridge.snapshot()
+
+        assertTrue(bridge.stateForTest().isAccessibilityProviderAttached)
+        assertFalse(bridge.stateForTest().hasPendingFlush)
+        assertEquals(0, scheduled.size)
+    }
+
+    @Test
+    fun disposingBeforeProductionFlushSuppressesDelivery() {
+        val scheduled = mutableListOf<() -> Unit>()
+        val canceled = mutableListOf<Any?>()
+        val updates = mutableListOf<WinUIAccessibilityUpdate>()
+        val bridge =
+            createBridge(
+                scheduled = scheduled,
+                canceled = canceled,
+                updates = updates,
+            )
+        val owner = createSemanticsOwner()
+
+        bridge.snapshot()
+        bridge.onSemanticsChange(owner)
+        bridge.dispose()
+
+        assertEquals(1, canceled.size)
+        scheduled.single().invoke()
+        assertEquals(0, updates.size)
+    }
+
+    @Test
     fun batchesSemanticsLayoutAndScrollChanges() {
         val scheduled = mutableListOf<() -> Unit>()
         val updates = mutableListOf<WinUIAccessibilityUpdate>()

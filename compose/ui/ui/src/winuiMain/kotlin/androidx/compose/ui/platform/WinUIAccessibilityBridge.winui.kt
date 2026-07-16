@@ -60,6 +60,7 @@ internal class WinUIAccessibilityBridge(
     private var hasPendingSemanticsChange = false
     private var hasPendingScrollChange = false
     private var pendingScrollDelta = Offset.Zero
+    private var isAccessibilityProviderAttached = false
     private var isDisposed = false
 
     var isAccessibilityForcedForTesting: Boolean = false
@@ -76,7 +77,7 @@ internal class WinUIAccessibilityBridge(
         isAccessibilityForcedForTesting = enable
         if (enable) {
             scheduleFlushIfNeeded()
-        } else {
+        } else if (!isAccessibilityProviderAttached) {
             cancelPendingFlush()
         }
     }
@@ -119,10 +120,13 @@ internal class WinUIAccessibilityBridge(
         hasPendingSemanticsChange = false
         hasPendingScrollChange = false
         pendingScrollDelta = Offset.Zero
+        isAccessibilityProviderAttached = false
     }
 
-    override fun snapshot(): WinUIAccessibilitySnapshot =
-        currentSemanticsOwner?.toWinUIAccessibilitySnapshot() ?: EmptySnapshot
+    override fun snapshot(): WinUIAccessibilitySnapshot {
+        attachAccessibilityProvider()
+        return currentSemanticsOwner?.toWinUIAccessibilitySnapshot() ?: EmptySnapshot
+    }
 
     override fun performAction(request: WinUIAccessibilityActionRequest): Boolean {
         val targetNode = currentSemanticsOwner
@@ -153,6 +157,7 @@ internal class WinUIAccessibilityBridge(
     fun stateForTest(): WinUIAccessibilityBridgeState =
         WinUIAccessibilityBridgeState(
             isAccessibilityForcedForTesting = isAccessibilityForcedForTesting,
+            isAccessibilityProviderAttached = isAccessibilityProviderAttached,
             accessibilityEventBatchIntervalMillis = accessibilityEventBatchIntervalMillis,
             currentSemanticsNodesInvalidated = currentSemanticsNodesInvalidated,
             hasPendingFlush = pendingPost != null,
@@ -164,7 +169,7 @@ internal class WinUIAccessibilityBridge(
 
     private fun scheduleFlushIfNeeded() {
         if (
-            !isAccessibilityForcedForTesting ||
+            !isAccessibilityEnabled() ||
             isDisposed ||
             pendingPost != null ||
             !hasPendingAccessibilityUpdate()
@@ -181,7 +186,7 @@ internal class WinUIAccessibilityBridge(
 
     private fun flush() {
         pendingPost = null
-        if (isDisposed || !isAccessibilityForcedForTesting || !hasPendingAccessibilityUpdate()) {
+        if (isDisposed || !isAccessibilityEnabled() || !hasPendingAccessibilityUpdate()) {
             return
         }
         val update = WinUIAccessibilityUpdate(
@@ -204,6 +209,15 @@ internal class WinUIAccessibilityBridge(
         pendingPost?.let(removePost)
         pendingPost = null
     }
+
+    private fun attachAccessibilityProvider() {
+        if (isDisposed || isAccessibilityProviderAttached) return
+        isAccessibilityProviderAttached = true
+        scheduleFlushIfNeeded()
+    }
+
+    private fun isAccessibilityEnabled(): Boolean =
+        isAccessibilityProviderAttached || isAccessibilityForcedForTesting
 
     private fun pendingWinUIAccessibilityChange(): WinUIAccessibilityChange =
         WinUIAccessibilityChange(
@@ -240,6 +254,7 @@ internal data class WinUIAccessibilityUpdate(
 
 internal data class WinUIAccessibilityBridgeState(
     val isAccessibilityForcedForTesting: Boolean,
+    val isAccessibilityProviderAttached: Boolean,
     val accessibilityEventBatchIntervalMillis: Long,
     val currentSemanticsNodesInvalidated: Boolean,
     val hasPendingFlush: Boolean,

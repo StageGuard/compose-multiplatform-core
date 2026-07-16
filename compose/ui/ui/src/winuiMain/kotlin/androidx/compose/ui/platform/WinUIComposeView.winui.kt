@@ -153,6 +153,10 @@ class WinUIComposeView internal constructor(
         get() = owner.accessibilityProvider.snapshot()
 
     @InternalComposeUiApi
+    val accessibilityUpdateCountForTest: Int
+        get() = renderHost.accessibilityUpdateCountForTest
+
+    @InternalComposeUiApi
     fun performAccessibilityActionForTest(request: WinUIAccessibilityActionRequest): Boolean =
         owner.accessibilityProvider.performAction(request)
 
