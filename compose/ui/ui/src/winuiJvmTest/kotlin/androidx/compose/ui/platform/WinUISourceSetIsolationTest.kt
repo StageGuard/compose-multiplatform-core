@@ -228,6 +228,22 @@ class WinUISourceSetIsolationTest {
         }
     }
 
+    @Test
+    fun winuiExplicitlyProjectsInputPaneSurface() {
+        val buildScript = findUiModuleRoot().resolve("build.gradle").readText()
+
+        listOf(
+            "type(\"Windows.Foundation.Rect\")",
+            "type(\"Windows.UI.ViewManagement.InputPane\")",
+            "type(\"Windows.UI.ViewManagement.InputPaneVisibilityEventArgs\")",
+        ).forEach { declaration ->
+            assertTrue(
+                buildScript.contains(declaration),
+                "Missing WinRT projection: $declaration",
+            )
+        }
+    }
+
     private fun kotlinFiles(root: Path): List<Path> {
         if (!root.exists()) return emptyList()
         Files.walk(root).use { paths ->
