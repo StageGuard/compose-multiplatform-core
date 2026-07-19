@@ -54,11 +54,24 @@ class WinUIPlatformWindowInsetsTest {
     }
 
     @Test
+    fun imeBottomInsetContributesToSafeDrawingAndSafeContent() {
+        val insets = WinUIPlatformWindowInsets(
+            captionBarHeight = 32,
+            imeBottomInset = 420,
+        )
+
+        insets.ime.assertInsets(bottom = 420)
+        insets.safeDrawing.assertInsets(top = 32, bottom = 420)
+        insets.safeContent.assertInsets(top = 32, bottom = 420)
+    }
+
+    @Test
     fun excludingSafeInsetsRemovesCaptionBarFromSafeAndSystemInsets() {
         val insets = WinUIPlatformWindowInsets(
             captionBarHeight = 32,
             titleBarLeftInset = PlatformInsets(left = 96),
             titleBarRightInset = PlatformInsets(right = 140),
+            imeBottomInset = 360,
         )
 
         val excluded = insets.excluding(safeInsets = true, ime = false)
@@ -67,18 +80,30 @@ class WinUIPlatformWindowInsetsTest {
         excluded.titleBarLeftInset.assertInsets()
         excluded.titleBarRightInset.assertInsets()
         excluded.systemBars.assertInsets()
-        excluded.safeDrawing.assertInsets()
-        excluded.safeContent.assertInsets()
+        excluded.ime.assertInsets(bottom = 360)
+        excluded.safeDrawing.assertInsets(bottom = 360)
+        excluded.safeContent.assertInsets(bottom = 360)
         assertSame(excluded, excluded.excluding(safeInsets = false, ime = false))
     }
 
     @Test
-    fun excludingImeIsStableWhenWinUIDesktopImeInsetsAreZero() {
-        val insets = WinUIPlatformWindowInsets(captionBarHeight = 32)
+    fun excludingImePreservesCaptionAndTitleBarInsets() {
+        val insets = WinUIPlatformWindowInsets(
+            captionBarHeight = 32,
+            titleBarLeftInset = PlatformInsets(left = 96),
+            titleBarRightInset = PlatformInsets(right = 140),
+            imeBottomInset = 360,
+        )
 
         val excluded = insets.excluding(safeInsets = false, ime = true)
 
-        assertSame(insets, excluded)
+        excluded.captionBar.assertInsets(top = 32)
+        excluded.titleBarLeftInset.assertInsets(left = 96)
+        excluded.titleBarRightInset.assertInsets(right = 140)
+        excluded.systemBars.assertInsets(top = 32)
+        excluded.ime.assertInsets()
+        excluded.safeDrawing.assertInsets(top = 32)
+        excluded.safeContent.assertInsets(top = 32)
     }
 
     private fun PlatformInsets.assertInsets(

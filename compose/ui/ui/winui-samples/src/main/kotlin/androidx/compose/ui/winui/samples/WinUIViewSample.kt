@@ -88,6 +88,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -3028,6 +3029,18 @@ private object ComposeWinUiSmokeApp {
         val probe = WinUITextInputSessionSmokeProbe()
         val currentComposeView = WinUIComposeView()
         currentComposeView.setContent {
+            val softwareKeyboardController = checkNotNull(LocalSoftwareKeyboardController.current) {
+                "WinUI text input smoke did not receive a software keyboard controller."
+            }
+            LaunchedEffect(softwareKeyboardController) {
+                while (!probe.secondInputStarted) {
+                    delay(1)
+                }
+                softwareKeyboardController.show()
+                probe.softwareKeyboardShowRequested = true
+                softwareKeyboardController.hide()
+                probe.softwareKeyboardHideRequested = true
+            }
             Layout(
                 modifier = Modifier.winUITextInputSessionSmoke(probe),
                 content = {},
@@ -3039,8 +3052,11 @@ private object ComposeWinUiSmokeApp {
             probe.firstInputStarted &&
                 probe.firstInputCancelled &&
                 probe.secondInputStarted &&
-                !probe.secondInputCancelled
+                !probe.secondInputCancelled &&
+                probe.softwareKeyboardShowRequested &&
+                probe.softwareKeyboardHideRequested
         }
+        println("compose-winui-sample: software keyboard show/hide requests")
         currentComposeView.dispose()
         awaitCondition("WinUI text input disposal cancellation") {
             probe.secondInputCancelled
@@ -3365,6 +3381,8 @@ private class WinUITextInputSessionSmokeProbe {
     var firstInputCancelled: Boolean = false
     var secondInputStarted: Boolean = false
     var secondInputCancelled: Boolean = false
+    var softwareKeyboardShowRequested: Boolean = false
+    var softwareKeyboardHideRequested: Boolean = false
 }
 
 @OptIn(ExperimentalComposeUiApi::class)

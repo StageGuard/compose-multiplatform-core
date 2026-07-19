@@ -298,6 +298,10 @@ class WinUIComposeView internal constructor(
     private var saveableStateRegistry: SaveableStateRegistry? = null
     private var content: (@Composable () -> Unit)? = null
     private var platformWindowInsets: PlatformWindowInsets by mutableStateOf(EmptyPlatformWindowInsets)
+    private var captionBarHeight = 0
+    private var titleBarLeftInset = 0
+    private var titleBarRightInset = 0
+    private var inputPaneOccludedRect: WinUIInputPaneOccludedRect? = null
     private var inputPaneController: WinUIInputPaneController? = null
     private var currentInteropRoots: List<UIElement> = emptyList()
     private var isRootContentSyncScheduled = false
@@ -446,13 +450,22 @@ class WinUIComposeView internal constructor(
     private fun ensureInputPaneController() {
         val currentWindow = window ?: return
         if (isDisposed || inputPaneController != null) return
-        inputPaneController = createWinUIInputPaneController(currentWindow)
+        inputPaneController = createWinUIInputPaneController(
+            window = currentWindow,
+            onOccludedRectChanged = ::setInputPaneOccludedRect,
+        )
+    }
+
+    private fun setInputPaneOccludedRect(occludedRect: WinUIInputPaneOccludedRect?) {
+        inputPaneOccludedRect = occludedRect
+        updatePlatformWindowInsets()
     }
 
     internal fun setWindowContainerSize(size: IntSize) {
         updateDensityFromXamlRoot()
         owner.setWindowContainerSize(size)
         renderHost.setSize(size, owner.density)
+        updatePlatformWindowInsets()
         requestRender()
     }
 
@@ -465,10 +478,30 @@ class WinUIComposeView internal constructor(
         leftInset: Int,
         rightInset: Int,
     ) {
+        captionBarHeight = height
+        titleBarLeftInset = leftInset
+        titleBarRightInset = rightInset
+        updatePlatformWindowInsets()
+    }
+
+    private fun updatePlatformWindowInsets() {
+        val density = owner.density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val rootHeightDp = runCatching { rootFrameworkElement.actualHeight.toFloat() }
+            .getOrNull()
+            ?.takeIf { it.isFinite() && it > 0f }
+            ?: (owner.windowInfo.containerSize.height / density)
+        val imeBottomInset = inputPaneOccludedRect?.let { occludedRect ->
+            calculateWinUIImeBottomInset(
+                rootHeightDp = rootHeightDp,
+                occludedRect = occludedRect,
+                density = density,
+            )
+        } ?: 0
         platformWindowInsets = WinUIPlatformWindowInsets(
-            captionBarHeight = height,
-            titleBarLeftInset = PlatformInsets(left = leftInset),
-            titleBarRightInset = PlatformInsets(right = rightInset),
+            captionBarHeight = captionBarHeight,
+            titleBarLeftInset = PlatformInsets(left = titleBarLeftInset),
+            titleBarRightInset = PlatformInsets(right = titleBarRightInset),
+            imeBottomInset = imeBottomInset,
         )
     }
 
@@ -609,6 +642,7 @@ class WinUIComposeView internal constructor(
         owner.windowInfo.containerSize.takeIf { it.width > 0 && it.height > 0 }?.let { size ->
             renderHost.setSize(size, owner.density)
         }
+        updatePlatformWindowInsets()
     }
 
     private fun clearXamlRootDensityObserver() {

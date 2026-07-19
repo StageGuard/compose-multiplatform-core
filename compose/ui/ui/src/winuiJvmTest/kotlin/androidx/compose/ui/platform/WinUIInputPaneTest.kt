@@ -23,6 +23,56 @@ import kotlin.test.assertTrue
 
 class WinUIInputPaneTest {
     @Test
+    fun dockedOcclusionConvertsClientDipsToBottomPixels() {
+        val bottomInset = calculateWinUIImeBottomInset(
+            rootHeightDp = 800f,
+            occludedRect = WinUIInputPaneOccludedRect(
+                x = 0f,
+                y = 500f,
+                width = 1200f,
+                height = 300f,
+            ),
+            density = 1.25f,
+        )
+
+        assertEquals(375, bottomInset)
+    }
+
+    @Test
+    fun occlusionExtendingPastClientBottomUsesOnlyVisibleOverlap() {
+        val bottomInset = calculateWinUIImeBottomInset(
+            rootHeightDp = 800f,
+            occludedRect = WinUIInputPaneOccludedRect(
+                x = 0f,
+                y = 600f,
+                width = 1200f,
+                height = 300f,
+            ),
+            density = 1.5f,
+        )
+
+        assertEquals(300, bottomInset)
+    }
+
+    @Test
+    fun floatingAndInvalidOcclusionDoNotProduceImeInsets() {
+        val floating = WinUIInputPaneOccludedRect(
+            x = 200f,
+            y = 400f,
+            width = 600f,
+            height = 200f,
+        )
+        val empty = floating.copy(y = 800f, height = 0f)
+        val invalid = floating.copy(y = Float.NaN)
+
+        assertEquals(0, calculateWinUIImeBottomInset(800f, floating, 1.25f))
+        assertEquals(0, calculateWinUIImeBottomInset(800f, empty, 1.25f))
+        assertEquals(0, calculateWinUIImeBottomInset(800f, invalid, 1.25f))
+        assertEquals(0, calculateWinUIImeBottomInset(-1f, floating, 1.25f))
+        assertEquals(0, calculateWinUIImeBottomInset(800f, floating, 0f))
+    }
+
+    @Test
     fun controllerDelegatesShowAndHideToInputPane() {
         val pane = FakeWinUIInputPaneAdapter(
             tryShowResult = true,
@@ -70,11 +120,28 @@ class WinUIInputPaneTest {
 
         assertEquals(listOf(occludedRect, null), changes)
     }
+
+    @Test
+    fun controllerPublishesCurrentOcclusionWhenInputPaneIsAlreadyVisible() {
+        val occludedRect = WinUIInputPaneOccludedRect(
+            x = 0f,
+            y = 500f,
+            width = 800f,
+            height = 300f,
+        )
+        val pane = FakeWinUIInputPaneAdapter(currentOcclusion = occludedRect)
+        val changes = mutableListOf<WinUIInputPaneOccludedRect?>()
+
+        WinUIInputPaneController(pane, changes::add)
+
+        assertEquals(listOf<WinUIInputPaneOccludedRect?>(occludedRect), changes)
+    }
 }
 
 internal class FakeWinUIInputPaneAdapter(
     private val tryShowResult: Boolean = true,
     private val tryHideResult: Boolean = true,
+    private val currentOcclusion: WinUIInputPaneOccludedRect? = null,
 ) : WinUIInputPaneAdapter {
     var tryShowCount: Int = 0
         private set
@@ -98,6 +165,8 @@ internal class FakeWinUIInputPaneAdapter(
         tryHideCount += 1
         return tryHideResult
     }
+
+    override fun currentOccludedRect(): WinUIInputPaneOccludedRect? = currentOcclusion
 
     override fun addShowing(
         handler: (WinUIInputPaneOccludedRect) -> Unit,

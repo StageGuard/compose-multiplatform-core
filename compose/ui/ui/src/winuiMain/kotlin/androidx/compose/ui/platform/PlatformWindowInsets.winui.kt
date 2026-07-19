@@ -73,9 +73,13 @@ internal data class WinUIPlatformWindowInsets(
     private val captionBarHeight: Int = 0,
     override val titleBarLeftInset: PlatformInsets = PlatformInsets.Zero,
     override val titleBarRightInset: PlatformInsets = PlatformInsets.Zero,
+    private val imeBottomInset: Int = 0,
 ) : PlatformWindowInsets {
     override val captionBar: PlatformInsets = PlatformInsets(
         top = captionBarHeight,
+    )
+    override val ime: PlatformInsets = PlatformInsets(
+        bottom = imeBottomInset,
     )
     override val systemBars: PlatformInsets = captionBar
 
@@ -84,9 +88,12 @@ internal data class WinUIPlatformWindowInsets(
         ime: Boolean,
     ): PlatformWindowInsets {
         if (!safeInsets && !ime) return this
-        if (!safeInsets) return this
-
-        return WinUIPlatformWindowInsets()
+        return WinUIPlatformWindowInsets(
+            captionBarHeight = if (safeInsets) 0 else captionBarHeight,
+            titleBarLeftInset = if (safeInsets) PlatformInsets.Zero else titleBarLeftInset,
+            titleBarRightInset = if (safeInsets) PlatformInsets.Zero else titleBarRightInset,
+            imeBottomInset = if (ime) 0 else imeBottomInset,
+        )
     }
 }
 

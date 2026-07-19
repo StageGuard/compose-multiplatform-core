@@ -21,6 +21,7 @@ import windows.foundation.Rect
 import windows.foundation.TypedEventHandler
 import windows.ui.viewmanagement.InputPane
 import windows.ui.viewmanagement.InputPaneVisibilityEventArgs
+import kotlin.math.roundToInt
 
 internal data class WinUIInputPaneOccludedRect(
     val x: Float,
@@ -28,6 +29,35 @@ internal data class WinUIInputPaneOccludedRect(
     val width: Float,
     val height: Float,
 )
+
+internal fun calculateWinUIImeBottomInset(
+    rootHeightDp: Float,
+    occludedRect: WinUIInputPaneOccludedRect,
+    density: Float,
+): Int {
+    if (!rootHeightDp.isFinite() || rootHeightDp <= 0f) return 0
+    if (!density.isFinite() || density <= 0f) return 0
+    if (
+        !occludedRect.x.isFinite() ||
+        !occludedRect.y.isFinite() ||
+        !occludedRect.width.isFinite() ||
+        !occludedRect.height.isFinite() ||
+        occludedRect.width <= 0f ||
+        occludedRect.height <= 0f
+    ) {
+        return 0
+    }
+
+    val occludedBottom = occludedRect.y + occludedRect.height
+    if (!occludedBottom.isFinite() || occludedBottom < rootHeightDp) return 0
+
+    val occludedTop = occludedRect.y.coerceAtLeast(0f)
+    if (occludedTop >= rootHeightDp) return 0
+
+    val overlapPx = (rootHeightDp - occludedTop) * density
+    if (!overlapPx.isFinite() || overlapPx <= 0f) return 0
+    return overlapPx.roundToInt().coerceIn(0, 0xFFFF)
+}
 
 internal fun interface WinUIInputPaneEventRegistration {
     fun dispose()
@@ -45,6 +75,8 @@ internal interface WinUIInputPaneAdapter {
     fun addHiding(
         handler: () -> Unit,
     ): WinUIInputPaneEventRegistration
+
+    fun currentOccludedRect(): WinUIInputPaneOccludedRect?
 
     fun dispose() {}
 }
@@ -75,6 +107,9 @@ internal class WinUIInputPaneController(
             showing.dispose()
             throw throwable
         }
+        runCatching { inputPane.currentOccludedRect() }
+            .getOrNull()
+            ?.let(onOccludedRectChanged)
     }
 
     fun show(): Boolean =
@@ -124,6 +159,9 @@ private class ProjectedWinUIInputPaneAdapter(
     override fun tryShow(): Boolean = inputPane.tryShow()
 
     override fun tryHide(): Boolean = inputPane.tryHide()
+
+    override fun currentOccludedRect(): WinUIInputPaneOccludedRect? =
+        inputPane.occludedRect.toWinUIInputPaneOccludedRectOrNull()
 
     override fun addShowing(
         handler: (WinUIInputPaneOccludedRect) -> Unit,
@@ -176,3 +214,17 @@ private fun Rect.toWinUIInputPaneOccludedRect(): WinUIInputPaneOccludedRect =
         width = width,
         height = height,
     )
+
+private fun Rect.toWinUIInputPaneOccludedRectOrNull(): WinUIInputPaneOccludedRect? {
+    if (
+        !x.isFinite() ||
+        !y.isFinite() ||
+        !width.isFinite() ||
+        !height.isFinite() ||
+        width <= 0f ||
+        height <= 0f
+    ) {
+        return null
+    }
+    return toWinUIInputPaneOccludedRect()
+}
