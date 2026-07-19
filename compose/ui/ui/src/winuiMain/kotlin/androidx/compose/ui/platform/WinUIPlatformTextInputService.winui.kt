@@ -45,6 +45,8 @@ internal object WinUIPlatformTextInputService : PlatformTextInputService {
     private var rootToScreenMapperReady: () -> Boolean = { false }
     private var rootToViewportMapper: (Offset) -> Offset = { it }
     private var rootViewportBoundsInRoot: () -> Rect? = { null }
+    private var inputPaneControllerOwner: Any? = null
+    private var inputPaneController: WinUIInputPaneController? = null
     internal val nativeBridge: WinUINativeTextInputBridge = WinUINativeTextInputBridge(this)
 
     internal val isInputActive: Boolean
@@ -116,12 +118,14 @@ internal object WinUIPlatformTextInputService : PlatformTextInputService {
     }
 
     override fun showSoftwareKeyboard() {
+        inputPaneController?.show()
         activeInputSession = activeInputSession?.copy(isSoftwareKeyboardVisible = true)
         activeInputMethodSession =
             activeInputMethodSession?.copy(isSoftwareKeyboardVisible = true)
     }
 
     override fun hideSoftwareKeyboard() {
+        inputPaneController?.hide()
         activeInputSession = activeInputSession?.copy(isSoftwareKeyboardVisible = false)
         activeInputMethodSession =
             activeInputMethodSession?.copy(isSoftwareKeyboardVisible = false)
@@ -262,6 +266,7 @@ internal object WinUIPlatformTextInputService : PlatformTextInputService {
         activeInputSession = null
         activeInputMethodSession = null
         unregisterRootToScreenMapper(rootToScreenMapperOwner)
+        unregisterInputPaneController(inputPaneControllerOwner)
     }
 
     internal fun onWindowFocusChanged(isFocused: Boolean) {
@@ -291,6 +296,22 @@ internal object WinUIPlatformTextInputService : PlatformTextInputService {
         rootToScreenMapperReady = { false }
         rootToViewportMapper = { it }
         rootViewportBoundsInRoot = { null }
+    }
+
+    internal fun registerInputPaneController(
+        owner: Any,
+        controller: WinUIInputPaneController,
+    ) {
+        inputPaneControllerOwner = owner
+        inputPaneController = controller
+    }
+
+    internal fun unregisterInputPaneController(owner: Any?) {
+        if (owner != null && inputPaneControllerOwner !== owner) {
+            return
+        }
+        inputPaneControllerOwner = null
+        inputPaneController = null
     }
 
     internal fun mapRootOffsetToScreen(offset: Offset): Offset =

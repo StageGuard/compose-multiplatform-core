@@ -9,6 +9,11 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
+- **Closed desktop interop projection gap:** `KWINRT-063`. Snapshot
+  `0.1.0-20260719.013720-104` generates the C#/WinRT-style
+  `InputPaneInterop.getForWindow(RawAddress)` source addition, and compose-winui
+  compiles and passes its focused InputPane tests against the republished Skiko
+  WinUI snapshot.
 - **Open compose-winui validation gap:** `KWINRT-061`. Upstream
   kotlin-winrt has a target-module/root identity fallback for this path, but
   compose-winui has not yet validated a refreshed snapshot locally because the
@@ -37,7 +42,34 @@ baseline, not every retest attempt.
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-056`,
-  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, and `KWINRT-062`.
+  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, `KWINRT-062`, and
+  `KWINRT-063`.
+
+## KWINRT-063: Desktop InputPane interop helper was not generated
+
+- **Status:** Closed in kotlin-winrt snapshot
+  `0.1.0-20260719.013720-104` on 2026-07-19.
+- **Observed in:** compose-winui software-keyboard integration for a WinUI 3
+  desktop `Microsoft.UI.Xaml.Window`.
+- **Symptom:** explicit projection of
+  `Windows.UI.ViewManagement.InputPane` correctly generates `TryShow`,
+  `TryHide`, `Showing`, `Hiding`, `OccludedRect`, and
+  `GetForCurrentView`. Microsoft documents `GetForCurrentView` for Store/UWP
+  views; desktop apps must query the InputPane activation factory for
+  `IInputPaneInterop` and call `GetForWindow(HWND, REFIID)`.
+- **Resolution:** kotlin-winrt now mirrors C#/WinRT's
+  `Windows.UI.ViewManagement.InputPaneInterop` source addition. Its generated
+  `getForWindow(RawAddress)` helper owns the activation-factory query,
+  `IInputPaneInterop::GetForWindow` ABI call, and projected `InputPane` return
+  wrapping. Compose now retrieves the HWND with `WindowNative` and calls that
+  helper; the JVM-only activation-factory/vtable workaround and incorrect
+  `GetForCurrentView` desktop fallback were removed.
+- **Validation:** kotlin-winrt metadata, generator, suppression, and dependency
+  identity tests pass. With republished `skiko-winui`
+  `0.0.0-20260718.172102-37` / JVM build `-20`, compose-ui regenerates
+  `windows/ui/viewmanagement/InputPaneInterop.kt`, compiles the WinUI JVM
+  target, and passes the focused InputPane, text-input service, and source-set
+  architecture tests.
 
 ## KWINRT-062: Refreshed sample projection has conflicting interface IIDs
 

@@ -244,6 +244,55 @@ class WinUISourceSetIsolationTest {
         }
     }
 
+    @Test
+    fun winuiInputPaneUsesDesktopWindowInteropAndOwnerRegistration() {
+        val moduleRoot = findUiModuleRoot()
+        val jvmInteropFile = moduleRoot.resolve(
+            "src/winuiJvmMain/kotlin/androidx/compose/ui/platform/WinUIInputPane.winuiJvm.kt"
+        )
+        assertTrue(jvmInteropFile.exists(), "WinUI JVM InputPane interop source is missing.")
+        val jvmInteropSource = jvmInteropFile.readText()
+        val composeViewSource = moduleRoot.resolve(
+            "src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt"
+        ).readText()
+
+        listOf(
+            "WindowNative.getWindowHandle(window)",
+            "InputPaneInterop.getForWindow(windowHandle)",
+        ).forEach { expected ->
+            assertTrue(
+                jvmInteropSource.contains(expected),
+                "Desktop InputPane interop should contain $expected.",
+            )
+        }
+        listOf(
+            "createWinUIInputPaneController(",
+            "registerInputPaneController(this, controller)",
+            "unregisterInputPaneController(this)",
+        ).forEach { expected ->
+            assertTrue(
+                composeViewSource.contains(expected),
+                "Window-backed WinUIComposeView should contain $expected.",
+            )
+        }
+        listOf(
+            "ActivationFactory",
+            "WinRTProjectionIntrinsic",
+            "I_INPUT_PANE_INTEROP_IID",
+            "InputPane.Metadata.DEFAULT_INTERFACE_IID",
+            "getForCurrentView",
+            "KWINRT-063",
+            "ProcessBuilder",
+            "rundll32",
+            "powershell.exe",
+        ).forEach { forbidden ->
+            assertFalse(
+                jvmInteropSource.contains(forbidden),
+                "Compose InputPane acquisition must use the generated interop helper: found $forbidden.",
+            )
+        }
+    }
+
     private fun kotlinFiles(root: Path): List<Path> {
         if (!root.exists()) return emptyList()
         Files.walk(root).use { paths ->

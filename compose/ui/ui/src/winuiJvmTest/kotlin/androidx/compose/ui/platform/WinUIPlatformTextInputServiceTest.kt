@@ -336,6 +336,43 @@ class WinUIPlatformTextInputServiceTest {
     }
 
     @Test
+    fun softwareKeyboardControllerDelegatesToRegisteredInputPane() {
+        val owner = Any()
+        val pane = FakeWinUIInputPaneAdapter()
+        val controller = WinUIInputPaneController(pane)
+        WinUIPlatformTextInputService.registerInputPaneController(owner, controller)
+        WinUIPlatformTextInputService.startInput(
+            value = TextFieldValue(""),
+            imeOptions = ImeOptions.Default,
+            onEditCommand = {},
+            onImeActionPerformed = {},
+        )
+
+        WinUISoftwareKeyboardController.show()
+        WinUISoftwareKeyboardController.hide()
+
+        assertEquals(1, pane.tryShowCount)
+        assertEquals(1, pane.tryHideCount)
+        controller.dispose()
+    }
+
+    @Test
+    fun unregisteringDifferentOwnerKeepsActiveInputPaneController() {
+        val registeredOwner = Any()
+        val pane = FakeWinUIInputPaneAdapter()
+        val controller = WinUIInputPaneController(pane)
+        WinUIPlatformTextInputService.registerInputPaneController(registeredOwner, controller)
+
+        WinUIPlatformTextInputService.unregisterInputPaneController(Any())
+        WinUISoftwareKeyboardController.show()
+        WinUIPlatformTextInputService.unregisterInputPaneController(registeredOwner)
+        WinUISoftwareKeyboardController.show()
+
+        assertEquals(1, pane.tryShowCount)
+        controller.dispose()
+    }
+
+    @Test
     fun updateTextLayoutResultStoresRootAndScreenBounds() {
         val mapperOwner = Any()
         WinUIPlatformTextInputService.registerRootToScreenMapper(

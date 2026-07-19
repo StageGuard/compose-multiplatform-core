@@ -298,6 +298,7 @@ class WinUIComposeView internal constructor(
     private var saveableStateRegistry: SaveableStateRegistry? = null
     private var content: (@Composable () -> Unit)? = null
     private var platformWindowInsets: PlatformWindowInsets by mutableStateOf(EmptyPlatformWindowInsets)
+    private var inputPaneController: WinUIInputPaneController? = null
     private var currentInteropRoots: List<UIElement> = emptyList()
     private var isRootContentSyncScheduled = false
     private var isRenderRequestFlushScheduled = false
@@ -417,6 +418,11 @@ class WinUIComposeView internal constructor(
             { architectureComponentsOwner.setLifecycleState(Lifecycle.State.DESTROYED) },
             { clearXamlRootDensityObserver() },
             { WinUIPlatformTextInputService.unregisterRootToScreenMapper(this) },
+            { WinUIPlatformTextInputService.unregisterInputPaneController(this) },
+            {
+                inputPaneController?.dispose()
+                inputPaneController = null
+            },
             { owner.onAccessibilityProviderDetached() },
             { owner.dispose() },
             { clearLoadedRenderSchedulerRequest() },
@@ -425,8 +431,22 @@ class WinUIComposeView internal constructor(
     }
 
     internal fun setWindowFocused(isWindowFocused: Boolean) {
+        if (isWindowFocused) {
+            ensureInputPaneController()
+            inputPaneController?.let { controller ->
+                WinUIPlatformTextInputService.registerInputPaneController(this, controller)
+            }
+        } else {
+            WinUIPlatformTextInputService.unregisterInputPaneController(this)
+        }
         owner.setWindowFocused(isWindowFocused)
         WinUIPlatformTextInputService.onWindowFocusChanged(isWindowFocused)
+    }
+
+    private fun ensureInputPaneController() {
+        val currentWindow = window ?: return
+        if (isDisposed || inputPaneController != null) return
+        inputPaneController = createWinUIInputPaneController(currentWindow)
     }
 
     internal fun setWindowContainerSize(size: IntSize) {
