@@ -83,6 +83,11 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import java.nio.file.Path
+import java.nio.file.Paths
+import kotlin.io.path.exists
+import kotlin.io.path.name
+import kotlin.io.path.readText
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
@@ -102,6 +107,19 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WinUIOwnerTest {
+    @Test
+    fun indirectPointerFocusListenerIsRegisteredOnlyDuringOwnerLifetime() {
+        val source = findUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/node/WinUIOwner.winui.kt")
+            .readText()
+        val registration = "focusOwner.listeners += IndirectPointerInputFocusListener"
+        val removal = "focusOwner.listeners -= IndirectPointerInputFocusListener"
+
+        assertTrue(source.contains(registration))
+        assertTrue(source.contains(removal))
+        assertTrue(source.indexOf(registration) < source.indexOf(removal))
+    }
+
     @Test
     fun ownerRecordsPlatformStateHooks() {
         val events = OwnerEvents()
@@ -1326,6 +1344,18 @@ class WinUIOwnerTest {
             scheduleOutOfFrame = scheduleOutOfFrame,
             coordinateMapper = coordinateMapper,
         )
+    }
+
+    private fun findUiModuleRoot(): Path {
+        val start = Paths.get("").toAbsolutePath()
+        generateSequence(start) { it.parent }.forEach { candidate ->
+            val direct = candidate.resolve("src/winuiMain/kotlin")
+            if (direct.exists() && candidate.name == "ui") return candidate
+
+            val fromRepoRoot = candidate.resolve("compose/ui/ui/src/winuiMain/kotlin")
+            if (fromRepoRoot.exists()) return candidate.resolve("compose/ui/ui")
+        }
+        error("Could not find compose/ui/ui module root from $start.")
     }
 }
 

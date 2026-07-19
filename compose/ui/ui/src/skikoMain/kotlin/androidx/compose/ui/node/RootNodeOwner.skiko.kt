@@ -36,6 +36,7 @@ import androidx.compose.ui.autofill.AutofillManager
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusOwner
 import androidx.compose.ui.focus.FocusOwnerImpl
+import androidx.compose.ui.focus.IndirectPointerInputFocusListener
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
@@ -174,6 +175,7 @@ internal class RootNodeOwner(
     init {
         snapshotObserver.startObserving()
         owner.root.attach(owner)
+        focusOwner.listeners += IndirectPointerInputFocusListener
         platformContext.rootForTestListener?.onRootForTestCreated(rootForTest)
         onRootSizeChanged(size)
         updatePositionCacheAndDispatch()
@@ -189,6 +191,7 @@ internal class RootNodeOwner(
         platformContext.rootForTestListener?.onRootForTestDisposed(rootForTest)
         snapshotObserver.stopObserving()
         graphicsContext.dispose()
+        focusOwner.listeners -= IndirectPointerInputFocusListener
         _owner.dispose()
         // we don't need to call root.detach() because root will be garbage collected
         isDisposed = true

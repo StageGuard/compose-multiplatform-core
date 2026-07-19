@@ -109,6 +109,7 @@ import androidx.compose.ui.focus.FocusOwner
 import androidx.compose.ui.focus.FocusOwnerImpl
 import androidx.compose.ui.focus.FocusTargetModifierNode
 import androidx.compose.ui.focus.FocusTargetNode
+import androidx.compose.ui.focus.IndirectPointerInputFocusListener
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.focus.calculateFocusRectRelativeTo
 import androidx.compose.ui.focus.focusRect
@@ -183,10 +184,8 @@ import androidx.compose.ui.node.OwnerSnapshotObserver
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.node.SemanticsModifierNode
 import androidx.compose.ui.node.TraversableNode
-import androidx.compose.ui.node.ancestors
 import androidx.compose.ui.node.requireLayoutCoordinates
 import androidx.compose.ui.node.requireLayoutNode
-import androidx.compose.ui.node.setOfAncestors
 import androidx.compose.ui.platform.MotionEventVerifierApi29.isValidMotionEvent
 import androidx.compose.ui.platform.coreshims.ViewCompatShims
 import androidx.compose.ui.relocation.BringIntoViewModifierNode
@@ -209,7 +208,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.round
-import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastIsFinite
 import androidx.compose.ui.util.fastLastOrNull
 import androidx.compose.ui.util.fastRoundToInt
@@ -1422,18 +1420,7 @@ internal class AndroidComposeView(context: Context, composeViewContext: ComposeV
         previous: FocusTargetModifierNode?,
         current: FocusTargetModifierNode?,
     ) {
-        val previousIndirectPointerEventModifiers =
-            previous?.ancestors(type = Nodes.IndirectPointerInput, includeSelf = true) ?: return
-
-        val currentIndirectPointerEventModifiers =
-            current?.setOfAncestors(type = Nodes.IndirectPointerInput, includeSelf = true)
-
-        previousIndirectPointerEventModifiers.fastForEach {
-            val stillHasFocus = currentIndirectPointerEventModifiers?.contains(it) ?: false
-            if (!stillHasFocus) {
-                it.onCancelIndirectPointerInput()
-            }
-        }
+        IndirectPointerInputFocusListener.onFocusChanged(previous, current)
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {

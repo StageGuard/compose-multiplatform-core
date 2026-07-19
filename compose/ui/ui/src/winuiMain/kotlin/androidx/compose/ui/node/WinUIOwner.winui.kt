@@ -36,6 +36,7 @@ import androidx.compose.ui.draganddrop.WinUIDragAndDropManager
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusOwner
 import androidx.compose.ui.focus.FocusOwnerImpl
+import androidx.compose.ui.focus.IndirectPointerInputFocusListener
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.focus.WinUIEmbeddedViewPlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
@@ -249,6 +250,7 @@ internal class WinUIOwner(
         root.attach(this)
         semanticsOwner.listeners += winUIAutofill
         focusOwner.listeners += winUIAutofill
+        focusOwner.listeners += IndirectPointerInputFocusListener
         measureAndLayoutDelegate.updateRootConstraints(Constraints())
     }
 
@@ -261,6 +263,7 @@ internal class WinUIOwner(
         }
         semanticsOwner.listeners -= winUIAutofill
         focusOwner.listeners -= winUIAutofill
+        focusOwner.listeners -= IndirectPointerInputFocusListener
         releaseActivePlatformState()
         winUIAutofill.dispose()
         cancelPointerInput()
