@@ -30,6 +30,7 @@ import androidx.compose.ui.draganddrop.DragAndDropNode
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
@@ -274,6 +275,15 @@ sealed interface ComposeScene : AutoCloseable {
      * only represent new pointers.
      */
     fun cancelPointerInput()
+
+    /**
+     * Send an [IndirectPointerEvent] to the focused content.
+     * @return true if the event was consumed by the content
+     */
+    fun sendIndirectPointerEvent(event: IndirectPointerEvent): Boolean
+
+    /** Cancel ongoing indirect pointer input in the focused content. */
+    fun cancelIndirectPointerInput()
 
     /**
      * Send [KeyEvent] to the content.

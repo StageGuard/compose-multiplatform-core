@@ -27,6 +27,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
@@ -276,6 +277,20 @@ internal abstract class BaseComposeScene(
         inputHandler.cancelPointerInput()
     }
 
+    override fun sendIndirectPointerEvent(event: IndirectPointerEvent): Boolean =
+        postponeInvalidation("BaseComposeScene:sendIndirectPointerEvent") {
+            processIndirectPointerEvent(event).also {
+                frameRecomposer.performScheduledEffects()
+            }
+        }
+
+    override fun cancelIndirectPointerInput() {
+        postponeInvalidation("BaseComposeScene:cancelIndirectPointerInput") {
+            processCancelIndirectPointerInput()
+            frameRecomposer.performScheduledEffects()
+        }
+    }
+
     override fun sendKeyEvent(keyEvent: KeyEvent): Boolean =
         postponeInvalidation("BaseComposeScene:sendKeyEvent") {
             inputHandler.onKeyEvent(keyEvent).also {
@@ -323,6 +338,10 @@ internal abstract class BaseComposeScene(
     protected abstract fun processPointerInputEvent(event: PointerInputEvent): PointerEventResult
 
     protected abstract fun processCancelPointerInput()
+
+    protected abstract fun processIndirectPointerEvent(event: IndirectPointerEvent): Boolean
+
+    protected abstract fun processCancelIndirectPointerInput()
 
     protected abstract fun processKeyEvent(keyEvent: KeyEvent): Boolean
 

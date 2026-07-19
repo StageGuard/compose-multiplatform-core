@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.SkiaGraphicsContext
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -330,6 +331,14 @@ internal class RootNodeOwner(
 
     fun onKeyEvent(keyEvent: KeyEvent): Boolean {
         return focusOwner.dispatchKeyEvent(keyEvent) || handleFocusKeys(keyEvent)
+    }
+
+    fun onIndirectPointerEvent(event: IndirectPointerEvent): Boolean {
+        return focusOwner.dispatchIndirectPointerEvent(event)
+    }
+
+    fun onCancelIndirectPointerInput() {
+        focusOwner.dispatchIndirectPointerCancel()
     }
 
     private fun handleFocusKeys(keyEvent: KeyEvent): Boolean {

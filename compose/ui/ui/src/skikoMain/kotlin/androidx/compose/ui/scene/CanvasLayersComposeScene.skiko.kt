@@ -30,6 +30,7 @@ import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -188,6 +189,7 @@ private class CanvasLayersComposeSceneImpl(
     private val focusedOwner
         get() = focusedLayer?.owner ?: mainOwner
     private var gestureOwner: RootNodeOwner? = null
+    private var indirectPointerInputOwner: RootNodeOwner? = null
     private var lastHoverOwner: RootNodeOwner? = null
 
     init {
@@ -279,6 +281,18 @@ private class CanvasLayersComposeSceneImpl(
 
         // Reset gesture owner because all ongoing gestures are cancelled
         gestureOwner = null
+    }
+
+    override fun processIndirectPointerEvent(event: IndirectPointerEvent): Boolean {
+        val owner = focusedOwner
+        val consumed = owner.onIndirectPointerEvent(event)
+        indirectPointerInputOwner = if (event.changes.fastAny { it.pressed }) owner else null
+        return consumed
+    }
+
+    override fun processCancelIndirectPointerInput() {
+        indirectPointerInputOwner?.onCancelIndirectPointerInput()
+        indirectPointerInputOwner = null
     }
 
     override fun processKeyEvent(keyEvent: KeyEvent): Boolean =
@@ -495,6 +509,9 @@ private class CanvasLayersComposeSceneImpl(
         }
         if (owner == gestureOwner) {
             gestureOwner = null
+        }
+        if (owner == indirectPointerInputOwner) {
+            indirectPointerInputOwner = null
         }
         semanticsOwnerListener?.onSemanticsOwnerRemoved(owner.semanticsOwner)
     }

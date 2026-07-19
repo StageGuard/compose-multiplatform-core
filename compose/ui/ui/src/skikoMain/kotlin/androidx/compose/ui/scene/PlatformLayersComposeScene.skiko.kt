@@ -22,6 +22,7 @@ import androidx.compose.runtime.CompositionContext
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.pointer.PointerInputEvent
 import androidx.compose.ui.input.rotary.RotaryScrollEvent
@@ -178,6 +179,13 @@ private class PlatformLayersComposeSceneImpl(
 
     override fun processCancelPointerInput() {
         mainOwner.onCancelPointerInput()
+    }
+
+    override fun processIndirectPointerEvent(event: IndirectPointerEvent): Boolean =
+        mainOwner.onIndirectPointerEvent(event)
+
+    override fun processCancelIndirectPointerInput() {
+        mainOwner.onCancelIndirectPointerInput()
     }
 
     override fun processKeyEvent(keyEvent: KeyEvent): Boolean =
