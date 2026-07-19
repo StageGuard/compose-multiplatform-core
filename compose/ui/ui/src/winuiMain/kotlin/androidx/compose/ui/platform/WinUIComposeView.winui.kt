@@ -33,6 +33,7 @@ import androidx.compose.ui.focus.WinUIPlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asComposeCanvas
+import androidx.compose.ui.input.indirect.toComposeIndirectPointerEvent
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -280,6 +281,15 @@ class WinUIComposeView internal constructor(
     internal val isScreenCoordinateConversionReady: Boolean
         get() = rootContentControl.isLoaded && !owner.isMeasureLayoutInProgress
     init {
+        window?.let { owningWindow ->
+            renderHost.bindIndirectPointerInput(
+                window = owningWindow,
+                onEvent = { native ->
+                    owner.sendIndirectPointerEvent(native.toComposeIndirectPointerEvent())
+                },
+                onCancel = owner::cancelIndirectPointerInput,
+            )
+        }
         renderHost.setAccessibilityProvider(owner.accessibilityProvider)
         owner.onAccessibilityProviderAttached()
         WinUIPlatformTextInputService.registerRootToScreenMapper(
@@ -427,6 +437,7 @@ class WinUIComposeView internal constructor(
                 inputPaneController?.dispose()
                 inputPaneController = null
             },
+            { renderHost.closeIndirectPointerInput() },
             { owner.onAccessibilityProviderDetached() },
             { owner.dispose() },
             { clearLoadedRenderSchedulerRequest() },

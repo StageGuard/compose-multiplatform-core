@@ -51,6 +51,7 @@ import androidx.compose.ui.hapticfeedback.WinUIHapticFeedback
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.WinUIInputModeManager
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -797,6 +798,17 @@ internal class WinUIOwner(
         lastMousePointerEvent = null
         pointerEventSender.reset()
         pointerInputEventProcessor.processCancel()
+    }
+
+    internal fun sendIndirectPointerEvent(event: IndirectPointerEvent): Boolean {
+        if (isShuttingDown) return false
+        return focusOwner.dispatchIndirectPointerEvent(event)
+    }
+
+    internal fun cancelIndirectPointerInput() {
+        if (!isShuttingDown) {
+            focusOwner.dispatchIndirectPointerCancel()
+        }
     }
 
     internal fun sendKeyEvent(keyEvent: KeyEvent): Boolean {

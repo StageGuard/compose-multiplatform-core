@@ -109,15 +109,49 @@ import kotlin.test.assertTrue
 class WinUIOwnerTest {
     @Test
     fun indirectPointerFocusListenerIsRegisteredOnlyDuringOwnerLifetime() {
-        val source = findUiModuleRoot()
-            .resolve("src/winuiMain/kotlin/androidx/compose/ui/node/WinUIOwner.winui.kt")
-            .readText()
+        val source = winUIOwnerSource()
         val registration = "focusOwner.listeners += IndirectPointerInputFocusListener"
         val removal = "focusOwner.listeners -= IndirectPointerInputFocusListener"
 
         assertTrue(source.contains(registration))
         assertTrue(source.contains(removal))
         assertTrue(source.indexOf(registration) < source.indexOf(removal))
+    }
+
+    @Test
+    fun indirectPointerDispatchDelegatesToFocusOwner() {
+        val source = winUIOwnerSource()
+
+        assertTrue(
+            source.contains(
+                "internal fun sendIndirectPointerEvent(event: IndirectPointerEvent): Boolean"
+            )
+        )
+        assertTrue(source.contains("return focusOwner.dispatchIndirectPointerEvent(event)"))
+        assertTrue(source.contains("internal fun cancelIndirectPointerInput()"))
+        assertTrue(source.contains("focusOwner.dispatchIndirectPointerCancel()"))
+    }
+
+    @Test
+    fun composeViewBindsOnlyOwningWindowAndClosesInputBeforeOwner() {
+        val source = findUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt")
+            .readText()
+        val ownerIndex = source.indexOf("internal val owner = WinUIOwner(")
+        val conditionalBindingIndex = source.indexOf("window?.let { owningWindow ->")
+        val closeBindingIndex = source.indexOf("{ renderHost.closeIndirectPointerInput() }")
+        val ownerDisposeIndex = source.indexOf("{ owner.dispose() }")
+
+        assertTrue(conditionalBindingIndex > ownerIndex)
+        assertTrue(source.contains("renderHost.bindIndirectPointerInput("))
+        assertTrue(
+            source.contains(
+                "owner.sendIndirectPointerEvent(native.toComposeIndirectPointerEvent())"
+            )
+        )
+        assertTrue(source.contains("onCancel = owner::cancelIndirectPointerInput"))
+        assertTrue(closeBindingIndex >= 0)
+        assertTrue(closeBindingIndex < ownerDisposeIndex)
     }
 
     @Test
@@ -1357,6 +1391,11 @@ class WinUIOwnerTest {
         }
         error("Could not find compose/ui/ui module root from $start.")
     }
+
+    private fun winUIOwnerSource(): String =
+        findUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/node/WinUIOwner.winui.kt")
+            .readText()
 }
 
 private class OwnerEvents {

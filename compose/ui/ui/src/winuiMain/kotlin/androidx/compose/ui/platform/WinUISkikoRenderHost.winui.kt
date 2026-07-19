@@ -17,13 +17,17 @@
 package androidx.compose.ui.platform
 
 import microsoft.ui.xaml.FrameworkElement
+import microsoft.ui.xaml.Window
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import org.jetbrains.skiko.GraphicsApi
 import org.jetbrains.skiko.SkikoRenderDelegate
 import org.jetbrains.skiko.winui.WinUIAccessibilityProvider
 import org.jetbrains.skiko.winui.WinUIFrameScheduler
+import org.jetbrains.skiko.winui.WinUIIndirectPointerEvent
+import org.jetbrains.skiko.winui.WinUIInputHandler
 import org.jetbrains.skiko.winui.WinUISkiaLayer
+import org.jetbrains.skiko.winui.bindWinUIIndirectPointerInput
 
 internal class WinUISkikoRenderHost(
     private val layer: WinUISkikoLayerAdapter,
@@ -40,6 +44,7 @@ internal class WinUISkikoRenderHost(
     )
 
     private var frameScheduler: AutoCloseable? = null
+    private var indirectPointerInputBinding: AutoCloseable? = null
     private var isClosed = false
     private var isSurfaceAttached = false
     private var requestedSurfaceSize: IntSize? = null
@@ -93,6 +98,36 @@ internal class WinUISkikoRenderHost(
             layer.notifyAccessibilityChanged(update)
             accessibilityUpdateCount += 1
         }
+    }
+
+    fun bindIndirectPointerInput(
+        window: Window,
+        onEvent: (WinUIIndirectPointerEvent) -> Boolean,
+        onCancel: () -> Unit,
+    ) {
+        check(!isClosed) {
+            "Cannot bind WinUI indirect pointer input after the render host is closed."
+        }
+        closeIndirectPointerInput()
+        layer.inputHandler = object : WinUIInputHandler {
+            override fun onIndirectPointerEvent(event: WinUIIndirectPointerEvent): Boolean =
+                onEvent(event)
+
+            override fun onIndirectPointerCancel() {
+                onCancel()
+            }
+        }
+        try {
+            indirectPointerInputBinding = layer.bindIndirectPointerInput(window)
+        } catch (throwable: Throwable) {
+            layer.inputHandler = null
+            throw throwable
+        }
+    }
+
+    fun closeIndirectPointerInput() {
+        if (isClosed) return
+        closeIndirectPointerInputPreserving(null)?.let { throw it }
     }
 
     fun requestRender(throttledToVsync: Boolean = true) {
@@ -173,6 +208,7 @@ internal class WinUISkikoRenderHost(
         isClosed = true
         isSurfaceAttached = false
         var failure: Throwable? = null
+        failure = closeIndirectPointerInputPreserving(failure)
         failure = closeFrameSchedulerPreserving(failure)
         failure = layer.closePreserving(failure)
         failure = renderDelegateCloseable.closePreserving(failure)
@@ -199,6 +235,18 @@ internal class WinUISkikoRenderHost(
         frameScheduler = null
         debugRender { "closeFrameScheduler hadScheduler=${scheduler != null}" }
         return scheduler.closePreserving(previousFailure)
+    }
+
+    private fun closeIndirectPointerInputPreserving(previousFailure: Throwable?): Throwable? {
+        val binding = indirectPointerInputBinding
+        indirectPointerInputBinding = null
+        var failure = binding.closePreserving(previousFailure)
+        try {
+            layer.inputHandler = null
+        } catch (throwable: Throwable) {
+            failure?.addSuppressed(throwable) ?: run { failure = throwable }
+        }
+        return failure
     }
 
     private fun diagnostics(): WinUISkikoRenderHostDiagnostics =
@@ -265,6 +313,8 @@ internal data class WinUISkikoRenderHostDiagnostics(
 internal interface WinUISkikoLayerAdapter : AutoCloseable {
     val component: FrameworkElement
 
+    var inputHandler: WinUIInputHandler?
+
     val renderApi: GraphicsApi
 
     val renderVersion: Long
@@ -284,6 +334,8 @@ internal interface WinUISkikoLayerAdapter : AutoCloseable {
     fun requestRender(throttledToVsync: Boolean)
 
     fun setSize(size: WinUISkikoSurfaceSize)
+
+    fun bindIndirectPointerInput(window: Window): AutoCloseable
 
     fun startFrameScheduler(): AutoCloseable
 }
@@ -310,6 +362,12 @@ private class DefaultWinUISkikoLayerAdapter(
 
     override val component: FrameworkElement
         get() = layer.component
+
+    override var inputHandler: WinUIInputHandler?
+        get() = layer.inputHandler
+        set(value) {
+            layer.inputHandler = value
+        }
 
     override val renderApi: GraphicsApi
         get() = layer.renderApi
@@ -359,6 +417,9 @@ private class DefaultWinUISkikoLayerAdapter(
         component.width = size.xamlWidth
         component.height = size.xamlHeight
     }
+
+    override fun bindIndirectPointerInput(window: Window): AutoCloseable =
+        window.bindWinUIIndirectPointerInput(layer)
 
     override fun startFrameScheduler(): WinUIFrameScheduler =
         layer.startFrameScheduler()
