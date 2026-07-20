@@ -75,6 +75,8 @@
 - [x] Provide WinUI actuals for common platform hooks such as time, delayed posting, view configuration, window info, URI handling, haptics, semantics region, focusability, and platform velocity tracking.
 - [x] Route initial WinUI JVM delayed posting back through the registered WinUI `DispatcherQueue` instead of running callbacks directly on the scheduler thread.
 - [x] Provide initial WinUI composition locals for density, layout direction, view configuration, font resolution, URI handling, active-window focus state, and AppWindow-backed container size.
+- [x] Observe the effective XAML theme and flow direction plus Windows text scale and animation settings, then update `LocalSystemTheme`, owner layout direction, `Density.fontScale`, and the root recomposer `MotionDurationScale` without recreating the Compose root.
+- [x] Drive each `WinUIComposeView` lifecycle from its loaded, visible, and active state: unattached or hidden roots remain `CREATED`, inactive loaded roots are `STARTED`, active loaded roots are `RESUMED`, and disposal is terminal `DESTROYED`.
 - [x] Route WinUI caption-bar/title-bar insets from `AppWindow.titleBar`
   (`height`, `leftInset`, and `rightInset`) into `WindowInsets.captionBar`,
   `WindowInsets.systemBars`, `safeDrawing`, and `safeContent`; keep the other
@@ -223,6 +225,7 @@
 - [x] Add compile validation for the new WinUI JVM source set.
 - [x] Add repository-local reusable `WinUIView` smoke validation for reset on deactivation, reactivation without recreation, and final release on disposal.
 - [x] Add repository-local composition-local smoke validation for WinUI density, layout direction, view configuration, font resolver, and URI handler.
+- [x] Add repository-local environment/lifecycle tests and window smoke coverage for effective Light/Dark theme changes, RTL flow-direction changes, positive text scale, attach-safe lifecycle locals, activated `RESUMED`, and disposal to `DESTROYED`.
 - [x] Add repository-local architecture-owner composition-local smoke validation for WinUI lifecycle, saved-state registry, and ViewModel store owners.
 - [x] Add repository-local architecture-owner smoke validation for WinUI `viewModel()` creation with `SavedStateHandle`, retention across `disposeComposition()`, and `ViewModelStore` clearing on `dispose()`.
 - [x] Add repository-local architecture-owner smoke validation for WinUI `LocalNavigationEventDispatcherOwner` host-default provisioning.
