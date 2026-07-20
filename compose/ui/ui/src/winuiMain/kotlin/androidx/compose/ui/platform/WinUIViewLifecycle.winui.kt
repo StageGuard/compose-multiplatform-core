@@ -22,7 +22,6 @@ import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.RoutedEventHandler
 import microsoft.ui.xaml.UIElement
 import microsoft.ui.xaml.Visibility
-import windows.foundation.EventRegistrationToken
 
 internal fun calculateWinUIViewLifecycleState(
     isLoaded: Boolean,
@@ -63,6 +62,14 @@ internal class WinUIViewLifecycleController(
         }
     }
 
+    fun setRootState(isLoaded: Boolean, isVisible: Boolean) {
+        if (!isDisposed) {
+            this.isLoaded = isLoaded
+            this.isVisible = isVisible
+            publishState()
+        }
+    }
+
     fun setActive(value: Boolean) {
         if (!isDisposed) {
             isActive = value
@@ -91,35 +98,44 @@ internal class WinUIViewLifecycleController(
     }
 }
 
+internal data class WinUIViewLifecycleRootState(
+    val isLoaded: Boolean,
+    val isVisible: Boolean,
+)
+
+internal interface WinUIViewLifecycleSource {
+    fun register(
+        onLoadedChanged: (Boolean) -> Unit,
+        onVisibilityChanged: (Boolean) -> Unit,
+    ): List<() -> Unit>
+
+    fun readRootState(): WinUIViewLifecycleRootState
+}
+
 internal class WinUIRootLifecycleBinding(
-    private val root: FrameworkElement,
+    private val source: WinUIViewLifecycleSource,
     private val controller: WinUIViewLifecycleController,
 ) : AutoCloseable {
+    constructor(
+        root: FrameworkElement,
+        controller: WinUIViewLifecycleController,
+    ) : this(FrameworkElementWinUIViewLifecycleSource(root), controller)
+
     private var isClosed = false
-
-    private val loadedHandler: RoutedEventHandler = { _, _ -> controller.setLoaded(true) }
-    private val unloadedHandler: RoutedEventHandler = { _, _ -> controller.setLoaded(false) }
-    private val visibilityHandler = DependencyPropertyChangedCallback { _, _ ->
-        runCatching { root.visibility == Visibility.Visible }
-            .getOrNull()
-            ?.let(controller::setVisible)
-    }
-
-    private val loadedToken: EventRegistrationToken? =
-        runCatching { root.loaded.add(loadedHandler) }.getOrNull()
-    private val unloadedToken: EventRegistrationToken? =
-        runCatching { root.unloaded.add(unloadedHandler) }.getOrNull()
-    private val visibilityToken: Long? = runCatching {
-        root.registerPropertyChangedCallback(
-            UIElement.visibilityProperty,
-            visibilityHandler,
-        )
-    }.getOrNull()
+    private val unregisterActions = source.register(
+        onLoadedChanged = { isLoaded ->
+            if (!isClosed) controller.setLoaded(isLoaded)
+        },
+        onVisibilityChanged = { isVisible ->
+            if (!isClosed) controller.setVisible(isVisible)
+        },
+    )
 
     init {
-        controller.setLoaded(runCatching { root.isLoaded }.getOrDefault(false))
-        controller.setVisible(
-            runCatching { root.visibility == Visibility.Visible }.getOrDefault(true),
+        val rootState = source.readRootState()
+        controller.setRootState(
+            isLoaded = rootState.isLoaded,
+            isVisible = rootState.isVisible,
         )
     }
 
@@ -127,17 +143,50 @@ internal class WinUIRootLifecycleBinding(
         if (isClosed) return
         isClosed = true
 
-        loadedToken?.let { token ->
-            runCatching { root.loaded.remove(token) }
-        }
-        unloadedToken?.let { token ->
-            runCatching { root.unloaded.remove(token) }
-        }
-        visibilityToken?.let { token ->
-            runCatching {
-                root.unregisterPropertyChangedCallback(UIElement.visibilityProperty, token)
-            }
+        unregisterActions.forEach { unregister ->
+            runCatching { unregister() }
         }
         controller.dispose()
     }
+}
+
+private class FrameworkElementWinUIViewLifecycleSource(
+    private val root: FrameworkElement,
+) : WinUIViewLifecycleSource {
+    override fun register(
+        onLoadedChanged: (Boolean) -> Unit,
+        onVisibilityChanged: (Boolean) -> Unit,
+    ): List<() -> Unit> {
+        val loadedHandler: RoutedEventHandler = { _, _ -> onLoadedChanged(true) }
+        val unloadedHandler: RoutedEventHandler = { _, _ -> onLoadedChanged(false) }
+        val visibilityHandler = DependencyPropertyChangedCallback { _, _ ->
+            runCatching { root.visibility == Visibility.Visible }
+                .getOrNull()
+                ?.let(onVisibilityChanged)
+        }
+
+        return buildList {
+            runCatching { root.loaded.add(loadedHandler) }.getOrNull()?.let { token ->
+                add { root.loaded.remove(token) }
+            }
+            runCatching { root.unloaded.add(unloadedHandler) }.getOrNull()?.let { token ->
+                add { root.unloaded.remove(token) }
+            }
+            runCatching {
+                root.registerPropertyChangedCallback(
+                    UIElement.visibilityProperty,
+                    visibilityHandler,
+                )
+            }.getOrNull()?.let { token ->
+                add {
+                    root.unregisterPropertyChangedCallback(UIElement.visibilityProperty, token)
+                }
+            }
+        }
+    }
+
+    override fun readRootState(): WinUIViewLifecycleRootState = WinUIViewLifecycleRootState(
+        isLoaded = runCatching { root.isLoaded }.getOrDefault(false),
+        isVisible = runCatching { root.visibility == Visibility.Visible }.getOrDefault(true),
+    )
 }
