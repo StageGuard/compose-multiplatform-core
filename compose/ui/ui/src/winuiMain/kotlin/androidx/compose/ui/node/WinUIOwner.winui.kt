@@ -216,7 +216,8 @@ internal class WinUIOwner(
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override val fontLoader: Font.ResourceLoader = WinUIFontResourceLoader
     override val fontFamilyResolver: FontFamily.Resolver = createFontFamilyResolver()
-    override val layoutDirection: LayoutDirection = LayoutDirection.Ltr
+    override var layoutDirection: LayoutDirection by mutableStateOf(LayoutDirection.Ltr)
+        private set
     override val localeList: LocaleList = LocaleList.current
     override val snapshotObserver = snapshotInvalidationTracker.snapshotObserver()
     override val modifierLocalManager: ModifierLocalManager = ModifierLocalManager(this)
@@ -320,6 +321,13 @@ internal class WinUIOwner(
             )
             onMeasureAndLayoutRequested()
         }
+    }
+
+    fun updateLayoutDirection(layoutDirection: LayoutDirection) {
+        if (isShuttingDown || this.layoutDirection == layoutDirection) return
+        this.layoutDirection = layoutDirection
+        root.layoutDirection = layoutDirection
+        onMeasureAndLayoutRequested()
     }
 
     private fun updateWindowContainerSize(size: IntSize) {

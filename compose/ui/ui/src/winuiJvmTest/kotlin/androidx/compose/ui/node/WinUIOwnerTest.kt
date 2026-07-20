@@ -251,6 +251,19 @@ class WinUIOwnerTest {
     }
 
     @Test
+    fun ownerLayoutDirectionIsMutableAndSchedulesLayout() {
+        val source = winUIOwnerSource()
+        assertTrue(
+            source.contains(
+                "override var layoutDirection: LayoutDirection by mutableStateOf(LayoutDirection.Ltr)"
+            )
+        )
+        assertTrue(source.contains("fun updateLayoutDirection(layoutDirection: LayoutDirection)"))
+        assertTrue(source.contains("root.layoutDirection = layoutDirection"))
+        assertTrue(source.contains("onMeasureAndLayoutRequested()"))
+    }
+
+    @Test
     fun accessibilityBridgeDefersEventsUntilAccessibilityIsForcedForTesting() {
         val owner = createOwner()
         try {

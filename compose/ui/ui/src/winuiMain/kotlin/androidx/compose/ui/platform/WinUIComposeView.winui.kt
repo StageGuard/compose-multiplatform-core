@@ -29,6 +29,7 @@ import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.retain.LocalRetainedValuesStoreProvider
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.LocalSystemTheme
 import androidx.compose.ui.focus.WinUIPlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -53,7 +54,6 @@ import androidx.compose.ui.viewinterop.WinUIInteropTransaction
 import androidx.compose.ui.viewinterop.WinUIRootContentHost
 import androidx.compose.ui.viewinterop.WinUIRootContentControl
 import androidx.compose.ui.viewinterop.collectWinUIInteropRoots
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.enableSavedStateHandles
 import androidx.savedstate.compose.LocalSavedStateRegistryOwner
 import windows.foundation.EventRegistrationToken
@@ -229,7 +229,6 @@ class WinUIComposeView internal constructor(
         enforceMainThread = false,
     ).apply {
         enableSavedStateHandles()
-        setLifecycleState(Lifecycle.State.RESUMED)
     }
     private val hostDefaultProvider = WinUIHostDefaultProvider(architectureComponentsOwner)
     private val retainedValuesStore = WinUIRetainedValuesStore()
@@ -326,6 +325,20 @@ class WinUIComposeView internal constructor(
     private var xamlRootChangedHandler: TypedEventHandler<XamlRoot, XamlRootChangedEventArgs>? =
         null
     private var xamlRootChangedToken: EventRegistrationToken? = null
+    private var systemEnvironment by mutableStateOf(WinUIEnvironment())
+    private val motionDurationScale = WinUIMotionDurationScale()
+    private val lifecycleController = WinUIViewLifecycleController(
+        architectureComponentsOwner::setLifecycleState,
+    )
+    private val lifecycleBinding = WinUIRootLifecycleBinding(
+        root = rootContentControl,
+        controller = lifecycleController,
+    )
+    private val environmentObserver = WinUIEnvironmentObserver(
+        source = WinUIXamlEnvironmentSource(rootContentControl),
+        dispatch = { block -> dispatchQueue.dispatch(block) },
+        onChanged = ::applySystemEnvironment,
+    )
     private val keyInputAdapter = WinUIKeyInputAdapter(
         root = root,
         owner = owner,
@@ -383,6 +396,7 @@ class WinUIComposeView internal constructor(
                 LocalPlatformWindowInsets provides platformWindowInsets,
                 LocalWinUIRoot provides rootContentControl,
                 LocalWinUIWindow provides window,
+                LocalSystemTheme provides systemEnvironment.systemTheme,
             ) {
                 LocalRetainedValuesStoreProvider(retainedValuesStore) {
                     ProvideCommonCompositionLocals(
@@ -429,7 +443,8 @@ class WinUIComposeView internal constructor(
             { dragAndDropAdapter.dispose() },
             { pointerCursorAdapter.dispose() },
             { retainedValuesStore.dispose() },
-            { architectureComponentsOwner.setLifecycleState(Lifecycle.State.DESTROYED) },
+            { environmentObserver.close() },
+            { lifecycleBinding.close() },
             { clearXamlRootDensityObserver() },
             { WinUIPlatformTextInputService.unregisterRootToScreenMapper(this) },
             { WinUIPlatformTextInputService.unregisterInputPaneController(this) },
@@ -454,6 +469,7 @@ class WinUIComposeView internal constructor(
         } else {
             WinUIPlatformTextInputService.unregisterInputPaneController(this)
         }
+        lifecycleController.setActive(isWindowFocused)
         owner.setWindowFocused(isWindowFocused)
         WinUIPlatformTextInputService.onWindowFocusChanged(isWindowFocused)
     }
@@ -470,6 +486,16 @@ class WinUIComposeView internal constructor(
     private fun setInputPaneOccludedRect(occludedRect: WinUIInputPaneOccludedRect?) {
         inputPaneOccludedRect = occludedRect
         updatePlatformWindowInsets()
+    }
+
+    private fun applySystemEnvironment(environment: WinUIEnvironment) {
+        if (isDisposed) return
+        systemEnvironment = environment
+        owner.updateLayoutDirection(environment.layoutDirection)
+        owner.updateDensity(Density(owner.density.density, environment.fontScale))
+        motionDurationScale.updateAnimationsEnabled(environment.animationsEnabled)
+        scheduleRootContentSync()
+        requestRender()
     }
 
     internal fun setWindowContainerSize(size: IntSize) {
@@ -538,7 +564,7 @@ class WinUIComposeView internal constructor(
         GlobalSnapshotManager.ensureStarted(dispatcherQueue)
         val compositionContext = parentCompositionContext ?: run {
             val dispatcher = WinUIDispatcher(dispatcherQueue)
-            FrameRecomposer(dispatcher, ::requestRender).also {
+            FrameRecomposer(dispatcher + motionDurationScale, ::requestRender).also {
                 frameRecomposer = it
             }.compositionContext
         }
