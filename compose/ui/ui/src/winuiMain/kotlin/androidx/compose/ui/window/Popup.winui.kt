@@ -300,6 +300,7 @@ private fun WinUIWindowPopupLayout(
     val parentWindow = LocalWinUIWindow.current
     val parentRoot = LocalWinUIRoot.current
     val containerSize = LocalWindowInfo.current.containerSize
+    val parentIsActive = LocalWindowInfo.current.isWindowFocused
     val layoutDirection = LocalLayoutDirection.current
     val currentContent by rememberUpdatedState(content)
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
@@ -312,6 +313,7 @@ private fun WinUIWindowPopupLayout(
             properties = properties,
             parentBoundsInWindow = parentBoundsInWindow.value,
             windowSize = containerSize,
+            parentIsActive = parentIsActive,
             layoutDirection = layoutDirection,
             onDismissRequest = currentOnDismissRequest,
             content = currentContent,
@@ -341,7 +343,13 @@ private class WinUIFlyoutPopupHost(
     parentWindow: XamlWindow?,
     private val parentRoot: FrameworkElement?,
 ) {
-    private val composeView = WinUIComposeView()
+    private val composeView = parentWindow?.let { window ->
+        WinUIComposeView(
+            window = window,
+            onSensitiveContentChanged = {},
+            observeWindowActivation = false,
+        )
+    } ?: WinUIComposeView()
     private val flyout = TransparentComposeFlyout(composeView.root)
     private val transparentBackdrop = parentWindow?.let {
         WinUITransparentBackdrop(
@@ -351,6 +359,7 @@ private class WinUIFlyoutPopupHost(
     }
     private var shouldBeOpen = false
     private var isOpen = false
+    private var parentIsActive = false
     private var contentSize = IntSize.Zero
     private var popupPositionProvider: PopupPositionProvider? = null
     private var properties: PopupProperties by mutableStateOf(PopupProperties())
@@ -387,6 +396,7 @@ private class WinUIFlyoutPopupHost(
         }
         closedToken = flyout.closed.add { _, _ ->
             isOpen = false
+            updateHostActivation()
         }
         keyDownToken = composeView.root.previewKeyDown.add(KeyEventHandler { _, args ->
             if (!args.handled && properties.focusable && isOpen && args.key.isPopupBackKey()) {
@@ -449,6 +459,7 @@ private class WinUIFlyoutPopupHost(
     fun close() {
         shouldBeOpen = false
         isOpen = false
+        updateHostActivation()
         closingToken?.let { token ->
             runCatching { flyout.closing.remove(token) }
         }
@@ -477,6 +488,7 @@ private class WinUIFlyoutPopupHost(
         properties: PopupProperties,
         parentBoundsInWindow: IntRect,
         windowSize: IntSize,
+        parentIsActive: Boolean,
         layoutDirection: androidx.compose.ui.unit.LayoutDirection,
         onDismissRequest: (() -> Unit)?,
         content: @Composable () -> Unit,
@@ -485,6 +497,7 @@ private class WinUIFlyoutPopupHost(
         this.properties = properties
         this.parentBoundsInWindow = parentBoundsInWindow
         this.windowSize = windowSize
+        this.parentIsActive = parentIsActive
         this.layoutDirection = layoutDirection
         this.onDismissRequest = onDismissRequest
         this.currentContent = content
@@ -499,6 +512,7 @@ private class WinUIFlyoutPopupHost(
             dismissOnClickOutside = properties.dismissOnClickOutside,
             onDismissRequest = onDismissRequest,
         )
+        updateHostActivation()
         if (windowSize != IntSize.Zero) {
             composeView.setWindowContainerSize(windowSize)
             composeView.rootFrameworkElement.width = windowSize.width.toDouble()
@@ -568,7 +582,12 @@ private class WinUIFlyoutPopupHost(
             }.onFailure {
                 isOpen = false
             }
+            updateHostActivation()
         }
+    }
+
+    private fun updateHostActivation() {
+        composeView.setHostActive(parentIsActive && isOpen)
     }
 }
 

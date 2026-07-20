@@ -76,7 +76,10 @@ class WinUIComposeViewDisposalTest {
                 "pointerCursorAdapter.dispose()",
                 "retainedValuesStore.dispose()",
                 "environmentObserver.close()",
+                "windowActivationBinding?.close()",
                 "lifecycleBinding.close()",
+                "if (dispatchQueueDelegate.isInitialized())",
+                "dispatchQueueDelegate.value.close()",
                 "clearXamlRootDensityObserver()",
                 "WinUIPlatformTextInputService.unregisterRootToScreenMapper(this)",
                 "owner.onAccessibilityProviderDetached()",
@@ -90,6 +93,19 @@ class WinUIComposeViewDisposalTest {
             assertTrue(index > previousIndex, "Missing or reordered aggregated cleanup step: $step")
             previousIndex = index
         }
+    }
+
+    @Test
+    fun dispatchQueueIsLazilyOwnedAndConditionallyClosedBeforeOwnerTeardown() {
+        val source = winUIComposeViewSource()
+
+        assertTrue(
+            source.contains(
+                "private val dispatchQueueDelegate =\n" +
+                    "        lazy { WinUIDispatchQueue(requireRootDispatcherQueue()) }"
+            )
+        )
+        assertTrue(source.contains("private val dispatchQueue by dispatchQueueDelegate"))
     }
 
     private fun winUIComposeViewSource(): String =

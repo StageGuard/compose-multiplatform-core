@@ -22,6 +22,10 @@ import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.RoutedEventHandler
 import microsoft.ui.xaml.UIElement
 import microsoft.ui.xaml.Visibility
+import microsoft.ui.xaml.Window
+import microsoft.ui.xaml.WindowActivatedEventArgs
+import microsoft.ui.xaml.WindowActivationState
+import windows.foundation.TypedEventHandler
 
 internal fun calculateWinUIViewLifecycleState(
     isLoaded: Boolean,
@@ -147,6 +151,51 @@ internal class WinUIRootLifecycleBinding(
             runCatching { unregister() }
         }
         controller.dispose()
+    }
+}
+
+internal interface WinUIWindowActivationSource {
+    fun register(onActivated: (WindowActivationState) -> Unit): () -> Unit
+}
+
+internal class WinUIWindowActivationBinding(
+    private val source: WinUIWindowActivationSource,
+    private val onActiveChanged: (Boolean) -> Unit,
+) : AutoCloseable {
+    constructor(
+        window: Window,
+        onActiveChanged: (Boolean) -> Unit,
+    ) : this(WindowWinUIViewActivationSource(window), onActiveChanged)
+
+    private var isClosed = false
+    private var unregisterAction: (() -> Unit)? = runCatching {
+        source.register { activationState ->
+            if (!isClosed) {
+                onActiveChanged(activationState != WindowActivationState.Deactivated)
+            }
+        }
+    }.getOrNull()
+
+    override fun close() {
+        if (isClosed) return
+        isClosed = true
+        val unregister = unregisterAction
+        unregisterAction = null
+        if (unregister != null) {
+            runCatching { unregister() }
+        }
+    }
+}
+
+private class WindowWinUIViewActivationSource(
+    private val window: Window,
+) : WinUIWindowActivationSource {
+    override fun register(onActivated: (WindowActivationState) -> Unit): () -> Unit {
+        val handler: TypedEventHandler<Any?, WindowActivatedEventArgs> = { _, args ->
+            onActivated(args.windowActivationState)
+        }
+        val token = window.activated.add(handler)
+        return { window.activated.remove(token) }
     }
 }
 

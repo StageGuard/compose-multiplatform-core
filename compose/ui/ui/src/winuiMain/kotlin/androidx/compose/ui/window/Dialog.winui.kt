@@ -88,6 +88,7 @@ actual fun Dialog(
     val parentWindow = LocalWinUIWindow.current
     val parentRoot = LocalWinUIRoot.current
     val containerSize = LocalWindowInfo.current.containerSize
+    val parentIsActive = LocalWindowInfo.current.isWindowFocused
     val currentContent by rememberUpdatedState(content)
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
     val parentCompositionContext = rememberCompositionContext()
@@ -99,6 +100,7 @@ actual fun Dialog(
         dialogHost.update(
             properties = properties,
             windowSize = containerSize,
+            parentIsActive = parentIsActive,
             onDismissRequest = currentOnDismissRequest,
             content = currentContent,
         )
@@ -124,7 +126,13 @@ private class WinUIDialogHost(
     private val parentWindow: XamlWindow?,
     private val parentRoot: FrameworkElement?,
 ) {
-    private val composeView = WinUIComposeView()
+    private val composeView = parentWindow?.let { window ->
+        WinUIComposeView(
+            window = window,
+            onSensitiveContentChanged = {},
+            observeWindowActivation = false,
+        )
+    } ?: WinUIComposeView()
     private val flyout = TransparentComposeFlyout(composeView.root)
     private var properties: DialogProperties by mutableStateOf(DialogProperties())
     private var windowSize: IntSize by mutableStateOf(IntSize.Zero)
@@ -132,6 +140,7 @@ private class WinUIDialogHost(
     private var onDismissRequest: (() -> Unit)? = null
     private var shouldBeOpen = false
     private var isOpen = false
+    private var parentIsActive = false
     private var isClosed = false
     private var dialogContentBoundsInRoot = IntRect.Zero
     private val dismissalState = WinUIPopupDismissState(
@@ -157,6 +166,7 @@ private class WinUIDialogHost(
         }
         closedToken = flyout.closed.add { _, _ ->
             isOpen = false
+            updateHostActivation()
         }
         keyDownToken = composeView.root.previewKeyDown.add(KeyEventHandler { _, args ->
             if (!args.handled && isOpen && args.key.isDialogBackKey()) {
@@ -247,11 +257,13 @@ private class WinUIDialogHost(
     fun update(
         properties: DialogProperties,
         windowSize: IntSize,
+        parentIsActive: Boolean,
         onDismissRequest: () -> Unit,
         content: @Composable () -> Unit,
     ) {
         this.properties = properties
         this.windowSize = windowSize
+        this.parentIsActive = parentIsActive
         this.onDismissRequest = onDismissRequest
         this.currentContent = content
         dismissalState.update(
@@ -264,6 +276,7 @@ private class WinUIDialogHost(
         } else {
             LightDismissOverlayMode.Off
         }
+        updateHostActivation()
         if (windowSize != IntSize.Zero) {
             composeView.setWindowContainerSize(windowSize)
             composeView.rootFrameworkElement.width = windowSize.width.coerceAtLeast(1).toDouble()
@@ -283,6 +296,7 @@ private class WinUIDialogHost(
         isClosed = true
         shouldBeOpen = false
         isOpen = false
+        updateHostActivation()
         closingToken?.let { token -> runCatching { flyout.closing.remove(token) } }
         closingToken = null
         closedToken?.let { token -> runCatching { flyout.closed.remove(token) } }
@@ -320,7 +334,12 @@ private class WinUIDialogHost(
                 it.placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
             }
             runCatching { flyout.showAt(root, options) }.onFailure { isOpen = false }
+            updateHostActivation()
         }
+    }
+
+    private fun updateHostActivation() {
+        composeView.setHostActive(parentIsActive && isOpen)
     }
 }
 

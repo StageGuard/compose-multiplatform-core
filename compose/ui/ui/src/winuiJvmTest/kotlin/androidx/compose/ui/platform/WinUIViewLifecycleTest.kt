@@ -17,6 +17,7 @@
 package androidx.compose.ui.platform
 
 import androidx.lifecycle.Lifecycle
+import microsoft.ui.xaml.WindowActivationState
 import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -160,6 +161,39 @@ class WinUIViewLifecycleTest {
     }
 
     @Test
+    fun windowActivationBindingMapsStatesUnregistersOnceAndMakesCallbacksInert() {
+        val activeStates = mutableListOf<Boolean>()
+        val source = FakeWinUIWindowActivationSource()
+        val binding = WinUIWindowActivationBinding(source, activeStates::add)
+
+        source.emit(WindowActivationState.CodeActivated)
+        source.emit(WindowActivationState.Deactivated)
+        source.emit(WindowActivationState.PointerActivated)
+        binding.close()
+        binding.close()
+        source.emit(WindowActivationState.Deactivated)
+
+        assertEquals(listOf(true, false, true), activeStates)
+        assertEquals(1, source.unregisterAttempts)
+    }
+
+    @Test
+    fun windowActivationBindingToleratesRegistrationAndRemovalFailures() {
+        WinUIWindowActivationBinding(
+            source = FakeWinUIWindowActivationSource(registrationFails = true),
+            onActiveChanged = {},
+        ).close()
+
+        val removalFailureSource = FakeWinUIWindowActivationSource(removalFails = true)
+        val binding = WinUIWindowActivationBinding(removalFailureSource) {}
+
+        binding.close()
+        binding.close()
+
+        assertEquals(1, removalFailureSource.unregisterAttempts)
+    }
+
+    @Test
     fun productionSourceUsesRequiredNativeXamlLifecycleSignals() {
         val source = findWinUIUiModuleRoot()
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIViewLifecycle.winui.kt")
@@ -175,6 +209,22 @@ class WinUIViewLifecycleTest {
             "root.unregisterPropertyChangedCallback(UIElement.visibilityProperty",
         ).forEach { nativeCall ->
             assertTrue(source.contains(nativeCall), "Missing native lifecycle call: $nativeCall")
+        }
+    }
+
+    @Test
+    fun productionSourceUsesWindowActivationEventAndDeactivatedMapping() {
+        val source = findWinUIUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIViewLifecycle.winui.kt")
+            .readText()
+            .filterNot { it.isWhitespace() }
+
+        listOf(
+            "window.activated.add(",
+            "window.activated.remove(",
+            "WindowActivationState.Deactivated",
+        ).forEach { nativeCall ->
+            assertTrue(source.contains(nativeCall), "Missing activation lifecycle call: $nativeCall")
         }
     }
 }
@@ -213,5 +263,27 @@ private class FakeWinUIViewLifecycleSource(
 
     fun emitVisible(value: Boolean) {
         onVisibilityChanged(value)
+    }
+}
+
+private class FakeWinUIWindowActivationSource(
+    private val registrationFails: Boolean = false,
+    private val removalFails: Boolean = false,
+) : WinUIWindowActivationSource {
+    private var onActivated: ((WindowActivationState) -> Unit)? = null
+    var unregisterAttempts: Int = 0
+        private set
+
+    override fun register(onActivated: (WindowActivationState) -> Unit): () -> Unit {
+        if (registrationFails) error("registration failed")
+        this.onActivated = onActivated
+        return {
+            unregisterAttempts++
+            if (removalFails) error("removal failed")
+        }
+    }
+
+    fun emit(state: WindowActivationState) {
+        onActivated?.invoke(state)
     }
 }

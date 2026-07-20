@@ -38,8 +38,22 @@ class WinUIEnvironmentIntegrationTest {
 
         assertTrue(source.contains("WinUIViewLifecycleController("))
         assertTrue(source.contains("WinUIRootLifecycleBinding("))
-        assertTrue(source.contains("lifecycleController.setActive(isWindowFocused)"))
+        assertTrue(source.contains("WinUIWindowActivationBinding("))
+        assertTrue(source.contains("fun setHostActive(isActive: Boolean)"))
+        assertTrue(source.contains("lifecycleController.setActive(isActive)"))
+        assertTrue(source.contains("windowActivationBinding?.close()"))
         assertTrue(source.contains("lifecycleBinding.close()"))
+    }
+
+    @Test
+    fun windowBackedViewOwnsActivationBindingAndRawSetContentUsesIt() {
+        val source = winUIComposeViewSource()
+        val rawSetContent = source.substringAfter(
+            "fun Window.setContent(content: @Composable () -> Unit): WinUIComposeView",
+        )
+
+        assertTrue(source.contains("window?.let { WinUIWindowActivationBinding(it, ::setHostActive) }"))
+        assertTrue(rawSetContent.contains("window = this"))
     }
 
     @Test

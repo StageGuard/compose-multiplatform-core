@@ -183,6 +183,28 @@ class WinUIPopupDialogBehaviorTest {
         assertEquals(constrained, winUIDialogMaxWidth(1200, 1200, true))
     }
 
+    @Test
+    fun popupHostUsesParentWindowAndParentFocusWhileOpen() {
+        val source = winUISource("Popup.winui.kt")
+
+        assertTrue(source.contains("LocalWindowInfo.current.isWindowFocused"))
+        assertTrue(source.contains("parentWindow?.let { window ->"))
+        assertTrue(source.contains("window = window"))
+        assertTrue(source.contains("observeWindowActivation = false"))
+        assertTrue(source.contains("composeView.setHostActive(parentIsActive && isOpen)"))
+    }
+
+    @Test
+    fun dialogHostUsesParentWindowAndParentFocusWhileOpen() {
+        val source = winUISource("Dialog.winui.kt")
+
+        assertTrue(source.contains("LocalWindowInfo.current.isWindowFocused"))
+        assertTrue(source.contains("parentWindow?.let { window ->"))
+        assertTrue(source.contains("window = window"))
+        assertTrue(source.contains("observeWindowActivation = false"))
+        assertTrue(source.contains("composeView.setHostActive(parentIsActive && isOpen)"))
+    }
+
     private fun winUISource(fileName: String): String =
         findUiModuleRoot()
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/window/$fileName")

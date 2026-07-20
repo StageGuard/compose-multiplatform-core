@@ -86,6 +86,7 @@ class WinUIComposeView internal constructor(
     private val retrieveInteropTransaction: () -> WinUIInteropTransaction,
     private val onSensitiveContentChanged: (Boolean) -> Unit = {},
     private val window: Window? = null,
+    private val observeWindowActivation: Boolean = window != null,
 ) {
     constructor() : this(WinUIRootContentHost())
 
@@ -96,7 +97,13 @@ class WinUIComposeView internal constructor(
     internal constructor(
         window: Window,
         onSensitiveContentChanged: (Boolean) -> Unit,
-    ) : this(WinUIRootContentHost(), onSensitiveContentChanged, window)
+        observeWindowActivation: Boolean = true,
+    ) : this(
+        WinUIRootContentHost(),
+        onSensitiveContentChanged,
+        window,
+        observeWindowActivation,
+    )
 
     internal val rootNode = LayoutNode().also {
         it.measurePolicy = RootMeasurePolicy
@@ -251,7 +258,9 @@ class WinUIComposeView internal constructor(
     init {
         setBaseContent(listOf(renderHost.component))
     }
-    private val dispatchQueue by lazy { WinUIDispatchQueue(requireRootDispatcherQueue()) }
+    private val dispatchQueueDelegate =
+        lazy { WinUIDispatchQueue(requireRootDispatcherQueue()) }
+    private val dispatchQueue by dispatchQueueDelegate
     private var ownerCoroutineContext: CoroutineContext = EmptyCoroutineContext
 
     internal val owner = WinUIOwner(
@@ -334,6 +343,12 @@ class WinUIComposeView internal constructor(
         root = rootContentControl,
         controller = lifecycleController,
     )
+    private val windowActivationBinding =
+        if (observeWindowActivation) {
+            window?.let { WinUIWindowActivationBinding(it, ::setHostActive) }
+        } else {
+            null
+        }
     private val environmentObserver = WinUIEnvironmentObserver(
         source = WinUIXamlEnvironmentSource(rootContentControl),
         dispatch = { block -> dispatchQueue.dispatch(block) },
@@ -444,7 +459,13 @@ class WinUIComposeView internal constructor(
             { pointerCursorAdapter.dispose() },
             { retainedValuesStore.dispose() },
             { environmentObserver.close() },
+            { windowActivationBinding?.close() },
             { lifecycleBinding.close() },
+            {
+                if (dispatchQueueDelegate.isInitialized()) {
+                    dispatchQueueDelegate.value.close()
+                }
+            },
             { clearXamlRootDensityObserver() },
             { WinUIPlatformTextInputService.unregisterRootToScreenMapper(this) },
             { WinUIPlatformTextInputService.unregisterInputPaneController(this) },
@@ -460,8 +481,9 @@ class WinUIComposeView internal constructor(
         )
     }
 
-    internal fun setWindowFocused(isWindowFocused: Boolean) {
-        if (isWindowFocused) {
+    fun setHostActive(isActive: Boolean) {
+        if (isDisposed) return
+        if (isActive) {
             ensureInputPaneController()
             inputPaneController?.let { controller ->
                 WinUIPlatformTextInputService.registerInputPaneController(this, controller)
@@ -469,9 +491,13 @@ class WinUIComposeView internal constructor(
         } else {
             WinUIPlatformTextInputService.unregisterInputPaneController(this)
         }
-        lifecycleController.setActive(isWindowFocused)
-        owner.setWindowFocused(isWindowFocused)
-        WinUIPlatformTextInputService.onWindowFocusChanged(isWindowFocused)
+        lifecycleController.setActive(isActive)
+        owner.setWindowFocused(isActive)
+        WinUIPlatformTextInputService.onWindowFocusChanged(isActive)
+    }
+
+    internal fun setWindowFocused(isWindowFocused: Boolean) {
+        setHostActive(isWindowFocused)
     }
 
     private fun ensureInputPaneController() {
@@ -839,6 +865,7 @@ class WinUIComposeView internal constructor(
         host: WinUIRootContentHost,
         onSensitiveContentChanged: (Boolean) -> Unit,
         window: Window? = null,
+        observeWindowActivation: Boolean = window != null,
     ) : this(
         host.root,
         host::setBaseContent,
@@ -847,6 +874,7 @@ class WinUIComposeView internal constructor(
         host::retrieveTransaction,
         onSensitiveContentChanged,
         window,
+        observeWindowActivation,
     )
 }
 
@@ -872,7 +900,10 @@ internal fun rootPixelOffsetToCoreTextScreenPixels(
 }
 
 fun Window.setContent(content: @Composable () -> Unit): WinUIComposeView {
-    val composeView = WinUIComposeView(this) {}
+    val composeView = WinUIComposeView(
+        window = this,
+        onSensitiveContentChanged = {},
+    )
     this.content = composeView.root
     composeView.setContent(content)
     return composeView
