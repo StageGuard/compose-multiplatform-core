@@ -22,6 +22,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.unit.LayoutDirection
+import microsoft.ui.xaml.DependencyPropertyChangedCallback
+import microsoft.ui.xaml.ElementTheme
+import microsoft.ui.xaml.FlowDirection
+import microsoft.ui.xaml.FrameworkElement
+import microsoft.ui.xaml.RoutedEventHandler
+import windows.foundation.EventRegistrationToken
+import windows.foundation.TypedEventHandler
+import windows.ui.viewmanagement.UISettings
+import windows.ui.viewmanagement.UISettingsAnimationsEnabledChangedEventArgs
 
 internal data class WinUIEnvironment(
     val systemTheme: SystemTheme = SystemTheme.Unknown,
@@ -35,6 +44,104 @@ internal interface WinUIEnvironmentSource : AutoCloseable {
 
     fun setChangeListener(listener: (() -> Unit)?)
 }
+
+internal class WinUIXamlEnvironmentSource(
+    private val root: FrameworkElement,
+    private val uiSettings: UISettings? = runCatching { UISettings() }.getOrNull(),
+) : WinUIEnvironmentSource {
+    private var listener: (() -> Unit)? = null
+    private var isClosed = false
+
+    private val themeHandler: TypedEventHandler<FrameworkElement, Any?> =
+        { _, _ -> notifyChanged() }
+    private val loadedHandler: RoutedEventHandler = { _, _ -> notifyChanged() }
+    private val flowDirectionHandler =
+        DependencyPropertyChangedCallback { _, _ -> notifyChanged() }
+    private val textScaleHandler: TypedEventHandler<UISettings, Any?> =
+        { _, _ -> notifyChanged() }
+    private val animationsHandler:
+        TypedEventHandler<UISettings, UISettingsAnimationsEnabledChangedEventArgs> =
+        { _, _ -> notifyChanged() }
+
+    private val themeToken: EventRegistrationToken? =
+        runCatching { root.actualThemeChanged.add(themeHandler) }.getOrNull()
+    private val loadedToken: EventRegistrationToken? =
+        runCatching { root.loaded.add(loadedHandler) }.getOrNull()
+    private val flowDirectionToken: Long? = runCatching {
+        root.registerPropertyChangedCallback(FrameworkElement.flowDirectionProperty, flowDirectionHandler)
+    }.getOrNull()
+    private val textScaleToken: EventRegistrationToken? = uiSettings?.let { uiSettings ->
+        runCatching { uiSettings.textScaleFactorChanged.add(textScaleHandler) }.getOrNull()
+    }
+    private val animationsToken: EventRegistrationToken? = uiSettings?.let { uiSettings ->
+        runCatching { uiSettings.animationsEnabledChanged.add(animationsHandler) }.getOrNull()
+    }
+
+    override fun snapshot(): WinUIEnvironment = WinUIEnvironment(
+        systemTheme = runCatching { root.actualTheme.toComposeSystemTheme() }
+            .getOrDefault(SystemTheme.Unknown),
+        layoutDirection = runCatching { root.flowDirection.toComposeLayoutDirection() }
+            .getOrDefault(LayoutDirection.Ltr),
+        fontScale = normalizeWinUITextScaleFactor(
+            uiSettings?.let { uiSettings ->
+                runCatching { uiSettings.textScaleFactor }.getOrNull()
+            }
+        ),
+        animationsEnabled = uiSettings?.let { uiSettings ->
+            runCatching { uiSettings.animationsEnabled }.getOrDefault(true)
+        } ?: true,
+    )
+
+    override fun setChangeListener(listener: (() -> Unit)?) {
+        this.listener = listener
+    }
+
+    private fun notifyChanged() {
+        if (!isClosed) {
+            listener?.invoke()
+        }
+    }
+
+    override fun close() {
+        if (isClosed) return
+        isClosed = true
+        listener = null
+
+        themeToken?.let { token ->
+            runCatching { root.actualThemeChanged.remove(token) }
+        }
+        loadedToken?.let { token ->
+            runCatching { root.loaded.remove(token) }
+        }
+        flowDirectionToken?.let { token ->
+            runCatching {
+                root.unregisterPropertyChangedCallback(FrameworkElement.flowDirectionProperty, token)
+            }
+        }
+        uiSettings?.let { uiSettings ->
+            textScaleToken?.let { token ->
+                runCatching { uiSettings.textScaleFactorChanged.remove(token) }
+            }
+            animationsToken?.let { token ->
+                runCatching { uiSettings.animationsEnabledChanged.remove(token) }
+            }
+        }
+    }
+}
+
+internal fun ElementTheme.toComposeSystemTheme(): SystemTheme = when (this) {
+    ElementTheme.Dark -> SystemTheme.Dark
+    ElementTheme.Light -> SystemTheme.Light
+    else -> SystemTheme.Unknown
+}
+
+internal fun FlowDirection.toComposeLayoutDirection(): LayoutDirection = when (this) {
+    FlowDirection.RightToLeft -> LayoutDirection.Rtl
+    else -> LayoutDirection.Ltr
+}
+
+internal fun normalizeWinUITextScaleFactor(value: Double?): Float =
+    value?.toFloat()?.takeIf { it.isFinite() && it > 0f } ?: 1f
 
 internal class WinUIEnvironmentObserver(
     private val source: WinUIEnvironmentSource,

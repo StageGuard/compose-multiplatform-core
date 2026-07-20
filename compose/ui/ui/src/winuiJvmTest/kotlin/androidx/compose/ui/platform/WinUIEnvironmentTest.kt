@@ -18,9 +18,17 @@ package androidx.compose.ui.platform
 
 import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.unit.LayoutDirection
+import java.nio.file.Path
+import java.nio.file.Paths
+import kotlin.io.path.exists
+import kotlin.io.path.name
+import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import microsoft.ui.xaml.ElementTheme
+import microsoft.ui.xaml.FlowDirection
 
 class WinUIEnvironmentTest {
     @Test
@@ -96,6 +104,65 @@ class WinUIEnvironmentTest {
         scale.updateAnimationsEnabled(true)
         assertEquals(1f, scale.scaleFactor)
     }
+
+    @Test
+    fun xamlValuesMapToComposeEnvironmentValues() {
+        assertEquals(SystemTheme.Dark, ElementTheme.Dark.toComposeSystemTheme())
+        assertEquals(SystemTheme.Light, ElementTheme.Light.toComposeSystemTheme())
+        assertEquals(SystemTheme.Unknown, ElementTheme.Default.toComposeSystemTheme())
+        assertEquals(
+            LayoutDirection.Ltr,
+            FlowDirection.LeftToRight.toComposeLayoutDirection(),
+        )
+        assertEquals(
+            LayoutDirection.Rtl,
+            FlowDirection.RightToLeft.toComposeLayoutDirection(),
+        )
+    }
+
+    @Test
+    fun textScaleUsesOnlyFinitePositiveValues() {
+        assertEquals(1f, normalizeWinUITextScaleFactor(null))
+        assertEquals(1f, normalizeWinUITextScaleFactor(Double.NaN))
+        assertEquals(1f, normalizeWinUITextScaleFactor(Double.POSITIVE_INFINITY))
+        assertEquals(1f, normalizeWinUITextScaleFactor(0.0))
+        assertEquals(1f, normalizeWinUITextScaleFactor(-1.0))
+        assertEquals(1.25f, normalizeWinUITextScaleFactor(1.25))
+    }
+
+    @Test
+    fun productionSourceRegistersAndRemovesEveryEnvironmentSignal() {
+        val source = findWinUIUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIEnvironment.winui.kt")
+            .readText()
+
+        listOf(
+            "root.actualThemeChanged.add",
+            "root.loaded.add",
+            "root.registerPropertyChangedCallback(FrameworkElement.flowDirectionProperty",
+            "uiSettings.textScaleFactorChanged.add",
+            "uiSettings.animationsEnabledChanged.add",
+            "root.actualThemeChanged.remove",
+            "root.loaded.remove",
+            "root.unregisterPropertyChangedCallback(FrameworkElement.flowDirectionProperty",
+            "uiSettings.textScaleFactorChanged.remove",
+            "uiSettings.animationsEnabledChanged.remove",
+        ).forEach { required ->
+            assertTrue(source.contains(required), "Missing environment wiring: $required")
+        }
+    }
+}
+
+internal fun findWinUIUiModuleRoot(): Path {
+    val start = Paths.get("").toAbsolutePath()
+    generateSequence(start) { it.parent }.forEach { candidate ->
+        val direct = candidate.resolve("src/winuiMain/kotlin")
+        if (direct.exists() && candidate.name == "ui") return candidate
+
+        val fromRepoRoot = candidate.resolve("compose/ui/ui/src/winuiMain/kotlin")
+        if (fromRepoRoot.exists()) return candidate.resolve("compose/ui/ui")
+    }
+    error("Could not find compose/ui/ui module root from $start.")
 }
 
 private class FakeEnvironmentSource(
