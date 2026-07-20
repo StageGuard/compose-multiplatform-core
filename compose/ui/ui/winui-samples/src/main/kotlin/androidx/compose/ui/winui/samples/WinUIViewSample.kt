@@ -36,7 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.LocalSystemTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.autofill.AutofillNode
 import androidx.compose.ui.autofill.FillableData
 import androidx.compose.ui.autofill.createFromBoolean
@@ -143,6 +145,7 @@ import androidx.compose.foundation.text.BasicText
 import windows.foundation.EventRegistrationToken
 import io.github.composefluent.winrt.runtime.asWinRT
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.createSavedStateHandle
@@ -153,6 +156,8 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.savedstate.compose.LocalSavedStateRegistryOwner
 import microsoft.ui.xaml.automation.AutomationProperties
 import microsoft.ui.xaml.automation.peers.AccessibilityView
+import microsoft.ui.xaml.ElementTheme
+import microsoft.ui.xaml.FlowDirection
 import microsoft.ui.xaml.controls.Button
 import microsoft.ui.xaml.controls.Canvas
 import microsoft.ui.xaml.controls.ContentControl
@@ -174,6 +179,13 @@ import org.jetbrains.skiko.winui.WinUIAccessibilityLiveSetting
 import org.jetbrains.skiko.winui.WinUIAccessibilityNode
 
 private val LocalWindowPopupSmokeMarker = staticCompositionLocalOf { "missing" }
+
+private object WinUIEnvironmentSmokeState {
+    var theme: SystemTheme = SystemTheme.Unknown
+    var layoutDirection: LayoutDirection = LayoutDirection.Ltr
+    var fontScale: Float = 1f
+    var lifecycleState: Lifecycle.State = Lifecycle.State.INITIALIZED
+}
 
 @Composable
 fun WinUIViewSampleContent(
@@ -220,15 +232,22 @@ fun WinUIViewSampleContent(
     )
 }
 
+@OptIn(InternalComposeUiApi::class)
 @Composable
 private fun ValidateWinUICompositionLocals(
     expectWindowFocus: Boolean,
     allowWindowFocusChanges: Boolean = false,
 ) {
-    check(LocalDensity.current.density > 0f) {
+    val density = LocalDensity.current
+    check(density.density.isFinite() && density.density > 0f) {
         "WinUI LocalDensity was not provided by WinUIComposeView."
     }
-    check(LocalLayoutDirection.current == LayoutDirection.Ltr) {
+    val fontScale = density.fontScale
+    check(fontScale.isFinite() && fontScale > 0f) {
+        "WinUI LocalDensity.fontScale was not provided by WinUIComposeView."
+    }
+    val layoutDirection = LocalLayoutDirection.current
+    check(layoutDirection == LayoutDirection.Ltr || layoutDirection == LayoutDirection.Rtl) {
         "WinUI LocalLayoutDirection was not provided by WinUIComposeView."
     }
     check(LocalViewConfiguration.current.longPressTimeoutMillis > 0L) {
@@ -237,8 +256,10 @@ private fun ValidateWinUICompositionLocals(
     check(LocalFontFamilyResolver.current.resolve().value != null) {
         "WinUI LocalFontFamilyResolver was not provided by WinUIComposeView."
     }
-    check(LocalLifecycleOwner.current.lifecycle.currentState == Lifecycle.State.RESUMED) {
-        "WinUI LocalLifecycleOwner was not provided in a resumed state."
+    check(
+        LocalLifecycleOwner.current.lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)
+    ) {
+        "WinUI LocalLifecycleOwner was not provided in an attachable lifecycle state."
     }
     check(LocalSavedStateRegistryOwner.current != null) {
         "WinUI LocalSavedStateRegistryOwner was not provided."
@@ -274,6 +295,24 @@ private fun ValidateWinUICompositionLocals(
         check(windowInfo.containerDpSize.width.value > 0f) {
             "WinUI LocalWindowInfo did not expose a positive container dp width."
         }
+    }
+}
+
+@OptIn(InternalComposeUiApi::class)
+@Composable
+private fun CaptureWinUIEnvironment() {
+    WinUIEnvironmentSmokeState.theme = LocalSystemTheme.current
+    WinUIEnvironmentSmokeState.layoutDirection = LocalLayoutDirection.current
+    WinUIEnvironmentSmokeState.fontScale = LocalDensity.current.fontScale
+
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    WinUIEnvironmentSmokeState.lifecycleState = lifecycle.currentState
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ ->
+            WinUIEnvironmentSmokeState.lifecycleState = lifecycle.currentState
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
 }
 
@@ -394,6 +433,7 @@ private fun WinUIViewWindowIntegrationContent(
         expectWindowFocus = expectWindowFocus,
         allowWindowFocusChanges = onWindowFocusChanged != null,
     )
+    CaptureWinUIEnvironment()
     if (expectWindowFocus && onWindowFocusChanged != null) {
         val windowFocused = LocalWindowInfo.current.isWindowFocused
         DisposableEffect(windowFocused) {
@@ -707,6 +747,7 @@ private object ComposeWinUiSmokeApp {
                 var content by remember { mutableStateOf("Hello from Compose WinUI") }
                 var backdropSmokePassed by remember { mutableStateOf(false) }
                 var backdropClearSmokePassed by remember { mutableStateOf(false) }
+                var environmentSmokePassed by remember { mutableStateOf(false) }
                 var lastButton by remember { mutableStateOf<Button?>(null) }
                 var lastTextBox by remember { mutableStateOf<TextBox?>(null) }
                 var lastToggleSwitch by remember { mutableStateOf<ToggleSwitch?>(null) }
@@ -717,6 +758,63 @@ private object ComposeWinUiSmokeApp {
                 LaunchedEffect(Unit) {
                     withFrameNanos { }
                     content = "Hello from Compose WinUI updated"
+                }
+                LaunchedEffect(Unit) {
+                    val root = checkNotNull(window.content.asWinRTContentControl()) {
+                        "WinUI environment smoke could not find the Compose root ContentControl."
+                    }
+                    awaitCondition("WinUI root loaded") { root.isLoaded }
+                    awaitCondition("WinUI lifecycle RESUMED") {
+                        WinUIEnvironmentSmokeState.lifecycleState == Lifecycle.State.RESUMED
+                    }
+                    awaitCondition("WinUI effective theme") {
+                        WinUIEnvironmentSmokeState.theme == SystemTheme.Light ||
+                            WinUIEnvironmentSmokeState.theme == SystemTheme.Dark
+                    }
+                    val originalRequestedTheme = root.requestedTheme
+                    val originalFlowDirection = root.flowDirection
+                    val originalTheme = WinUIEnvironmentSmokeState.theme
+                    val originalLayoutDirection = WinUIEnvironmentSmokeState.layoutDirection
+                    check(originalTheme == SystemTheme.Light || originalTheme == SystemTheme.Dark) {
+                        "WinUI environment smoke did not observe an effective Light/Dark theme."
+                    }
+                    check(
+                        WinUIEnvironmentSmokeState.fontScale.isFinite() &&
+                            WinUIEnvironmentSmokeState.fontScale > 0f
+                    ) {
+                        "WinUI environment smoke observed an invalid font scale."
+                    }
+                    val requestedTheme = if (originalTheme == SystemTheme.Dark) {
+                        ElementTheme.Light
+                    } else {
+                        ElementTheme.Dark
+                    }
+                    val expectedTheme = if (requestedTheme == ElementTheme.Dark) {
+                        SystemTheme.Dark
+                    } else {
+                        SystemTheme.Light
+                    }
+                    try {
+                        root.requestedTheme = requestedTheme
+                        awaitCondition("WinUI requested theme") {
+                            WinUIEnvironmentSmokeState.theme == expectedTheme
+                        }
+                        root.flowDirection = FlowDirection.RightToLeft
+                        awaitCondition("WinUI RTL flow direction") {
+                            WinUIEnvironmentSmokeState.layoutDirection == LayoutDirection.Rtl
+                        }
+                    } finally {
+                        root.requestedTheme = originalRequestedTheme
+                        root.flowDirection = originalFlowDirection
+                    }
+                    awaitCondition("WinUI requested theme restore") {
+                        WinUIEnvironmentSmokeState.theme == originalTheme
+                    }
+                    awaitCondition("WinUI flow direction restore") {
+                        WinUIEnvironmentSmokeState.layoutDirection == originalLayoutDirection
+                    }
+                    environmentSmokePassed = true
+                    println("compose-winui-sample: system environment and lifecycle")
                 }
                 LaunchedEffect(backdrop) {
                     if (backdrop == WindowBackdrop.DesktopAcrylic) {
@@ -735,6 +833,7 @@ private object ComposeWinUiSmokeApp {
                     backdrop,
                     backdropSmokePassed,
                     backdropClearSmokePassed,
+                    environmentSmokePassed,
                     lastButton,
                     lastTextBox,
                     lastToggleSwitch,
@@ -753,6 +852,7 @@ private object ComposeWinUiSmokeApp {
                         backdrop == WindowBackdrop.None &&
                         backdropSmokePassed &&
                         backdropClearSmokePassed &&
+                        environmentSmokePassed &&
                         nativeFocusSmokePassed
                     ) {
                         windowSmokePassed = true
@@ -1076,14 +1176,21 @@ private object ComposeWinUiSmokeApp {
         currentComposeView.setContent {
             lifecycle = LocalLifecycleOwner.current.lifecycle
         }
-        check(lifecycle?.currentState == Lifecycle.State.RESUMED) {
-            "WinUI lifecycle owner did not enter RESUMED state."
+        val currentLifecycle = checkNotNull(lifecycle) {
+            "WinUI lifecycle owner was not provided."
+        }
+        check(currentLifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) {
+            "WinUI lifecycle owner did not expose an attachable initial state."
+        }
+        currentComposeView.setHostActive(true)
+        check(currentLifecycle.currentState == Lifecycle.State.CREATED) {
+            "Unattached WinUI lifecycle owner advanced without a loaded root."
         }
         currentComposeView.dispose()
-        check(lifecycle?.currentState == Lifecycle.State.DESTROYED) {
+        check(currentLifecycle.currentState == Lifecycle.State.DESTROYED) {
             "WinUI lifecycle owner did not enter DESTROYED state on dispose."
         }
-        println("compose-winui-sample: lifecycle owner resumed and destroyed")
+        println("compose-winui-sample: lifecycle owner created and destroyed")
     }
 
     private fun runWinUIViewModelOwnerSmoke() {
