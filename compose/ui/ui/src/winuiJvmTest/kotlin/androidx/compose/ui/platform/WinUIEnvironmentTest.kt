@@ -150,6 +150,12 @@ class WinUIEnvironmentTest {
         ).forEach { required ->
             assertTrue(source.contains(required), "Missing environment wiring: $required")
         }
+
+        val textScaleRemove = source.indexOf("uiSettings.textScaleFactorChanged.remove")
+        val animationsRemove = source.indexOf("uiSettings.animationsEnabledChanged.remove")
+        val settingsClose = source.indexOf("uiSettings.nativeObject.close()")
+        assertTrue(settingsClose > textScaleRemove, "UISettings must close after text-scale removal")
+        assertTrue(settingsClose > animationsRemove, "UISettings must close after animations removal")
     }
 }
 

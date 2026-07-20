@@ -125,6 +125,7 @@ internal class WinUIXamlEnvironmentSource(
             animationsToken?.let { token ->
                 runCatching { uiSettings.animationsEnabledChanged.remove(token) }
             }
+            runCatching { uiSettings.nativeObject.close() }
         }
     }
 }
