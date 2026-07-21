@@ -260,6 +260,7 @@ internal class WinUIOwner(
     fun dispose() {
         if (isShuttingDown) return
         isDisposing = true
+        (textToolbar as? WinUITextToolbar)?.close()
         outOfFrameQueue.clear()
         if (root.isAttached) {
             root.detach()

@@ -30,8 +30,9 @@ import microsoft.ui.xaml.controls.primitives.FlyoutShowOptions
 internal class WinUITextToolbar(
     private val hostProvider: () -> FrameworkElement? = { null },
     private val densityProvider: () -> Density = { Density(1f) },
-) : TextToolbar {
+) : TextToolbar, AutoCloseable {
     private var currentMenu: WinUITextToolbarMenu? = null
+    private var isClosed = false
 
     override val status: TextToolbarStatus
         get() = if (currentMenu == null) {
@@ -48,13 +49,19 @@ internal class WinUITextToolbar(
         onSelectAllRequested: (() -> Unit)?,
         onAutofillRequested: (() -> Unit)?,
     ) {
+        if (isClosed) return
         hide()
+        val guardedCopyRequest = onCopyRequested.guardWhileOpen()
+        val guardedPasteRequest = onPasteRequested.guardWhileOpen()
+        val guardedCutRequest = onCutRequested.guardWhileOpen()
+        val guardedSelectAllRequest = onSelectAllRequested.guardWhileOpen()
+        val guardedAutofillRequest = onAutofillRequested.guardWhileOpen()
         val requests = buildList {
-            addRequest("Copy", onCopyRequested)
-            addRequest("Paste", onPasteRequested)
-            addRequest("Cut", onCutRequested)
-            addRequest("Select all", onSelectAllRequested)
-            addRequest("Autofill", onAutofillRequested)
+            addRequest("Copy", guardedCopyRequest)
+            addRequest("Paste", guardedPasteRequest)
+            addRequest("Cut", guardedCutRequest)
+            addRequest("Select all", guardedSelectAllRequest)
+            addRequest("Autofill", guardedAutofillRequest)
         }
         val host = hostProvider()
         val nativeMenu = if (host != null && requests.isNotEmpty()) {
@@ -64,11 +71,11 @@ internal class WinUITextToolbar(
         }
         val menu = WinUITextToolbarMenu(
             rect = rect,
-            onCopyRequested = onCopyRequested,
-            onPasteRequested = onPasteRequested,
-            onCutRequested = onCutRequested,
-            onSelectAllRequested = onSelectAllRequested,
-            onAutofillRequested = onAutofillRequested,
+            onCopyRequested = guardedCopyRequest,
+            onPasteRequested = guardedPasteRequest,
+            onCutRequested = guardedCutRequest,
+            onSelectAllRequested = guardedSelectAllRequest,
+            onAutofillRequested = guardedAutofillRequest,
             itemLabels = requests.map { it.label },
             nativeMenu = nativeMenu?.flyout,
             clickRegistrations = nativeMenu?.clickRegistrations.orEmpty(),
@@ -102,6 +109,12 @@ internal class WinUITextToolbar(
         currentMenu = null
         clearNativeRegistrations(menu)
         menu.nativeMenu?.hide()
+    }
+
+    override fun close() {
+        if (isClosed) return
+        isClosed = true
+        hide()
     }
 
     internal fun menuForTest(): WinUITextToolbarMenu? = currentMenu
@@ -179,6 +192,10 @@ internal class WinUITextToolbar(
         runCatching {
             registration.item.click.remove(registration.token)
         }
+    }
+
+    private fun (() -> Unit)?.guardWhileOpen(): (() -> Unit)? = this?.let { callback ->
+        { if (!isClosed) callback() }
     }
 }
 
