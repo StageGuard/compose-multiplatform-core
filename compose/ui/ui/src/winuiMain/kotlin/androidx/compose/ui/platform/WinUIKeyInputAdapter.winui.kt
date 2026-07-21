@@ -120,12 +120,11 @@ internal class WinUIKeyInputAdapter(
                             "compose event=$eventType key=$key handled=$handled"
                         }
                     }
-                    if (eventType == KeyEventType.KeyDown) {
-                        characterInputProcessor.onKeyDownProcessed(
-                            keyCodePoint = 0,
-                            wasHandled = handled == true,
-                        )
-                    }
+                    characterInputProcessor.onKeyEventProcessed(
+                        eventType = eventType,
+                        key = key,
+                        wasHandled = handled == true,
+                    )
                     handled?.let { didHandle ->
                         args.handled = didHandle
                     }
@@ -247,11 +246,14 @@ internal class WinUICharacterInputProcessor {
         skipNextCharacter = false
     }
 
-    fun onKeyDownProcessed(
-        keyCodePoint: Int,
+    fun onKeyEventProcessed(
+        eventType: KeyEventType,
+        key: VirtualKey,
         wasHandled: Boolean,
     ) {
-        skipNextCharacter = wasHandled && keyCodePoint.toCommittedTextOrNull() != null
+        skipNextCharacter = eventType == KeyEventType.KeyDown &&
+            wasHandled &&
+            key.canProduceCharacter()
     }
 
     fun process(
@@ -261,22 +263,28 @@ internal class WinUICharacterInputProcessor {
         isCoreTextCompositionActive: Boolean = false,
         commitText: (String) -> Boolean,
     ): Boolean? {
+        val shouldSkip = skipNextCharacter
+        skipNextCharacter = false
         if (isHandled) return null
         val text = codePoint.toCommittedTextOrNull()
-        if (text == null) {
-            skipNextCharacter = false
-            return null
-        }
+        if (text == null) return null
         if (isCoreTextInputActive && isCoreTextCompositionActive) {
-            skipNextCharacter = false
             return true
         }
-        if (skipNextCharacter) {
-            skipNextCharacter = false
-            return null
-        }
+        if (shouldSkip) return null
         return commitText(text)
     }
+}
+
+private fun VirtualKey.canProduceCharacter(): Boolean {
+    val value = abiValue
+    return value == 0x20 || // VK_SPACE
+        value in 0x30..0x39 || // VK_0 .. VK_9
+        value in 0x41..0x5A || // VK_A .. VK_Z
+        value in 0x60..0x6F || // numpad digits and operators
+        value in 0xBA..0xC0 || // VK_OEM_1 .. VK_OEM_3
+        value in 0xDB..0xE2 || // VK_OEM_4 .. VK_OEM_102
+        value == 0xE7 // VK_PACKET
 }
 
 private fun windows.ui.core.CorePhysicalKeyStatus.toWin32KeyLParam(): Long {
