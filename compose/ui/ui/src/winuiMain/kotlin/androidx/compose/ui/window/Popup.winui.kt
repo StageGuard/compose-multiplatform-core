@@ -47,9 +47,11 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WinUIComposeView
 import androidx.compose.ui.platform.toWinUIXamlPoint
 import androidx.compose.ui.platform.toWinUIXamlSize
+import androidx.compose.ui.platform.winUIPositionToComposeOffset
 import androidx.compose.ui.semantics.popup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -245,6 +247,7 @@ private fun WinUICanvasPopupLayout(
     var parentBoundsInWindow by remember { mutableStateOf(IntRect.Zero) }
     var popupBoundsInRoot by remember { mutableStateOf(IntRect.Zero) }
     val root = LocalWinUIRoot.current?.let { it as? UIElement }
+    val density = LocalDensity.current
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
     val dismissalHost = remember(root) { WinUICanvasPopupDismissHost(root) }
 
@@ -252,6 +255,7 @@ private fun WinUICanvasPopupLayout(
         dismissalHost.update(
             properties = properties,
             popupBoundsInRoot = popupBoundsInRoot,
+            density = density,
             onDismissRequest = currentOnDismissRequest,
         )
     }
@@ -741,6 +745,7 @@ private class WinUICanvasPopupDismissHost(
 ) {
     private var properties = PopupProperties()
     private var popupBoundsInRoot = IntRect.Zero
+    private var density = Density(1f)
     private val dismissalState = WinUIPopupDismissState(
         dismissOnBackPress = true,
         dismissOnClickOutside = true,
@@ -752,10 +757,12 @@ private class WinUICanvasPopupDismissHost(
     fun update(
         properties: PopupProperties,
         popupBoundsInRoot: IntRect,
+        density: Density,
         onDismissRequest: (() -> Unit)?,
     ) {
         this.properties = properties
         this.popupBoundsInRoot = popupBoundsInRoot
+        this.density = density
         dismissalState.update(
             dismissOnBackPress = properties.dismissOnBackPress,
             dismissOnClickOutside = properties.dismissOnClickOutside,
@@ -777,7 +784,10 @@ private class WinUICanvasPopupDismissHost(
                 if (!args.handled) {
                     val point = args.getCurrentPoint(root).position
                     val dismissed = dismissalState.onOutsidePointer(
-                        Offset(point.x, point.y),
+                        winUICanvasPopupPointerPositionInRoot(
+                            Offset(point.x, point.y),
+                            density,
+                        ),
                         popupBoundsInRoot,
                     )
                     if (dismissed && properties.focusable) args.handled = true
@@ -797,6 +807,15 @@ private class WinUICanvasPopupDismissHost(
         pointerPressedToken = null
     }
 }
+
+internal fun winUICanvasPopupPointerPositionInRoot(
+    pointInXamlDips: Offset,
+    density: Density,
+): Offset = winUIPositionToComposeOffset(
+    pointInXamlDips.x,
+    pointInXamlDips.y,
+    density,
+)
 
 private fun VirtualKey.isPopupBackKey(): Boolean =
     this == VirtualKey.Escape || this == VirtualKey.GoBack || this == VirtualKey.NavigationCancel

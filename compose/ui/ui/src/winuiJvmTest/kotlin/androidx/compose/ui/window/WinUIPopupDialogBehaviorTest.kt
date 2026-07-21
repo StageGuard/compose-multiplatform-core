@@ -17,6 +17,7 @@
 package androidx.compose.ui.window
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntRect
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -125,6 +126,36 @@ class WinUIPopupDialogBehaviorTest {
         assertFalse(state.onOutsidePointer(Offset(50f, 50f), IntRect(0, 0, 100, 100)))
         assertTrue(state.onOutsidePointer(Offset(200f, 200f), IntRect(0, 0, 100, 100)))
         assertEquals(1, calls)
+    }
+
+    @Test
+    fun canvasPopupOutsidePressUsesComposePixelsAtXamlScales() {
+        listOf(1f, 1.5f, 2f).forEach { rasterizationScale ->
+            var calls = 0
+            val state = WinUIPopupDismissState(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true,
+                onDismissRequest = { calls++ },
+            )
+            val pointInXamlDips = Offset(40f, 30f)
+            val popupBoundsInComposePixels = IntRect(
+                left = 0,
+                top = 0,
+                right = (100 * rasterizationScale).toInt(),
+                bottom = (100 * rasterizationScale).toInt(),
+            )
+
+            assertFalse(
+                state.onOutsidePointer(
+                    winUICanvasPopupPointerPositionInRoot(
+                        pointInXamlDips,
+                        Density(rasterizationScale),
+                    ),
+                    popupBoundsInComposePixels,
+                )
+            )
+            assertEquals(0, calls)
+        }
     }
 
     @Test
