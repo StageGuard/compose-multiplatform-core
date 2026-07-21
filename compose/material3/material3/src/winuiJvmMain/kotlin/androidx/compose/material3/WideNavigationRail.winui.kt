@@ -28,9 +28,9 @@ actual constructor(
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other !is ModalBottomSheetProperties) return false
+        if (other !is ModalWideNavigationRailProperties) return false
 
-        return true
+        return shouldDismissOnBackPress == other.shouldDismissOnBackPress
     }
 
     override fun hashCode(): Int {

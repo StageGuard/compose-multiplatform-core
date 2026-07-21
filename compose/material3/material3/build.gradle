@@ -58,6 +58,8 @@ if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
         type("Windows.Globalization.DateTimeFormatting.DateTimeFormatter")
         type("Windows.Globalization.NumberFormatting.DecimalFormatter")
         type("Windows.System.UserProfile.GlobalizationPreferences")
+        type("Windows.Devices.Input.KeyboardCapabilities")
+        type("Windows.Devices.Input.MouseCapabilities")
     }
 }
 androidXMultiplatform {
@@ -239,8 +241,53 @@ kotlin {
             }
 
             winuiJvmTest {
-                dependsOn(skikoTest)
+                // The default JVM hierarchy also routes through jvmAndAndroidTest, which reaches
+                // commonTest and its :compose:ui:ui-test dependency.
+                dependsOn.removeAll { parent ->
+                    parent.name == "commonTest" || parent.name == "jvmAndAndroidTest"
+                }
+                dependencies {
+                    implementation(kotlin("test"))
+                }
             }
+        }
+    }
+}
+
+if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+    // The default Kotlin hierarchy wires WinUI JVM test configurations through the shared JVM
+    // and common test configurations. Material3 commonTest uses :compose:ui:ui-test, which has
+    // no WinUI JVM variant, so the focused WinUI platform tests must retain only their own
+    // dependencies.
+    afterEvaluate {
+        def defaultWinUiTestParents = [
+                "commonTestApi",
+                "commonTestCompileOnly",
+                "commonTestImplementation",
+                "commonTestRuntimeOnly",
+                "jvmAndAndroidTestApi",
+                "jvmAndAndroidTestCompileOnly",
+                "jvmAndAndroidTestImplementation",
+                "jvmAndAndroidTestRuntimeOnly",
+        ] as Set
+        configurations
+                .findAll { it.name.startsWith("winuiJvmTestCompilation") }
+                .each { configuration ->
+                    configuration.setExtendsFrom(
+                            configuration.extendsFrom.findAll { parent ->
+                                parent.name !in defaultWinUiTestParents
+                            }
+                    )
+                }
+        def winuiJvmTestResolvable = configurations.findByName(
+                "winuiJvmTestResolvableDependenciesMetadata"
+        )
+        if (winuiJvmTestResolvable != null) {
+            winuiJvmTestResolvable.setExtendsFrom(
+                    winuiJvmTestResolvable.extendsFrom.findAll { parent ->
+                        parent.name !in defaultWinUiTestParents
+                    }
+            )
         }
     }
 }
@@ -271,6 +318,7 @@ tasks.withType(KotlinCompile).configureEach {
         it.exclude("**/SkikoMenu.skiko.kt")
         it.exclude("**/ModalBottomSheet.skiko.kt")
         it.exclude("**/WideNavigationRail.skiko.kt")
+        it.exclude("**/PrecisionPointer.skiko.kt")
         it.exclude("**/BasicEdgeToEdgeDialog.skiko.kt")
         it.compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
