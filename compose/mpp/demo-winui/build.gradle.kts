@@ -130,6 +130,10 @@ val winUiMppSampleApiSurface = linkedMapOf(
         "maxWidth.toPx()",
         "maxHeight.toPx()",
     ),
+    "theme" to listOf(
+        "colors = if (isSystemInDarkTheme())",
+        "darkColors() else lightColors()",
+    ),
 )
 val winUiMppSampleGuardedApiSurface = linkedMapOf(
     "keyboard" to listOf(

@@ -16,12 +16,16 @@
 
 package androidx.compose.mpp.demo
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.titleBarLeftInset
 import androidx.compose.foundation.layout.titleBarRightInset
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.darkColors
+import androidx.compose.material.lightColors
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -142,14 +146,18 @@ fun main(args: Array<String>) {
                 }
             }
 
-            if (fontsLoaded.value) {
-                SideEffect {
-                    validation.record("app-content-composed")
-                }
-                CompositionLocalProvider(
-                    LocalSampleTopAppBarValidationRecorder provides topAppBarValidationRecorder
-                ) {
-                    app.Content(navController)
+            MaterialTheme(
+                colors = if (isSystemInDarkTheme()) darkColors() else lightColors()
+            ) {
+                if (fontsLoaded.value) {
+                    SideEffect {
+                        validation.record("app-content-composed")
+                    }
+                    CompositionLocalProvider(
+                        LocalSampleTopAppBarValidationRecorder provides topAppBarValidationRecorder
+                    ) {
+                        app.Content(navController)
+                    }
                 }
             }
 

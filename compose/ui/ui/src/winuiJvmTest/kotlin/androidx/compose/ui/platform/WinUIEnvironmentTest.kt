@@ -29,6 +29,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import microsoft.ui.xaml.ElementTheme
 import microsoft.ui.xaml.FlowDirection
+import windows.ui.Color
 
 class WinUIEnvironmentTest {
     @Test
@@ -145,6 +146,41 @@ class WinUIEnvironmentTest {
     }
 
     @Test
+    fun systemColorsMapToComposeSystemTheme() {
+        val black = Color(a = 255u, r = 0u, g = 0u, b = 0u)
+        val white = Color(a = 255u, r = 255u, g = 255u, b = 255u)
+
+        assertEquals(SystemTheme.Dark, systemThemeFromColors(white, black))
+        assertEquals(SystemTheme.Light, systemThemeFromColors(black, white))
+        assertEquals(SystemTheme.Unknown, systemThemeFromColors(black, black))
+    }
+
+    @Test
+    fun explicitXamlThemeOverridesSystemColors() {
+        val black = Color(a = 255u, r = 0u, g = 0u, b = 0u)
+        val white = Color(a = 255u, r = 255u, g = 255u, b = 255u)
+
+        assertEquals(
+            SystemTheme.Dark,
+            resolveWinUISystemTheme(
+                requestedTheme = ElementTheme.Dark,
+                actualTheme = ElementTheme.Dark,
+                foreground = black,
+                background = white,
+            ),
+        )
+        assertEquals(
+            SystemTheme.Dark,
+            resolveWinUISystemTheme(
+                requestedTheme = ElementTheme.Default,
+                actualTheme = ElementTheme.Light,
+                foreground = white,
+                background = black,
+            ),
+        )
+    }
+
+    @Test
     fun textScaleUsesOnlyFinitePositiveValues() {
         assertEquals(1f, normalizeWinUITextScaleFactor(null))
         assertEquals(1f, normalizeWinUITextScaleFactor(Double.NaN))
@@ -166,20 +202,24 @@ class WinUIEnvironmentTest {
             "root.registerPropertyChangedCallback(FrameworkElement.flowDirectionProperty",
             "uiSettings.textScaleFactorChanged.add",
             "uiSettings.animationsEnabledChanged.add",
+            "uiSettings.colorValuesChanged.add",
             "root.actualThemeChanged.remove",
             "root.loaded.remove",
             "root.unregisterPropertyChangedCallback(FrameworkElement.flowDirectionProperty",
             "uiSettings.textScaleFactorChanged.remove",
             "uiSettings.animationsEnabledChanged.remove",
+            "uiSettings.colorValuesChanged.remove",
         ).forEach { required ->
             assertTrue(source.contains(required), "Missing environment wiring: $required")
         }
 
         val textScaleRemove = source.indexOf("uiSettings.textScaleFactorChanged.remove")
         val animationsRemove = source.indexOf("uiSettings.animationsEnabledChanged.remove")
+        val colorsRemove = source.indexOf("uiSettings.colorValuesChanged.remove")
         val settingsClose = source.indexOf("uiSettings.nativeObject.close()")
         assertTrue(settingsClose > textScaleRemove, "UISettings must close after text-scale removal")
         assertTrue(settingsClose > animationsRemove, "UISettings must close after animations removal")
+        assertTrue(settingsClose > colorsRemove, "UISettings must close after color-values removal")
     }
 }
 

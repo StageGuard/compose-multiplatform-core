@@ -29,8 +29,11 @@ import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.RoutedEventHandler
 import windows.foundation.EventRegistrationToken
 import windows.foundation.TypedEventHandler
+import windows.ui.Color
+import windows.ui.viewmanagement.UIColorType
 import windows.ui.viewmanagement.UISettings
 import windows.ui.viewmanagement.UISettingsAnimationsEnabledChangedEventArgs
+import kotlin.math.pow
 
 internal data class WinUIEnvironment(
     val systemTheme: SystemTheme = SystemTheme.Unknown,
@@ -62,6 +65,8 @@ internal class WinUIXamlEnvironmentSource(
     private val animationsHandler:
         TypedEventHandler<UISettings, UISettingsAnimationsEnabledChangedEventArgs> =
         { _, _ -> notifyChanged() }
+    private val colorValuesHandler: TypedEventHandler<UISettings, Any?> =
+        { _, _ -> notifyChanged() }
 
     private val themeToken: EventRegistrationToken? =
         runCatching { root.actualThemeChanged.add(themeHandler) }.getOrNull()
@@ -76,21 +81,39 @@ internal class WinUIXamlEnvironmentSource(
     private val animationsToken: EventRegistrationToken? = uiSettings?.let { uiSettings ->
         runCatching { uiSettings.animationsEnabledChanged.add(animationsHandler) }.getOrNull()
     }
+    private val colorValuesToken: EventRegistrationToken? = uiSettings?.let { uiSettings ->
+        runCatching { uiSettings.colorValuesChanged.add(colorValuesHandler) }.getOrNull()
+    }
 
-    override fun snapshot(): WinUIEnvironment = WinUIEnvironment(
-        systemTheme = runCatching { root.actualTheme.toComposeSystemTheme() }
-            .getOrDefault(SystemTheme.Unknown),
-        layoutDirection = runCatching { root.flowDirection.toComposeLayoutDirection() }
-            .getOrDefault(LayoutDirection.Ltr),
-        fontScale = normalizeWinUITextScaleFactor(
-            uiSettings?.let { uiSettings ->
-                runCatching { uiSettings.textScaleFactor }.getOrNull()
-            }
-        ),
-        animationsEnabled = uiSettings?.let { uiSettings ->
-            runCatching { uiSettings.animationsEnabled }.getOrDefault(true)
-        } ?: true,
-    )
+    override fun snapshot(): WinUIEnvironment {
+        val requestedTheme = runCatching { root.requestedTheme }.getOrDefault(ElementTheme.Default)
+        val actualTheme = runCatching { root.actualTheme }.getOrDefault(ElementTheme.Default)
+        val foreground = uiSettings?.let { uiSettings ->
+            runCatching { uiSettings.getColorValue(UIColorType.Foreground) }.getOrNull()
+        }
+        val background = uiSettings?.let { uiSettings ->
+            runCatching { uiSettings.getColorValue(UIColorType.Background) }.getOrNull()
+        }
+
+        return WinUIEnvironment(
+            systemTheme = resolveWinUISystemTheme(
+                requestedTheme = requestedTheme,
+                actualTheme = actualTheme,
+                foreground = foreground,
+                background = background,
+            ),
+            layoutDirection = runCatching { root.flowDirection.toComposeLayoutDirection() }
+                .getOrDefault(LayoutDirection.Ltr),
+            fontScale = normalizeWinUITextScaleFactor(
+                uiSettings?.let { uiSettings ->
+                    runCatching { uiSettings.textScaleFactor }.getOrNull()
+                }
+            ),
+            animationsEnabled = uiSettings?.let { uiSettings ->
+                runCatching { uiSettings.animationsEnabled }.getOrDefault(true)
+            } ?: true,
+        )
+    }
 
     override fun setChangeListener(listener: (() -> Unit)?) {
         this.listener = listener
@@ -125,6 +148,9 @@ internal class WinUIXamlEnvironmentSource(
             animationsToken?.let { token ->
                 runCatching { uiSettings.animationsEnabledChanged.remove(token) }
             }
+            colorValuesToken?.let { token ->
+                runCatching { uiSettings.colorValuesChanged.remove(token) }
+            }
             runCatching { uiSettings.nativeObject.close() }
         }
     }
@@ -134,6 +160,52 @@ internal fun ElementTheme.toComposeSystemTheme(): SystemTheme = when (this) {
     ElementTheme.Dark -> SystemTheme.Dark
     ElementTheme.Light -> SystemTheme.Light
     else -> SystemTheme.Unknown
+}
+
+internal fun resolveWinUISystemTheme(
+    requestedTheme: ElementTheme,
+    actualTheme: ElementTheme,
+    foreground: Color?,
+    background: Color?,
+): SystemTheme {
+    val actualSystemTheme = actualTheme.toComposeSystemTheme()
+    if (requestedTheme != ElementTheme.Default) {
+        return actualSystemTheme.takeUnless { it == SystemTheme.Unknown }
+            ?: requestedTheme.toComposeSystemTheme()
+    }
+
+    val systemTheme = if (foreground != null && background != null) {
+        systemThemeFromColors(foreground, background)
+    } else {
+        SystemTheme.Unknown
+    }
+    return systemTheme.takeUnless { it == SystemTheme.Unknown } ?: actualSystemTheme
+}
+
+internal fun systemThemeFromColors(
+    foreground: Color,
+    background: Color,
+): SystemTheme {
+    val foregroundLuminance = foreground.relativeLuminance()
+    val backgroundLuminance = background.relativeLuminance()
+    return when {
+        backgroundLuminance < foregroundLuminance -> SystemTheme.Dark
+        backgroundLuminance > foregroundLuminance -> SystemTheme.Light
+        else -> SystemTheme.Unknown
+    }
+}
+
+private fun Color.relativeLuminance(): Double {
+    fun channel(value: UByte): Double {
+        val normalized = value.toInt() / 255.0
+        return if (normalized <= 0.04045) {
+            normalized / 12.92
+        } else {
+            ((normalized + 0.055) / 1.055).pow(2.4)
+        }
+    }
+
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
 }
 
 internal fun FlowDirection.toComposeLayoutDirection(): LayoutDirection = when (this) {
