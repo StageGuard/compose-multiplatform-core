@@ -279,6 +279,7 @@ class WinUIComposeView internal constructor(
         coordinateMapper = WinUICoordinateMapper.forRoot(
             root,
             screenCoordinatesReady = { isScreenCoordinateConversionReady },
+            rasterizationScale = { rootNode.density.density },
         ),
         textToolbar = WinUITextToolbar(
             hostProvider = { rootContentControl },
@@ -811,11 +812,9 @@ class WinUIComposeView internal constructor(
     }
 
     private fun rootPixelOffsetToScreen(offset: Offset): Offset {
-        val scale = owner.density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
         return rootPixelOffsetToCoreTextScreenPixels(
             offset = offset,
-            densityScale = scale,
-            localDipToScreenPixel = owner::localToScreen,
+            localPixelToScreenPixel = owner::localToScreen,
         )
     }
 
@@ -897,13 +896,8 @@ internal fun rootPixelOffsetToCoreTextViewportVisualPixels(
 
 internal fun rootPixelOffsetToCoreTextScreenPixels(
     offset: Offset,
-    densityScale: Float,
-    localDipToScreenPixel: (Offset) -> Offset,
-): Offset {
-    val scale = densityScale.takeIf { it.isFinite() && it > 0f } ?: 1f
-    val localDip = Offset(offset.x / scale, offset.y / scale)
-    return localDipToScreenPixel(localDip)
-}
+    localPixelToScreenPixel: (Offset) -> Offset,
+): Offset = localPixelToScreenPixel(offset)
 
 fun Window.setContent(content: @Composable () -> Unit): WinUIComposeView {
     val composeView = WinUIComposeView(

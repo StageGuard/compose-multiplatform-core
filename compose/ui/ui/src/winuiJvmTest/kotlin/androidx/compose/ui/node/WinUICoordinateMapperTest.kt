@@ -17,10 +17,31 @@
 package androidx.compose.ui.node
 
 import androidx.compose.ui.geometry.Offset
+import windows.foundation.Point
+import windows.graphics.PointInt32
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class WinUICoordinateMapperTest {
+    @Test
+    fun xamlTransformCoordinatesUseDipAndComposePixelBoundaries() {
+        val xamlPoint = Offset(20f, 40f).toWinUIXamlDipPoint(2f)
+        assertEquals(10f, xamlPoint.x)
+        assertEquals(20f, xamlPoint.y)
+        assertEquals(
+            Offset(20f, 40f),
+            Point(10f, 20f).toComposePixelOffset(2f),
+        )
+    }
+
+    @Test
+    fun screenCoordinateConverterResultsRemainPhysicalPixels() {
+        assertEquals(
+            Offset(100f, 200f),
+            PointInt32(100, 200).toComposeScreenPixelOffset(),
+        )
+    }
+
     @Test
     fun screenCoordinateConversionsAreSkippedUntilReady() {
         var calculatePositionInWindowCalls = 0

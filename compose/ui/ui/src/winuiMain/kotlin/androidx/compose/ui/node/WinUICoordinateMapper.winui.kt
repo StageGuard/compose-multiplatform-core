@@ -18,6 +18,7 @@ package androidx.compose.ui.node
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.platform.validateWinUIRasterizationScale
 import io.github.composefluent.winrt.runtime.asWinRT
 import microsoft.ui.xaml.UIElement
 import windows.foundation.Point
@@ -55,41 +56,60 @@ internal class WinUICoordinateMapper(
         fun forRoot(
             root: UIElement,
             screenCoordinatesReady: () -> Boolean = { true },
+            rasterizationScale: () -> Float = { 1f },
         ): WinUICoordinateMapper =
             WinUICoordinateMapper(
-                calculatePositionInWindow = { root.calculatePositionInWindow(it) },
-                calculateLocalPosition = { root.calculateLocalPosition(it) },
+                calculatePositionInWindow = {
+                    root.calculatePositionInWindow(it, rasterizationScale())
+                },
+                calculateLocalPosition = {
+                    root.calculateLocalPosition(it, rasterizationScale())
+                },
                 screenCoordinatesReady = screenCoordinatesReady,
-                localToScreen = { root.localToScreen(it) },
-                screenToLocal = { root.screenToLocal(it) },
+                localToScreen = { root.localToScreen(it, rasterizationScale()) },
+                screenToLocal = { root.screenToLocal(it, rasterizationScale()) },
             )
 
-        private fun UIElement.calculatePositionInWindow(localPosition: Offset): Offset {
+        private fun UIElement.calculatePositionInWindow(
+            localPosition: Offset,
+            rasterizationScale: Float,
+        ): Offset {
             val transform = rootTransformToWindow() ?: return localPosition
-            return transform.transformPoint(localPosition.toWinRTPoint()).toOffset()
+            return transform.transformPoint(localPosition.toWinUIXamlDipPoint(rasterizationScale))
+                .toComposePixelOffset(rasterizationScale)
         }
 
-        private fun UIElement.calculateLocalPosition(positionInWindow: Offset): Offset {
+        private fun UIElement.calculateLocalPosition(
+            positionInWindow: Offset,
+            rasterizationScale: Float,
+        ): Offset {
             val transform = rootTransformToWindow()?.inverse ?: return positionInWindow
-            return transform.transformPoint(positionInWindow.toWinRTPoint()).toOffset()
+            return transform.transformPoint(positionInWindow.toWinUIXamlDipPoint(rasterizationScale))
+                .toComposePixelOffset(rasterizationScale)
         }
 
-        private fun UIElement.localToScreen(localPosition: Offset): Offset {
+        private fun UIElement.localToScreen(
+            localPosition: Offset,
+            rasterizationScale: Float,
+        ): Offset {
             val xamlRoot = runCatching { xamlRoot }.getOrNull() ?: return localPosition
-            val positionInWindow = calculatePositionInWindow(localPosition)
+            val positionInWindow = calculatePositionInWindow(localPosition, rasterizationScale)
             val coordinateConverter = xamlRoot.coordinateConverter ?: return positionInWindow
             return coordinateConverter
-                .convertLocalToScreen(positionInWindow.toWinRTPoint())
-                .toOffset()
+                .convertLocalToScreen(positionInWindow.toWinUIXamlDipPoint(rasterizationScale))
+                .toComposeScreenPixelOffset()
         }
 
-        private fun UIElement.screenToLocal(positionOnScreen: Offset): Offset {
+        private fun UIElement.screenToLocal(
+            positionOnScreen: Offset,
+            rasterizationScale: Float,
+        ): Offset {
             val xamlRoot = runCatching { xamlRoot }.getOrNull() ?: return positionOnScreen
             val coordinateConverter = xamlRoot.coordinateConverter ?: return positionOnScreen
             val positionInWindow = coordinateConverter
-                .convertScreenToLocal(positionOnScreen.toWinRTPointInt32())
-                .toOffset()
-            return calculateLocalPosition(positionInWindow)
+                .convertScreenToLocal(positionOnScreen.toWinUIScreenPixelPoint())
+                .toComposePixelOffset(rasterizationScale)
+            return calculateLocalPosition(positionInWindow, rasterizationScale)
         }
 
         private fun UIElement.rootTransformToWindow() = runCatching {
@@ -105,13 +125,21 @@ internal class WinUICoordinateMapper(
         private fun <T> Any?.asExistingInstance(type: Class<T>): T? =
             if (this != null && type.isInstance(this)) type.cast(this) else null
 
-        private fun Offset.toWinRTPoint(): Point = Point(x, y)
-
-        private fun Offset.toWinRTPointInt32(): PointInt32 =
-            PointInt32(x.toInt(), y.toInt())
-
-        private fun Point.toOffset(): Offset = Offset(x, y)
-
-        private fun PointInt32.toOffset(): Offset = Offset(x.toFloat(), y.toFloat())
     }
 }
+
+internal fun Offset.toWinUIXamlDipPoint(rasterizationScale: Float): Point {
+    val scale = validateWinUIRasterizationScale(rasterizationScale)
+    return Point(x / scale, y / scale)
+}
+
+private fun Offset.toWinUIScreenPixelPoint(): PointInt32 =
+    PointInt32(x.toInt(), y.toInt())
+
+internal fun Point.toComposePixelOffset(rasterizationScale: Float): Offset {
+    val scale = validateWinUIRasterizationScale(rasterizationScale)
+    return Offset(x * scale, y * scale)
+}
+
+internal fun PointInt32.toComposeScreenPixelOffset(): Offset =
+    Offset(x.toFloat(), y.toFloat())

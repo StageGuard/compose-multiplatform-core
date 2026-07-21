@@ -508,11 +508,10 @@ class WinUIPlatformTextInputServiceTest {
             Offset(682f, 1127f),
             rootPixelOffsetToCoreTextScreenPixels(
                 offset = Offset(32f, 432f),
-                densityScale = 2f,
-                localDipToScreenPixel = { localDip ->
+                localPixelToScreenPixel = { localPixel ->
                     Offset(
-                        x = localDip.x * 2f + 650f,
-                        y = localDip.y * 2f + 695f,
+                        x = localPixel.x + 650f,
+                        y = localPixel.y + 695f,
                     )
                 },
             ),

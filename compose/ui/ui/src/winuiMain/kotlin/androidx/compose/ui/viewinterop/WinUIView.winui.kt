@@ -47,6 +47,8 @@ import androidx.compose.ui.node.WinUIOwner
 import androidx.compose.ui.node.requireOwner
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.toWinUIXamlSize
+import androidx.compose.ui.platform.validateWinUIRasterizationScale
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
@@ -233,6 +235,9 @@ private class WinUIViewHolder<T : UIElement>(
             if (field == value) return
             field = value
             layoutNode.density = value
+            if (layoutNode.isAttached) {
+                layoutNode.requestRemeasure()
+            }
         }
 
     private val positionModifier = Modifier.onGloballyPositioned { coordinates ->
@@ -301,7 +306,7 @@ private class WinUIViewHolder<T : UIElement>(
             .then(positionModifier)
 
     private val measurePolicy = MeasurePolicy { _, constraints ->
-        val desiredSize = view.measureUnclippedDesiredSize()
+        val desiredSize = view.measureUnclippedDesiredSize(this@WinUIViewHolder.density)
         val width = constraints.constrainWidth(desiredSize.width)
         val height = constraints.constrainHeight(desiredSize.height)
         layout(width, height) {
@@ -360,11 +365,11 @@ private class WinUIViewHolder<T : UIElement>(
         this.nativeWidth = nativeWidth
         this.nativeHeight = nativeHeight
         scheduleNativeUpdate {
-            group.uiElement.width = width.toWinUISize()
-            group.uiElement.height = height.toWinUISize()
+            group.uiElement.width = width.toWinUISize(density.density)
+            group.uiElement.height = height.toWinUISize(density.density)
             viewFrameworkElement?.let {
-                it.width = nativeWidth.toWinUISize()
-                it.height = nativeHeight.toWinUISize()
+                it.width = nativeWidth.toWinUISize(density.density)
+                it.height = nativeHeight.toWinUISize(density.density)
                 it.horizontalAlignment = HorizontalAlignment.Left
                 it.verticalAlignment = VerticalAlignment.Top
             }
@@ -382,8 +387,9 @@ private class WinUIViewHolder<T : UIElement>(
         positionX = x
         positionY = y
         scheduleNativeUpdate {
-            Canvas.setLeft(group.uiElement, x.toDouble())
-            Canvas.setTop(group.uiElement, y.toDouble())
+            val scale = validateWinUIRasterizationScale(density.density)
+            Canvas.setLeft(group.uiElement, (x / scale).toDouble())
+            Canvas.setTop(group.uiElement, (y / scale).toDouble())
         }
         updateOwnerInteropBoundsIfActive()
         updateOwnerInteropFocusRectIfFocused()
@@ -590,7 +596,12 @@ private class WinUIViewHolder<T : UIElement>(
             checkNotNull(RectangleGeometry.rectProperty) {
                 "WinUI RectangleGeometry.RectProperty is not available."
             },
-            Rect(0f, 0f, width.toFloat(), height.toFloat()),
+            Rect(
+                0f,
+                0f,
+                width.toWinUISize(density.density).toFloat(),
+                height.toWinUISize(density.density).toFloat(),
+            ),
         )
         scheduleNativeUpdate {
             setClip(group.uiElement, clip)
@@ -783,7 +794,7 @@ private class WinUIFocusTargetInteropNode(
     }
 }
 
-private fun UIElement.measureUnclippedDesiredSize(): IntSize {
+private fun UIElement.measureUnclippedDesiredSize(density: Density): IntSize {
     val measuredSize = runCatching {
         measure(
             Size(
@@ -792,16 +803,16 @@ private fun UIElement.measureUnclippedDesiredSize(): IntSize {
             )
         )
         IntSize(
-            width = desiredSize.width.toComposeLayoutSize(),
-            height = desiredSize.height.toComposeLayoutSize(),
+            width = desiredSize.width.toComposeLayoutSize(density),
+            height = desiredSize.height.toComposeLayoutSize(density),
         )
     }.getOrElse {
         IntSize.Zero
     }
     val explicitSize = asWinRTFrameworkElement()?.let {
         IntSize(
-            width = it.width.toComposeLayoutSize(),
-            height = it.height.toComposeLayoutSize(),
+            width = it.width.toComposeLayoutSize(density),
+            height = it.height.toComposeLayoutSize(density),
         )
     } ?: IntSize.Zero
     return IntSize(
@@ -810,26 +821,26 @@ private fun UIElement.measureUnclippedDesiredSize(): IntSize {
     )
 }
 
-private fun Int.toWinUISize(): Double =
-    if (this > 0) toDouble() else Double.NaN
+private fun Int.toWinUISize(rasterizationScale: Float): Double =
+    toWinUIXamlSize(rasterizationScale)
 
 private val requiredAccessibilityViewProperty
     get() = checkNotNull(AutomationProperties.accessibilityViewProperty) {
         "WinUI AutomationProperties.AccessibilityViewProperty is not available."
     }
 
-private fun Float.toComposeLayoutSize(): Int =
+private fun Float.toComposeLayoutSize(density: Density): Int =
     when {
         !isFinite() || this <= 0f -> 0
         this >= Int.MAX_VALUE.toFloat() -> Int.MAX_VALUE
-        else -> ceil(this).toInt()
+        else -> ceil(this * validateWinUIRasterizationScale(density.density)).toInt()
     }
 
-private fun Double.toComposeLayoutSize(): Int =
+private fun Double.toComposeLayoutSize(density: Density): Int =
     when {
         !isFinite() || this <= 0.0 -> 0
         this >= Int.MAX_VALUE.toDouble() -> Int.MAX_VALUE
-        else -> ceil(this).toInt()
+        else -> ceil(this * validateWinUIRasterizationScale(density.density)).toInt()
     }
 
 private fun Any?.asWinRTControl(): Control? =

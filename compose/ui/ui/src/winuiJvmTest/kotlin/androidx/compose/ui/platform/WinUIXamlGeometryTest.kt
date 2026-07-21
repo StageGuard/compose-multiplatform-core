@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import java.nio.file.Path
 import java.nio.file.Paths
+import windows.foundation.Rect as XamlRect
 import kotlin.io.path.exists
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -61,6 +62,21 @@ class WinUIXamlGeometryTest {
     }
 
     @Test
+    fun xamlDipSizesAndRectsConvertToComposePixels() {
+        listOf(
+            1f to IntSize(120, 80),
+            1.5f to IntSize(180, 120),
+            2f to IntSize(240, 160),
+        ).forEach { (scale, expected) ->
+            assertEquals(expected, WinUIXamlSize(120.0, 80.0).toComposePixelSize(scale))
+            assertEquals(
+                Rect(0f, 0f, expected.width.toFloat(), expected.height.toFloat()),
+                XamlRect(0f, 0f, 120f, 80f).toComposePixelRect(scale),
+            )
+        }
+    }
+
+    @Test
     fun nativeSurfacesUseSharedPhysicalPixelToXamlDipBoundary() {
         val moduleRoot = findUiModuleRoot()
         val popup = moduleRoot
@@ -75,6 +91,9 @@ class WinUIXamlGeometryTest {
         val renderHost = moduleRoot
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUISkikoRenderHost.winui.kt")
             .readText()
+        val composeView = moduleRoot
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt")
+            .readText()
 
         assertTrue(popup.contains("toWinUIXamlSize(rasterizationScale)"))
         assertTrue(popup.contains("toWinUIXamlPoint(rasterizationScale)"))
@@ -82,6 +101,7 @@ class WinUIXamlGeometryTest {
         assertTrue(toolbar.contains("FlyoutShowOptions()"))
         assertTrue(toolbar.contains("toWinUITextToolbarXamlPoint"))
         assertTrue(renderHost.contains("toWinUIXamlSize(density.density)"))
+        assertTrue(composeView.contains("rasterizationScale = { rootNode.density.density }"))
     }
 
     private fun findUiModuleRoot(): Path {
