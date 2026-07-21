@@ -23,6 +23,8 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
+import androidx.compose.ui.input.pointer.isCtrlPressed as isPointerCtrlPressed
 import windows.system.VirtualKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -30,6 +32,72 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WinUIKeyEventProcessorTest {
+    @Test
+    fun mapsWindowsPunctuationVirtualKeys() {
+        val mappings = mapOf(
+            0xBA to Key.Semicolon,
+            0xBB to Key.Equals,
+            0xBC to Key.Comma,
+            0xBD to Key.Minus,
+            0xBE to Key.Period,
+            0xBF to Key.Slash,
+            0xC0 to Key.Grave,
+            0xDB to Key.LeftBracket,
+            0xDC to Key.Backslash,
+            0xDD to Key.RightBracket,
+            0xDE to Key.Apostrophe,
+        )
+
+        mappings.forEach { (virtualKey, expectedKey) ->
+            val events = mutableListOf<KeyEvent>()
+            WinUIKeyEventProcessor().process(
+                eventType = KeyEventType.KeyDown,
+                key = VirtualKey(virtualKey),
+                isHandled = false,
+                nativeEvent = null,
+            ) {
+                events += it
+                false
+            }
+            assertEquals(expectedKey, events.single().key, "VK 0x${virtualKey.toString(16)}")
+        }
+    }
+
+    @Test
+    fun mapsWindowsFunctionBrowserMediaAndVolumeVirtualKeys() {
+        val mappings = mapOf(
+            0xA6 to Key.Back,
+            0xA7 to Key.Forward,
+            0xA8 to Key.Refresh,
+            0xAA to Key.Search,
+            0xAD to Key.VolumeMute,
+            0xAE to Key.VolumeDown,
+            0xAF to Key.VolumeUp,
+            0xB0 to Key.MediaNext,
+            0xB1 to Key.MediaPrevious,
+            0xB2 to Key.MediaStop,
+            0xB3 to Key.MediaPlayPause,
+            0xB4 to Key.Envelope,
+            0xB5 to Key.Music,
+            VirtualKey.NavigationCancel.abiValue to Key.Back,
+        )
+
+        mappings.forEach { (virtualKey, expectedKey) ->
+            val events = mutableListOf<KeyEvent>()
+            val key = VirtualKey(virtualKey)
+            WinUIKeyEventProcessor().process(
+                eventType = KeyEventType.KeyDown,
+                key = key,
+                isHandled = false,
+                nativeEvent = null,
+            ) {
+                events += it
+                false
+            }
+            assertEquals(expectedKey, events.single().key, "VK $virtualKey")
+        }
+    }
+
     @Test
     fun matchesKeyEventsFromComposeRenderHostDescendants() {
         val renderHost = FakeKeyEventSource(parent = null)
@@ -234,6 +302,122 @@ class WinUIKeyEventProcessorTest {
         assertEquals(Key.CtrlLeft, events[2].key)
         assertEquals(Key.B, events[3].key)
         assertEquals(false, events[3].isCtrlPressed)
+    }
+
+    @Test
+    fun resetClearsPressedModifierState() {
+        val processor = WinUIKeyEventProcessor()
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.Control,
+            isHandled = false,
+            nativeEvent = null,
+        ) { false }
+
+        processor.reset()
+        val events = mutableListOf<KeyEvent>()
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.A,
+            isHandled = false,
+            nativeEvent = null,
+        ) {
+            events += it
+            false
+        }
+
+        assertEquals(false, events.single().isCtrlPressed)
+    }
+
+    @Test
+    fun releasingOneControlKeyKeepsOtherControlKeyPressed() {
+        val processor = WinUIKeyEventProcessor()
+
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.LeftControl,
+            isHandled = false,
+            nativeEvent = null,
+        ) { false }
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.RightControl,
+            isHandled = false,
+            nativeEvent = null,
+        ) { false }
+        processor.process(
+            eventType = KeyEventType.KeyUp,
+            key = VirtualKey.LeftControl,
+            isHandled = false,
+            nativeEvent = null,
+        ) { false }
+
+        val events = mutableListOf<KeyEvent>()
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.A,
+            isHandled = false,
+            nativeEvent = null,
+        ) {
+            events += it
+            false
+        }
+
+        assertTrue(events.single().isCtrlPressed)
+    }
+
+    @Test
+    fun keyUpPublishesReleasedModifierStateAfterDispatch() {
+        val processor = WinUIKeyEventProcessor()
+        val modifierUpdates = mutableListOf<Boolean>()
+
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.Control,
+            isHandled = false,
+            nativeEvent = null,
+            onKeyboardModifiersChanged = { modifiers ->
+                modifierUpdates += modifiers.isPointerCtrlPressed
+            },
+        ) { false }
+        processor.process(
+            eventType = KeyEventType.KeyUp,
+            key = VirtualKey.Control,
+            isHandled = false,
+            nativeEvent = null,
+            onKeyboardModifiersChanged = { modifiers ->
+                modifierUpdates += modifiers.isPointerCtrlPressed
+            },
+        ) { false }
+
+        assertEquals(listOf(true, true, false), modifierUpdates)
+    }
+
+    @Test
+    fun pointerModifiersReplaceStaleTrackedModifierState() {
+        val modifierState = WinUIKeyboardModifierState()
+        val processor = WinUIKeyEventProcessor(modifierState)
+
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.Control,
+            isHandled = false,
+            nativeEvent = null,
+        ) { false }
+        modifierState.reconcilePressed(PointerKeyboardModifiers())
+
+        val events = mutableListOf<KeyEvent>()
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.A,
+            isHandled = false,
+            nativeEvent = null,
+        ) {
+            events += it
+            false
+        }
+
+        assertEquals(false, events.single().isCtrlPressed)
     }
 
 }

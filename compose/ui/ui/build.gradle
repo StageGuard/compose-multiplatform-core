@@ -159,6 +159,7 @@ if (composeWinUiGradlePluginAvailable) {
         type("Microsoft.UI.Content.ContentIslandEnvironment")
         type("Microsoft.UI.Input.InputSystemCursor")
         type("Microsoft.UI.Input.InputSystemCursorShape")
+        type("Microsoft.UI.Input.InputKeyboardSource")
         type("Microsoft.UI.Windowing.OverlappedPresenter")
         type("Microsoft.UI.Xaml.Application")
         type("Microsoft.UI.Xaml.Automation.AccessibilityView")
@@ -206,6 +207,7 @@ if (composeWinUiGradlePluginAvailable) {
         type("Windows.UI.ViewManagement.InputPane")
         type("Windows.UI.ViewManagement.InputPaneVisibilityEventArgs")
         type("Windows.UI.ViewManagement.UISettings")
+        type("Windows.UI.Core.CoreVirtualKeyStates")
         type("Windows.UI.Xaml.Interop.Type")
         type("Windows.UI.Xaml.Interop.NotifyCollectionChangedAction")
     }

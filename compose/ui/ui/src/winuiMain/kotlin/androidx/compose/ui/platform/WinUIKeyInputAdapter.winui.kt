@@ -20,6 +20,11 @@ import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
+import androidx.compose.ui.input.pointer.isAltPressed
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.node.WinUIOwner
 import windows.foundation.EventRegistrationToken
 import io.github.composefluent.winrt.runtime.WinRTEvent
@@ -34,11 +39,12 @@ import windows.system.VirtualKey
 internal class WinUIKeyInputAdapter(
     private val root: UIElement,
     private val owner: WinUIOwner,
+    keyboardModifierState: WinUIKeyboardModifierState = WinUIKeyboardModifierState(),
     private val composeEventSources: () -> List<Any?> = { listOf(root) },
     private val composeEventSubtreeSources: () -> List<Any?> = { emptyList() },
 ) {
     private var isDisposed = false
-    private val keyEventProcessor = WinUIKeyEventProcessor()
+    private val keyEventProcessor = WinUIKeyEventProcessor(keyboardModifierState)
     private val characterInputProcessor = WinUICharacterInputProcessor()
     private val registrations = listOf(
         registerKey(KeyEventType.KeyDown, root.keyDown),
@@ -49,9 +55,20 @@ internal class WinUIKeyInputAdapter(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
+        reset()
         registrations.forEach { registration ->
             runCatching { registration.remove() }
         }
+    }
+
+    internal fun reset() {
+        keyEventProcessor.reset()
+        characterInputProcessor.reset()
+        owner.updateKeyboardModifiers(keyEventProcessor.currentKeyboardModifiers())
+    }
+
+    internal fun refreshKeyboardModifiers() {
+        owner.updateKeyboardModifiers(keyEventProcessor.currentKeyboardModifiers())
     }
 
     @OptIn(InternalComposeUiApi::class)
@@ -96,6 +113,7 @@ internal class WinUIKeyInputAdapter(
                         shouldDispatchEvent = {
                             shouldDispatch
                         },
+                        onKeyboardModifiersChanged = owner::updateKeyboardModifiers,
                         sendKeyEvent = owner::sendKeyEvent,
                     ).also { handled ->
                         debugKeyInput {
@@ -184,8 +202,16 @@ internal class WinUIKeyInputAdapter(
     }
 }
 
-internal class WinUIKeyEventProcessor {
-    private val modifierState = WinUIKeyModifierState()
+internal class WinUIKeyEventProcessor(
+    private val modifierState: WinUIKeyboardModifierState = WinUIKeyboardModifierState(),
+) {
+
+    fun reset() {
+        modifierState.clearPressed()
+    }
+
+    fun currentKeyboardModifiers(): PointerKeyboardModifiers =
+        modifierState.toPointerKeyboardModifiers()
 
     @OptIn(InternalComposeUiApi::class)
     fun process(
@@ -194,6 +220,7 @@ internal class WinUIKeyEventProcessor {
         isHandled: Boolean,
         nativeEvent: Any?,
         shouldDispatchEvent: () -> Boolean = { true },
+        onKeyboardModifiersChanged: (PointerKeyboardModifiers) -> Unit = {},
         sendKeyEvent: (KeyEvent) -> Boolean,
     ): Boolean? {
         if (isHandled) return null
@@ -201,16 +228,24 @@ internal class WinUIKeyEventProcessor {
         if (eventType == KeyEventType.KeyDown) {
             modifierState.update(key, isPressed = true)
         }
-        val handled = sendKeyEvent(key.toComposeKeyEvent(eventType, modifierState, nativeEvent))
-        if (eventType == KeyEventType.KeyUp) {
-            modifierState.update(key, isPressed = false)
+        onKeyboardModifiersChanged(modifierState.toPointerKeyboardModifiers())
+        return try {
+            sendKeyEvent(key.toComposeKeyEvent(eventType, modifierState, nativeEvent))
+        } finally {
+            if (eventType == KeyEventType.KeyUp) {
+                modifierState.update(key, isPressed = false)
+                onKeyboardModifiersChanged(modifierState.toPointerKeyboardModifiers())
+            }
         }
-        return handled
     }
 }
 
 internal class WinUICharacterInputProcessor {
     private var skipNextCharacter = false
+
+    fun reset() {
+        skipNextCharacter = false
+    }
 
     fun onKeyDownProcessed(
         keyCodePoint: Int,
@@ -363,49 +398,24 @@ private fun Int.toCommittedTextOrNull(): String? {
     return char.toString()
 }
 
-private class WinUIKeyModifierState {
-    var isCtrlPressed = false
-        private set
-    var isMetaPressed = false
-        private set
-    var isAltPressed = false
-        private set
-    var isShiftPressed = false
-        private set
-
-    fun update(key: VirtualKey, isPressed: Boolean) {
-        when (key) {
-            VirtualKey.Control,
-            VirtualKey.LeftControl,
-            VirtualKey.RightControl -> isCtrlPressed = isPressed
-            VirtualKey.LeftWindows,
-            VirtualKey.RightWindows -> isMetaPressed = isPressed
-            VirtualKey.Menu,
-            VirtualKey.LeftMenu,
-            VirtualKey.RightMenu -> isAltPressed = isPressed
-            VirtualKey.Shift,
-            VirtualKey.LeftShift,
-            VirtualKey.RightShift -> isShiftPressed = isPressed
-            else -> Unit
-        }
-    }
-}
-
 @OptIn(InternalComposeUiApi::class)
 private fun VirtualKey.toComposeKeyEvent(
     eventType: KeyEventType,
-    modifierState: WinUIKeyModifierState,
+    modifierState: WinUIKeyboardModifierState,
     nativeEvent: Any?,
-) = KeyEvent(
-    key = toComposeKey(),
-    type = eventType,
-    codePoint = 0,
-    isCtrlPressed = modifierState.isCtrlPressed,
-    isMetaPressed = modifierState.isMetaPressed,
-    isAltPressed = modifierState.isAltPressed,
-    isShiftPressed = modifierState.isShiftPressed,
-    nativeEvent = nativeEvent,
-)
+): KeyEvent {
+    val modifiers = modifierState.toPointerKeyboardModifiers(lockKeys = WinUILockKeyState())
+    return KeyEvent(
+        key = toComposeKey(),
+        type = eventType,
+        codePoint = 0,
+        isCtrlPressed = modifiers.isCtrlPressed,
+        isMetaPressed = modifiers.isMetaPressed,
+        isAltPressed = modifiers.isAltPressed,
+        isShiftPressed = modifiers.isShiftPressed,
+        nativeEvent = nativeEvent,
+    )
+}
 
 private fun VirtualKey.toComposeKey(): Key =
     when (this) {
@@ -434,6 +444,14 @@ private fun VirtualKey.toComposeKey(): Key =
         VirtualKey.Up -> Key.DirectionUp
         VirtualKey.Right -> Key.DirectionRight
         VirtualKey.Down -> Key.DirectionDown
+        VirtualKey.NavigationView -> Key.Menu
+        VirtualKey.NavigationMenu -> Key.Menu
+        VirtualKey.NavigationUp -> Key.DirectionUp
+        VirtualKey.NavigationDown -> Key.DirectionDown
+        VirtualKey.NavigationLeft -> Key.DirectionLeft
+        VirtualKey.NavigationRight -> Key.DirectionRight
+        VirtualKey.NavigationAccept -> Key.Enter
+        VirtualKey.Print -> Key.PrintScreen
         VirtualKey.Snapshot -> Key.PrintScreen
         VirtualKey.Insert -> Key.Insert
         VirtualKey.Delete -> Key.Delete
@@ -510,8 +528,13 @@ private fun VirtualKey.toComposeKey(): Key =
         VirtualKey.GoBack,
         VirtualKey.NavigationCancel -> Key.Back
         VirtualKey.GoForward -> Key.Forward
+        VirtualKey.Refresh -> Key.Refresh
+        VirtualKey.Stop -> Key.MediaStop
+        VirtualKey.Favorites -> Key.Bookmark
         VirtualKey.Search -> Key.Search
         VirtualKey.GoHome -> Key.SystemHome
+        VirtualKey.Sleep -> Key.Sleep
+        VirtualKey.Kana -> Key.Kana
         VirtualKey.GamepadA -> Key.ButtonA
         VirtualKey.GamepadB -> Key.ButtonB
         VirtualKey.GamepadX -> Key.ButtonX
@@ -528,5 +551,39 @@ private fun VirtualKey.toComposeKey(): Key =
         VirtualKey.GamepadView -> Key.ButtonSelect
         VirtualKey.GamepadLeftThumbstickButton -> Key.ButtonThumbLeft
         VirtualKey.GamepadRightThumbstickButton -> Key.ButtonThumbRight
+        else -> toComposeExtendedKey()
+    }
+
+private fun VirtualKey.toComposeExtendedKey(): Key =
+    when (abiValue) {
+        0xA6 -> Key.Back // VK_BROWSER_BACK
+        0xA7 -> Key.Forward // VK_BROWSER_FORWARD
+        0xA8 -> Key.Refresh // VK_BROWSER_REFRESH
+        0xA9 -> Key.MediaStop // VK_BROWSER_STOP
+        0xAA -> Key.Search // VK_BROWSER_SEARCH
+        0xAB -> Key.Bookmark // VK_BROWSER_FAVORITES
+        0xAC -> Key.SystemHome // VK_BROWSER_HOME
+        0xAD -> Key.VolumeMute
+        0xAE -> Key.VolumeDown
+        0xAF -> Key.VolumeUp
+        0xB0 -> Key.MediaNext
+        0xB1 -> Key.MediaPrevious
+        0xB2 -> Key.MediaStop
+        0xB3 -> Key.MediaPlayPause
+        0xB4 -> Key.Envelope
+        0xB5 -> Key.Music
+        0xB7 -> Key.Calculator
+        0xBA -> Key.Semicolon // VK_OEM_1
+        0xBB -> Key.Equals // VK_OEM_PLUS
+        0xBC -> Key.Comma // VK_OEM_COMMA
+        0xBD -> Key.Minus // VK_OEM_MINUS
+        0xBE -> Key.Period // VK_OEM_PERIOD
+        0xBF -> Key.Slash // VK_OEM_2
+        0xC0 -> Key.Grave // VK_OEM_3
+        0xDB -> Key.LeftBracket // VK_OEM_4
+        0xDC -> Key.Backslash // VK_OEM_5
+        0xDD -> Key.RightBracket // VK_OEM_6
+        0xDE -> Key.Apostrophe // VK_OEM_7
+        0xE2 -> Key.Backslash // VK_OEM_102
         else -> Key.Unknown
-}
+    }

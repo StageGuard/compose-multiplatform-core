@@ -17,6 +17,7 @@
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.HistoricalChange
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -27,6 +28,22 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class WinUIPointerEventProcessorTest {
+    @Test
+    fun pointerEventSamplePreservesPressureHistoryAndHover() {
+        val history = listOf(
+            HistoricalChange(uptimeMillis = 4L, position = Offset(1f, 2f)),
+        )
+        val sample = samplePointerEvent().copy(
+            pressure = 0.6f,
+            activeHover = true,
+            historical = history,
+        ).toPointerSample()
+
+        assertEquals(0.6f, sample.pressure)
+        assertEquals(history, sample.historical)
+        assertEquals(true, sample.activeHover)
+    }
+
     @Test
     fun dispatchesHandledRenderSurfaceEvents() {
         val processor = WinUIPointerEventProcessor()
@@ -117,6 +134,26 @@ class WinUIPointerEventProcessorTest {
         assertEquals(
             Offset(15f, 30f),
             winUIPositionToComposeOffset(10f, 20f, Density(1.5f)),
+        )
+    }
+
+    @Test
+    fun capturedPointerRemainsDownWhenItExitsWhileInContact() {
+        assertEquals(
+            true,
+            winUIIsComposePointerDown(
+                eventType = PointerEventType.Exit,
+                isInContact = true,
+                buttons = PointerButtons(),
+            ),
+        )
+        assertEquals(
+            false,
+            winUIIsComposePointerDown(
+                eventType = PointerEventType.Exit,
+                isInContact = false,
+                buttons = PointerButtons(),
+            ),
         )
     }
 }

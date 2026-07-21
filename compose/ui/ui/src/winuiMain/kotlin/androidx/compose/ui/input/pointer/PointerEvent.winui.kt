@@ -124,6 +124,7 @@ internal actual class InternalPointerEvent(
     val keyboardModifiers: PointerKeyboardModifiers,
     val nativeEvent: Any?,
     val button: PointerButton?,
+    private val activeHoverIds: Set<Long> = emptySet(),
 ) {
     actual constructor(
         changes: LongSparseArray<PointerInputChange>,
@@ -135,12 +136,17 @@ internal actual class InternalPointerEvent(
         keyboardModifiers = pointerInputEvent.keyboardModifiers,
         nativeEvent = pointerInputEvent.nativeEvent,
         button = pointerInputEvent.button,
+        activeHoverIds = pointerInputEvent.pointers
+            .asSequence()
+            .filter { it.activeHover }
+            .map { it.id.value }
+            .toSet(),
     )
 
     actual var suppressMovementConsumption: Boolean = false
 
     actual fun activeHoverEvent(pointerId: PointerId): Boolean =
-        changes[pointerId.value]?.type == PointerType.Mouse
+        pointerId.value in activeHoverIds
 }
 
 private object ButtonMasks {

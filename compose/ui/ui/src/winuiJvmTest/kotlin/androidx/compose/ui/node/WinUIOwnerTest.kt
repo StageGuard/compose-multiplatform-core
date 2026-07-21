@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.platform.WinUITextToolbar
+import androidx.compose.ui.platform.WinUIPointerSample
 import androidx.compose.ui.platform.toXamlPoint
 import androidx.compose.ui.sensitiveContent
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -1405,6 +1406,101 @@ class WinUIOwnerTest {
         error("Could not find compose/ui/ui module root from $start.")
     }
 
+    @Test
+    fun pointerEventDispatchesAllActiveContactsWithPressureHistoryAndHover() {
+        val history = androidx.compose.ui.input.pointer.HistoricalChange(
+            uptimeMillis = 8L,
+            position = Offset(4f, 5f),
+        )
+        val pointers = listOf(
+            WinUIPointerSample(
+                id = 11L,
+                uptimeMillis = 10L,
+                position = Offset(1f, 2f),
+                down = true,
+                type = PointerType.Touch,
+                pressure = 0.25f,
+                activeHover = false,
+                historical = emptyList(),
+            ),
+            WinUIPointerSample(
+                id = 22L,
+                uptimeMillis = 11L,
+                position = Offset(3f, 4f),
+                down = false,
+                type = PointerType.Stylus,
+                pressure = 0.75f,
+                activeHover = true,
+                historical = listOf(history),
+            ),
+        )
+
+        val eventData = winUIPointerSamplesToEventData(
+            samples = pointers,
+            changedPointerId = 22L,
+            scrollDelta = Offset.Zero,
+        )
+
+        assertEquals(
+            listOf(
+                PointerSnapshot(
+                    id = 11L,
+                    pressure = 0.25f,
+                    activeHover = false,
+                    historicalCount = 0,
+                ),
+                PointerSnapshot(
+                    id = 22L,
+                    pressure = 0.75f,
+                    activeHover = true,
+                    historicalCount = 1,
+                ),
+            ),
+            eventData.map { data ->
+                PointerSnapshot(
+                    id = data.id.value,
+                    pressure = data.pressure,
+                    activeHover = data.activeHover,
+                    historicalCount = data.historical.size,
+                )
+            },
+        )
+    }
+
+    @Test
+    fun pointerContactInputModeDecisionDistinguishesHoverFromContact() {
+        listOf(PointerType.Touch, PointerType.Stylus, PointerType.Eraser).forEach { pointerType ->
+            assertTrue(
+                winUIShouldRequestTouchInputMode(
+                    down = true,
+                    type = pointerType,
+                    button = null,
+                ),
+            )
+        }
+        assertFalse(
+            winUIShouldRequestTouchInputMode(
+                down = false,
+                type = PointerType.Mouse,
+                button = null,
+            ),
+        )
+        assertFalse(
+            winUIShouldRequestTouchInputMode(
+                down = false,
+                type = PointerType.Stylus,
+                button = null,
+            ),
+        )
+        assertTrue(
+            winUIShouldRequestTouchInputMode(
+                down = true,
+                type = PointerType.Mouse,
+                button = PointerButton.Primary,
+            ),
+        )
+    }
+
     private fun winUIOwnerSource(): String =
         findUiModuleRoot()
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/node/WinUIOwner.winui.kt")
@@ -1449,6 +1545,13 @@ private data class PointerRecorderElement(
         name = "pointerRecorder"
     }
 }
+
+private data class PointerSnapshot(
+    val id: Long,
+    val pressure: Float,
+    val activeHover: Boolean,
+    val historicalCount: Int,
+)
 
 private class PointerRecorderNode(
     var events: MutableList<PointerEventType>,

@@ -86,6 +86,7 @@ import androidx.compose.ui.platform.WinUIAccessibilityManager
 import androidx.compose.ui.platform.WinUIClipboard
 import androidx.compose.ui.platform.WinUIClipboardManager
 import androidx.compose.ui.platform.WinUIPointerEvent
+import androidx.compose.ui.platform.WinUIPointerSample
 import androidx.compose.ui.platform.WinUIPlatformTextInputSession
 import androidx.compose.ui.platform.WinUIPlatformTextInputService
 import androidx.compose.ui.platform.WinUISoftwareKeyboardController
@@ -703,6 +704,35 @@ internal class WinUIOwner(
         )
     }
 
+    internal fun sendPointerEventForTest(
+        eventType: PointerEventType,
+        changedPointerId: Long,
+        pointers: List<WinUIPointerSample>,
+        buttons: PointerButtons,
+        keyboardModifiers: PointerKeyboardModifiers,
+        button: PointerButton?,
+        scrollDelta: Offset = Offset.Zero,
+        isInBounds: Boolean = eventType != PointerEventType.Exit,
+    ): Boolean {
+        val changedPointer = pointers.firstOrNull { it.id == changedPointerId }
+            ?: error("Missing changed pointer $changedPointerId")
+        return sendPointerEvent(
+            eventType = eventType,
+            position = changedPointer.position,
+            uptimeMillis = changedPointer.uptimeMillis,
+            pointerId = changedPointer.id,
+            down = changedPointer.down,
+            type = changedPointer.type,
+            buttons = buttons,
+            keyboardModifiers = keyboardModifiers,
+            button = button,
+            scrollDelta = scrollDelta,
+            isInBounds = isInBounds,
+            nativeEvent = null,
+            pointerSamples = pointers,
+        )
+    }
+
     internal fun sendPointerEvent(
         eventType: PointerEventType,
         position: Offset,
@@ -717,9 +747,10 @@ internal class WinUIOwner(
         isInBounds: Boolean = eventType != PointerEventType.Exit,
         nativeEvent: Any?,
         updateLastPointerEvent: Boolean = true,
+        pointerSamples: List<WinUIPointerSample> = emptyList(),
     ): Boolean {
         if (isShuttingDown) return false
-        if (button != null) {
+        if (winUIShouldRequestTouchInputMode(down, type, button)) {
             inputModeManager.requestInputMode(InputMode.Touch)
         }
         if (updateLastPointerEvent) {
@@ -740,27 +771,31 @@ internal class WinUIOwner(
                 )
             )
         }
+        updateKeyboardModifiers(keyboardModifiers)
         if (eventType != PointerEventType.Exit && isInInteropViewBounds(position)) {
             return false
+        }
+        val samples = pointerSamples.ifEmpty {
+            listOf(
+                WinUIPointerSample(
+                    id = pointerId,
+                    uptimeMillis = uptimeMillis,
+                    position = position,
+                    down = down,
+                    type = type,
+                    pressure = if (down) 1f else 0f,
+                    activeHover = type == PointerType.Mouse && !down,
+                    historical = emptyList(),
+                )
+            )
         }
         val event = PointerInputEvent(
             eventType = eventType,
             uptime = uptimeMillis,
-            pointers = listOf(
-                PointerInputEventData(
-                    id = PointerId(pointerId),
-                    uptime = uptimeMillis,
-                    positionOnScreen = position,
-                    position = position,
-                    down = down,
-                    pressure = 1f,
-                    type = type,
-                    activeHover = type == PointerType.Mouse,
-                    scrollDelta = scrollDelta,
-                    scaleGestureFactor = 1f,
-                    panGestureOffset = Offset.Zero,
-                    originalEventPosition = position,
-                )
+            pointers = winUIPointerSamplesToEventData(
+                samples = samples,
+                changedPointerId = pointerId,
+                scrollDelta = scrollDelta,
             ),
             buttons = buttons,
             keyboardModifiers = keyboardModifiers,
@@ -825,6 +860,12 @@ internal class WinUIOwner(
         return focusOwner.dispatchKeyEvent(keyEvent) || handleFocusKeys(keyEvent)
     }
 
+    internal fun updateKeyboardModifiers(keyboardModifiers: PointerKeyboardModifiers) {
+        if (!isShuttingDown) {
+            mutableWindowInfo.keyboardModifiers = keyboardModifiers
+        }
+    }
+
     private fun handleFocusKeys(keyEvent: KeyEvent): Boolean {
         if (keyEvent.type != KeyEventType.KeyDown) return false
         val focusDirection = when (keyEvent.key) {
@@ -836,6 +877,35 @@ internal class WinUIOwner(
         inputModeManager.requestInputMode(InputMode.Keyboard)
         return focusOwner.moveFocus(focusDirection)
     }
+}
+
+internal fun winUIShouldRequestTouchInputMode(
+    down: Boolean,
+    type: PointerType,
+    button: PointerButton?,
+): Boolean = button != null ||
+    (down && (type == PointerType.Touch || type == PointerType.Stylus || type == PointerType.Eraser))
+
+internal fun winUIPointerSamplesToEventData(
+    samples: List<WinUIPointerSample>,
+    changedPointerId: Long,
+    scrollDelta: Offset,
+): List<PointerInputEventData> = samples.map { sample ->
+    PointerInputEventData(
+        id = PointerId(sample.id),
+        uptime = sample.uptimeMillis,
+        positionOnScreen = sample.position,
+        position = sample.position,
+        down = sample.down,
+        pressure = sample.pressure,
+        type = sample.type,
+        activeHover = sample.activeHover,
+        historical = if (sample.id == changedPointerId) sample.historical else emptyList(),
+        scrollDelta = if (sample.id == changedPointerId) scrollDelta else Offset.Zero,
+        scaleGestureFactor = 1f,
+        panGestureOffset = Offset.Zero,
+        originalEventPosition = sample.position,
+    )
 }
 
 internal data class WinUIOwnerStateForTest(

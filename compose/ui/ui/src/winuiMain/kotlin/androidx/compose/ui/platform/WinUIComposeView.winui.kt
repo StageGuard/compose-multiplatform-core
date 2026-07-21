@@ -354,9 +354,11 @@ class WinUIComposeView internal constructor(
         dispatch = { block -> dispatchQueue.dispatch(block) },
         onChanged = ::applySystemEnvironment,
     )
+    private val keyboardModifierState = WinUIKeyboardModifierState()
     private val keyInputAdapter = WinUIKeyInputAdapter(
         root = root,
         owner = owner,
+        keyboardModifierState = keyboardModifierState,
         composeEventSources = { listOf(root) },
         composeEventSubtreeSources = { listOf(renderHost.component) },
     )
@@ -366,6 +368,7 @@ class WinUIComposeView internal constructor(
         WinUIPointerInputAdapter(
             root = renderHost.component,
             owner = owner,
+            keyboardModifierState = keyboardModifierState,
             onSourcePointerPointChanged = dragAndDropAdapter::updateSourcePointerPoint,
         )
 
@@ -484,11 +487,14 @@ class WinUIComposeView internal constructor(
     fun setHostActive(isActive: Boolean) {
         if (isDisposed) return
         if (isActive) {
+            keyInputAdapter.refreshKeyboardModifiers()
             ensureInputPaneController()
             inputPaneController?.let { controller ->
                 WinUIPlatformTextInputService.registerInputPaneController(this, controller)
             }
         } else {
+            pointerInputAdapter.cancelPointerInput()
+            keyInputAdapter.reset()
             WinUIPlatformTextInputService.unregisterInputPaneController(this)
         }
         lifecycleController.setActive(isActive)
