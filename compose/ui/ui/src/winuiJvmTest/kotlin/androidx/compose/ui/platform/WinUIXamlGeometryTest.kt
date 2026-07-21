@@ -27,6 +27,7 @@ import kotlin.io.path.name
 import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WinUIXamlGeometryTest {
@@ -100,6 +101,7 @@ class WinUIXamlGeometryTest {
         assertTrue(dialog.contains("toWinUIXamlSize(rasterizationScale)"))
         assertTrue(toolbar.contains("FlyoutShowOptions()"))
         assertTrue(toolbar.contains("toWinUITextToolbarXamlPoint"))
+        assertFalse(toolbar.contains("println("))
         assertTrue(renderHost.contains("toWinUIXamlSize(density.density)"))
         assertTrue(composeView.contains("rasterizationScale = { rootNode.density.density }"))
     }

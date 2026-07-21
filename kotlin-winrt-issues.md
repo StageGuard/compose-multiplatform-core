@@ -1289,18 +1289,18 @@ baseline, not every retest attempt.
   `compose-fluent-skiko\samples\SkiaWinUISample`, loaded Windows App SDK
   `Microsoft.UI.Xaml.dll` `3.1.8.2604`, and is evidence that this native
   text-input fail-fast is not specific to compose-winui's full smoke sample.
-- **Resolution:** compose-winui does not attach CoreText by default. Normal text
-  input is maintained through Compose's key event and edit-command model, while
-  the experimental CoreText bridge is kept behind
-  `compose.winui.textInput.coreText.enabled=true` for deliberate debugging only.
-  The native TextInputFramework fail-fast remains an upstream/runtime bucket to
-  revisit only with a deliberately scoped desktop IME integration.
-- **Validation:** with JDK 25 and current Maven snapshots,
-  `:compose:ui:ui:compileKotlinWinuiJvm`,
-  focused WinUI input tests, and
-  `:compose:ui:ui:winui-samples:runWinUIViewSample` pass with CoreText not
-  enabled. Reopen only with fresh native crash evidence from the current
-  snapshots.
+- **Resolution:** subsequent CoreText session ownership, focus, and state
+  synchronization fixes made the current compose-winui path stable enough to
+  attach CoreText by default whenever an input session and root-to-screen mapper
+  are available. `compose.winui.textInput.coreText.disabled=true` remains an
+  explicit diagnostic escape hatch; there is no current
+  `compose.winui.textInput.coreText.enabled` opt-in gate. `CharacterReceived`
+  remains the committed-text fallback when CoreText is unavailable or is not
+  composing.
+- **Validation:** validate the default-enabled policy with JDK 25, focused WinUI
+  input tests, `:compose:ui:ui:compileKotlinWinuiJvm`, and the repository-local
+  WinUI text-input/sample tasks without setting either CoreText system property.
+  Reopen only with fresh native crash evidence from the current snapshots.
 
 ## KWINRT-027: Maven compiler plugin snapshot requires Kotlin 2.4 compiler APIs
 

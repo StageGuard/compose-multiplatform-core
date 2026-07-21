@@ -150,17 +150,6 @@ internal class WinUITextToolbar(
     ) {
         if (currentMenu?.nativeMenu == flyout) {
             try {
-                System.err.println(
-                    "WinUIContextMenu.showAt source=textToolbar " +
-                        "root=${host::class.simpleName} " +
-                        "loaded=${runCatching { host.isLoaded }.getOrNull()} " +
-                        "xamlRoot=${runCatching { host.xamlRoot != null }.getOrNull()} " +
-                        "size=${runCatching { host.actualWidth }.getOrNull()}x" +
-                        "${runCatching { host.actualHeight }.getOrNull()} " +
-                        "density=${densityProvider().density} " +
-                        "rect=${menu.rect} " +
-                        "items=${menu.itemLabels.size}"
-                )
                 val options = FlyoutShowOptions().also { showOptions ->
                     showOptions.position = menu.rect.toWinUITextToolbarXamlPoint(
                         densityProvider().density
