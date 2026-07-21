@@ -166,6 +166,18 @@ class WinUIPopupDialogBehaviorTest {
     }
 
     @Test
+    fun popupKeyCallbacksReachCanvasAndWindowContent() {
+        val source = winUISource("Popup.winui.kt")
+
+        assertTrue(source.contains("onPreviewKeyEvent: ((KeyEvent) -> Boolean)?"))
+        assertTrue(source.contains("onKeyEvent: ((KeyEvent) -> Boolean)?"))
+        assertTrue(
+            source.split("popupKeyEventHandlers(").size - 1 >= 3,
+            "WinUI canvas and window popup content must both install popup key callbacks.",
+        )
+    }
+
+    @Test
     fun dialogDefaultWidthIsConstrained() {
         val unconstrained = winUIDialogMaxWidth(
             windowWidth = 1200,

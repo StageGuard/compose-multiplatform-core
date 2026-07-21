@@ -18,11 +18,10 @@ package androidx.compose.material3.internal
 
 import androidx.compose.runtime.Composable
 
-// TODO(https://github.com/JetBrains/compose-multiplatform/issues/3360) Support localization
-//  the current values are copied from compose\foundation\foundation\src\androidMain\res\values-en-rGB\strings.xml
 internal actual object BasicTooltipStrings {
     @Composable
-    actual fun label() = "show tooltip"
+    actual fun label() = getString(Strings.TooltipLongPressLabel)
+
     @Composable
-    actual fun description() = "tooltip"
+    actual fun description() = getString(Strings.TooltipPaneDescription)
 }

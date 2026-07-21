@@ -16,7 +16,21 @@
 
 package androidx.compose.material3
 
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import java.nio.file.Path
+import java.nio.file.Paths
+import kotlin.io.path.exists
+import kotlin.io.path.name
+import kotlin.io.path.readText
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -46,5 +60,85 @@ class WinUIMaterial3PlatformTest {
         assertFalse(winUIShouldUsePrecisionPointerComponentSizing(false, both))
         assertFalse(winUIShouldUsePrecisionPointerComponentSizing(true, keyboardOnly))
         assertFalse(winUIShouldUsePrecisionPointerComponentSizing(true, mouseOnly))
+    }
+
+    @Test
+    @OptIn(InternalComposeUiApi::class)
+    fun dropdownMenuDirectionalKeysMoveFocusInKeyboardMode() {
+        val focusDirections = mutableListOf<FocusDirection>()
+        val requestedInputModes = mutableListOf<InputMode>()
+        val focusManager = object : FocusManager {
+            override fun clearFocus(force: Boolean) = Unit
+
+            override fun moveFocus(focusDirection: FocusDirection): Boolean {
+                focusDirections += focusDirection
+                return true
+            }
+        }
+        val inputModeManager = object : InputModeManager {
+            override val inputMode: InputMode = InputMode.Touch
+
+            override fun requestInputMode(inputMode: InputMode): Boolean {
+                requestedInputModes += inputMode
+                return true
+            }
+        }
+
+        assertTrue(
+            handleDropdownOnKeyEvent(
+                KeyEvent(Key.DirectionDown, KeyEventType.KeyDown),
+                focusManager,
+                inputModeManager,
+            )
+        )
+        assertTrue(
+            handleDropdownOnKeyEvent(
+                KeyEvent(Key.DirectionUp, KeyEventType.KeyDown),
+                focusManager,
+                inputModeManager,
+            )
+        )
+        assertFalse(
+            handleDropdownOnKeyEvent(
+                KeyEvent(Key.DirectionDown, KeyEventType.KeyUp),
+                focusManager,
+                inputModeManager,
+            )
+        )
+
+        assertEquals(listOf(FocusDirection.Next, FocusDirection.Previous), focusDirections)
+        assertEquals(listOf(InputMode.Keyboard, InputMode.Keyboard), requestedInputModes)
+    }
+
+    @Test
+    fun winuiDropdownMenuPopupsForwardKeyEvents() {
+        val source = material3ModuleRoot()
+            .resolve("src/winuiJvmMain/kotlin/androidx/compose/material3/SkikoMenu.winui.kt")
+            .readText()
+
+        assertEquals(2, Regex("onKeyEvent\\s*=").findAll(source).count())
+    }
+
+    @Test
+    fun skikoTooltipUsesLocalizedMaterialStrings() {
+        val source = material3ModuleRoot()
+            .resolve("src/skikoMain/kotlin/androidx/compose/material3/internal/BasicTooltip.skiko.kt")
+            .readText()
+
+        assertTrue(source.contains("getString(Strings.TooltipLongPressLabel)"))
+        assertTrue(source.contains("getString(Strings.TooltipPaneDescription)"))
+        assertFalse(source.contains("\"show tooltip\""))
+    }
+
+    private fun material3ModuleRoot(): Path {
+        val start = Paths.get("").toAbsolutePath()
+        generateSequence(start) { it.parent }.forEach { candidate ->
+            val direct = candidate.resolve("src/winuiJvmMain/kotlin")
+            if (direct.exists() && candidate.name == "material3") return candidate
+
+            val fromRepoRoot = candidate.resolve("compose/material3/material3/src/winuiJvmMain/kotlin")
+            if (fromRepoRoot.exists()) return candidate.resolve("compose/material3/material3")
+        }
+        error("Could not find compose/material3/material3 module root from $start.")
     }
 }

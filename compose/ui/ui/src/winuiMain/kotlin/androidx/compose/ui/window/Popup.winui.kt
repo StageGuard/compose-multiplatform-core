@@ -32,6 +32,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInRoot
@@ -154,6 +157,8 @@ actual fun Popup(
         popupPositionProvider = popupPositionProvider,
         onDismissRequest = onDismissRequest,
         properties = properties,
+        onPreviewKeyEvent = null,
+        onKeyEvent = null,
         content = content,
     )
 }
@@ -164,12 +169,56 @@ actual fun Popup(
     onDismissRequest: (() -> Unit)?,
     properties: PopupProperties,
     content: @Composable () -> Unit,
+): Unit = Popup(
+    popupPositionProvider = popupPositionProvider,
+    onDismissRequest = onDismissRequest,
+    properties = properties,
+    onPreviewKeyEvent = null,
+    onKeyEvent = null,
+    content = content,
+)
+
+@Composable
+fun Popup(
+    alignment: Alignment = Alignment.TopStart,
+    offset: IntOffset = IntOffset(0, 0),
+    onDismissRequest: (() -> Unit)? = null,
+    properties: PopupProperties = PopupProperties(),
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)? = null,
+    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
+    content: @Composable () -> Unit,
 ) {
+    val popupPositionProvider = remember(alignment, offset) {
+        AlignmentOffsetPositionProvider(alignment, offset)
+    }
+    Popup(
+        popupPositionProvider = popupPositionProvider,
+        onDismissRequest = onDismissRequest,
+        properties = properties,
+        onPreviewKeyEvent = onPreviewKeyEvent,
+        onKeyEvent = onKeyEvent,
+        content = content,
+    )
+}
+
+@Composable
+fun Popup(
+    popupPositionProvider: PopupPositionProvider,
+    onDismissRequest: (() -> Unit)? = null,
+    properties: PopupProperties = PopupProperties(),
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)? = null,
+    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
+    content: @Composable () -> Unit,
+) {
+    val currentOnPreviewKeyEvent by rememberUpdatedState(onPreviewKeyEvent)
+    val currentOnKeyEvent by rememberUpdatedState(onKeyEvent)
     if (properties.layerType == LayerType.OnWindow) {
         WinUIWindowPopupLayout(
             popupPositionProvider = popupPositionProvider,
             onDismissRequest = onDismissRequest,
             properties = properties,
+            onPreviewKeyEvent = currentOnPreviewKeyEvent,
+            onKeyEvent = currentOnKeyEvent,
             content = content,
         )
     } else {
@@ -177,6 +226,8 @@ actual fun Popup(
             popupPositionProvider = popupPositionProvider,
             onDismissRequest = onDismissRequest,
             properties = properties,
+            onPreviewKeyEvent = currentOnPreviewKeyEvent,
+            onKeyEvent = currentOnKeyEvent,
             content = content,
         )
     }
@@ -187,6 +238,8 @@ private fun WinUICanvasPopupLayout(
     popupPositionProvider: PopupPositionProvider,
     onDismissRequest: (() -> Unit)?,
     properties: PopupProperties,
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
     content: @Composable () -> Unit,
 ) {
     var parentBoundsInWindow by remember { mutableStateOf(IntRect.Zero) }
@@ -232,7 +285,8 @@ private fun WinUICanvasPopupLayout(
                     size = coordinates.size,
                 )
             }
-            .semantics { popup() },
+            .semantics { popup() }
+            .popupKeyEventHandlers(onPreviewKeyEvent, onKeyEvent),
     ) { measurables, constraints ->
         val windowSize = containerSize.takeIf { it != IntSize.Zero }
             ?: constraints.finiteMaxSizeOr(IntSize.Zero)
@@ -283,6 +337,8 @@ private fun WinUIWindowPopupLayout(
     popupPositionProvider: PopupPositionProvider,
     onDismissRequest: (() -> Unit)?,
     properties: PopupProperties,
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
     content: @Composable () -> Unit,
 ) {
     val parentBoundsInWindow = remember { mutableStateOf(IntRect.Zero) }
@@ -320,6 +376,8 @@ private fun WinUIWindowPopupLayout(
             layoutDirection = layoutDirection,
             rasterizationScale = rasterizationScale,
             onDismissRequest = currentOnDismissRequest,
+            onPreviewKeyEvent = onPreviewKeyEvent,
+            onKeyEvent = onKeyEvent,
             content = currentContent,
         )
     }
@@ -375,6 +433,8 @@ private class WinUIFlyoutPopupHost(
     private var rasterizationScale: Float = 1f
     private var currentContent: @Composable () -> Unit by mutableStateOf({})
     private var onDismissRequest: (() -> Unit)? = null
+    private var onPreviewKeyEvent: ((KeyEvent) -> Boolean)? by mutableStateOf(null)
+    private var onKeyEvent: ((KeyEvent) -> Boolean)? by mutableStateOf(null)
     private val dismissalState = WinUIPopupDismissState(
         dismissOnBackPress = true,
         dismissOnClickOutside = true,
@@ -426,7 +486,8 @@ private class WinUIFlyoutPopupHost(
             content = content,
             modifier = Modifier
                 .onPlaced { coordinates -> updateContentSize(coordinates.size) }
-                .semantics { popup() },
+                .semantics { popup() }
+                .popupKeyEventHandlers(onPreviewKeyEvent, onKeyEvent),
         ) { measurables, constraints ->
             val windowSize = parentWindowSize.takeIf { it != IntSize.Zero }
                 ?: constraints.finiteMaxSizeOr(IntSize.Zero)
@@ -497,6 +558,8 @@ private class WinUIFlyoutPopupHost(
         layoutDirection: androidx.compose.ui.unit.LayoutDirection,
         rasterizationScale: Float,
         onDismissRequest: (() -> Unit)?,
+        onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+        onKeyEvent: ((KeyEvent) -> Boolean)?,
         content: @Composable () -> Unit,
     ) {
         this.popupPositionProvider = popupPositionProvider
@@ -507,6 +570,8 @@ private class WinUIFlyoutPopupHost(
         this.layoutDirection = layoutDirection
         this.rasterizationScale = rasterizationScale
         this.onDismissRequest = onDismissRequest
+        this.onPreviewKeyEvent = onPreviewKeyEvent
+        this.onKeyEvent = onKeyEvent
         this.currentContent = content
         flyout.allowFocusOnInteraction = properties.focusable
         flyout.lightDismissOverlayMode = if (properties.dismissOnClickOutside) {
@@ -773,6 +838,16 @@ private fun createTransparentFlyoutPresenterStyle(): Style =
         style.setters.add(Setter(FrameworkElement.minHeightProperty, 0.0))
         style.setters.add(Setter(UIElement.useSystemFocusVisualsProperty, false))
     }
+
+private fun Modifier.popupKeyEventHandlers(
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
+): Modifier {
+    var result = this
+    if (onPreviewKeyEvent != null) result = result.onPreviewKeyEvent(onPreviewKeyEvent)
+    if (onKeyEvent != null) result = result.onKeyEvent(onKeyEvent)
+    return result
+}
 
 private fun Constraints.finiteMaxSizeOr(fallback: IntSize): IntSize =
     IntSize(

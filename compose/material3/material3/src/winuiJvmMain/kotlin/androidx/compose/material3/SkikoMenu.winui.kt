@@ -36,12 +36,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -176,11 +189,19 @@ actual fun DropdownMenu(
                 }
             }
 
+        var focusManager: FocusManager? by mutableStateOf(null)
+        var inputModeManager: InputModeManager? by mutableStateOf(null)
         Popup(
             popupPositionProvider = popupPositionProvider,
             onDismissRequest = onDismissRequest,
             properties = properties,
+            onKeyEvent = {
+                handleDropdownOnKeyEvent(it, focusManager, inputModeManager)
+            },
         ) {
+            focusManager = LocalFocusManager.current
+            inputModeManager = LocalInputModeManager.current
+
             DropdownMenuContent(
                 expandedState = expandedState,
                 transformOriginState = transformOriginState,
@@ -241,11 +262,19 @@ actual fun DropdownMenuPopup(
         }
 
         val isInspecting = LocalInspectionMode.current
+        var focusManager: FocusManager? by mutableStateOf(null)
+        var inputModeManager: InputModeManager? by mutableStateOf(null)
         Popup(
             popupPositionProvider = popupPositionProvider,
             onDismissRequest = onDismissRequest,
             properties = properties,
+            onKeyEvent = {
+                handleDropdownOnKeyEvent(it, focusManager, inputModeManager)
+            },
         ) {
+            focusManager = LocalFocusManager.current
+            inputModeManager = LocalInputModeManager.current
+
             Column(
                 modifier =
                     modifier.width(IntrinsicSize.Max).graphicsLayer {
@@ -348,5 +377,28 @@ actual fun DropdownMenuItem(
         contentPadding = contentPadding,
         interactionSource = interactionSource,
     )
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun handleDropdownOnKeyEvent(
+    keyEvent: KeyEvent,
+    focusManager: FocusManager?,
+    inputModeManager: InputModeManager?,
+): Boolean = if (keyEvent.type == KeyEventType.KeyDown) {
+    when (keyEvent.key) {
+        Key.DirectionDown -> {
+            inputModeManager?.requestInputMode(InputMode.Keyboard)
+            focusManager?.moveFocus(FocusDirection.Next)
+            true
+        }
+        Key.DirectionUp -> {
+            inputModeManager?.requestInputMode(InputMode.Keyboard)
+            focusManager?.moveFocus(FocusDirection.Previous)
+            true
+        }
+        else -> false
+    }
+} else {
+    false
 }
 
