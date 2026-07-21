@@ -347,11 +347,11 @@ internal data class WinUISkikoSurfaceSize(
 )
 
 internal fun IntSize.toWinUISkikoSurfaceSize(density: Density): WinUISkikoSurfaceSize {
-    val scale = density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
+    val xamlSize = toWinUIXamlSize(density.density)
     return WinUISkikoSurfaceSize(
         physicalSize = this,
-        xamlWidth = width.toDouble() / scale.toDouble(),
-        xamlHeight = height.toDouble() / scale.toDouble(),
+        xamlWidth = xamlSize.width,
+        xamlHeight = xamlSize.height,
     )
 }
 

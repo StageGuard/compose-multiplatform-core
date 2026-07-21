@@ -25,7 +25,7 @@ import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.UIElement
 import microsoft.ui.xaml.controls.MenuFlyout
 import microsoft.ui.xaml.controls.MenuFlyoutItem
-import windows.foundation.Point
+import microsoft.ui.xaml.controls.primitives.FlyoutShowOptions
 
 internal class WinUITextToolbar(
     private val hostProvider: () -> FrameworkElement? = { null },
@@ -161,7 +161,12 @@ internal class WinUITextToolbar(
                         "rect=${menu.rect} " +
                         "items=${menu.itemLabels.size}"
                 )
-                flyout.showAt(host)
+                val options = FlyoutShowOptions().also { showOptions ->
+                    showOptions.position = menu.rect.toWinUITextToolbarXamlPoint(
+                        densityProvider().density
+                    )
+                }
+                flyout.showAt(host, options)
             } catch (_: Throwable) {
                 if (currentMenu?.nativeMenu == flyout) {
                     currentMenu = null
@@ -222,11 +227,6 @@ private data class NativeMenu(
     val clickRegistrations: List<WinUITextToolbarClickRegistration>,
     val closedRegistration: WinUITextToolbarClosedRegistration,
 )
-
-internal fun Rect.toXamlPoint(density: Density): Point {
-    val scale = density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
-    return Point(left / scale, bottom / scale)
-}
 
 private fun MutableList<WinUITextToolbarRequest>.addRequest(label: String, callback: (() -> Unit)?) {
     if (callback != null) {

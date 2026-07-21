@@ -37,10 +37,13 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWinUIRoot
 import androidx.compose.ui.platform.LocalWinUIWindow
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WinUIComposeView
+import androidx.compose.ui.platform.toWinUIXamlPoint
+import androidx.compose.ui.platform.toWinUIXamlSize
 import androidx.compose.ui.semantics.popup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
@@ -68,7 +71,6 @@ import microsoft.ui.xaml.input.KeyEventHandler
 import microsoft.ui.xaml.input.PointerEventHandler
 import microsoft.ui.xaml.media.SolidColorBrush
 import microsoft.ui.xaml.Application as XamlApplication
-import windows.foundation.Point
 import windows.system.VirtualKey
 import windows.ui.Color
 import microsoft.ui.xaml.Window as XamlWindow
@@ -302,6 +304,7 @@ private fun WinUIWindowPopupLayout(
     val containerSize = LocalWindowInfo.current.containerSize
     val parentIsActive = LocalWindowInfo.current.isWindowFocused
     val layoutDirection = LocalLayoutDirection.current
+    val rasterizationScale = LocalDensity.current.density
     val currentContent by rememberUpdatedState(content)
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
     val parentCompositionContext = rememberCompositionContext()
@@ -315,6 +318,7 @@ private fun WinUIWindowPopupLayout(
             windowSize = containerSize,
             parentIsActive = parentIsActive,
             layoutDirection = layoutDirection,
+            rasterizationScale = rasterizationScale,
             onDismissRequest = currentOnDismissRequest,
             content = currentContent,
         )
@@ -368,6 +372,7 @@ private class WinUIFlyoutPopupHost(
     private var layoutDirection: androidx.compose.ui.unit.LayoutDirection by mutableStateOf(
         androidx.compose.ui.unit.LayoutDirection.Ltr
     )
+    private var rasterizationScale: Float = 1f
     private var currentContent: @Composable () -> Unit by mutableStateOf({})
     private var onDismissRequest: (() -> Unit)? = null
     private val dismissalState = WinUIPopupDismissState(
@@ -490,6 +495,7 @@ private class WinUIFlyoutPopupHost(
         windowSize: IntSize,
         parentIsActive: Boolean,
         layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        rasterizationScale: Float,
         onDismissRequest: (() -> Unit)?,
         content: @Composable () -> Unit,
     ) {
@@ -499,6 +505,7 @@ private class WinUIFlyoutPopupHost(
         this.windowSize = windowSize
         this.parentIsActive = parentIsActive
         this.layoutDirection = layoutDirection
+        this.rasterizationScale = rasterizationScale
         this.onDismissRequest = onDismissRequest
         this.currentContent = content
         flyout.allowFocusOnInteraction = properties.focusable
@@ -515,8 +522,9 @@ private class WinUIFlyoutPopupHost(
         updateHostActivation()
         if (windowSize != IntSize.Zero) {
             composeView.setWindowContainerSize(windowSize)
-            composeView.rootFrameworkElement.width = windowSize.width.toDouble()
-            composeView.rootFrameworkElement.height = windowSize.height.toDouble()
+            val xamlSize = windowSize.toWinUIXamlSize(rasterizationScale)
+            composeView.rootFrameworkElement.width = xamlSize.width
+            composeView.rootFrameworkElement.height = xamlSize.height
         }
         updateFlyout()
     }
@@ -567,13 +575,17 @@ private class WinUIFlyoutPopupHost(
         } else {
             effectiveWindowSize
         }
-        composeView.rootFrameworkElement.width = hostSize.width.coerceAtLeast(1).toDouble()
-        composeView.rootFrameworkElement.height = hostSize.height.coerceAtLeast(1).toDouble()
+        val xamlHostSize = IntSize(
+            width = hostSize.width.coerceAtLeast(1),
+            height = hostSize.height.coerceAtLeast(1),
+        ).toWinUIXamlSize(rasterizationScale)
+        composeView.rootFrameworkElement.width = xamlHostSize.width
+        composeView.rootFrameworkElement.height = xamlHostSize.height
         if (shouldBeOpen && !isOpen) {
             isOpen = true
             flyout.xamlRoot = rootXamlRoot
             val showOptions = FlyoutShowOptions().also { options ->
-                options.position = Point(popupPosition.x.toFloat(), popupPosition.y.toFloat())
+                options.position = popupPosition.toWinUIXamlPoint(rasterizationScale)
                 options.placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
                 options.showMode = FlyoutShowMode.Transient
             }

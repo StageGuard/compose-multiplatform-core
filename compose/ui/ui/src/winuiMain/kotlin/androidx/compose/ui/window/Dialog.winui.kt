@@ -29,10 +29,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalWinUIRoot
 import androidx.compose.ui.platform.LocalWinUIWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.winUIPositionToComposeOffset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.toWinUIXamlSize
 import androidx.compose.ui.semantics.dialog
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
@@ -89,6 +91,7 @@ actual fun Dialog(
     val parentRoot = LocalWinUIRoot.current
     val containerSize = LocalWindowInfo.current.containerSize
     val parentIsActive = LocalWindowInfo.current.isWindowFocused
+    val rasterizationScale = LocalDensity.current.density
     val currentContent by rememberUpdatedState(content)
     val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
     val parentCompositionContext = rememberCompositionContext()
@@ -101,6 +104,7 @@ actual fun Dialog(
             properties = properties,
             windowSize = containerSize,
             parentIsActive = parentIsActive,
+            rasterizationScale = rasterizationScale,
             onDismissRequest = currentOnDismissRequest,
             content = currentContent,
         )
@@ -141,6 +145,7 @@ private class WinUIDialogHost(
     private var shouldBeOpen = false
     private var isOpen = false
     private var parentIsActive = false
+    private var rasterizationScale: Float = 1f
     private var isClosed = false
     private var dialogContentBoundsInRoot = IntRect.Zero
     private val dismissalState = WinUIPopupDismissState(
@@ -258,12 +263,14 @@ private class WinUIDialogHost(
         properties: DialogProperties,
         windowSize: IntSize,
         parentIsActive: Boolean,
+        rasterizationScale: Float,
         onDismissRequest: () -> Unit,
         content: @Composable () -> Unit,
     ) {
         this.properties = properties
         this.windowSize = windowSize
         this.parentIsActive = parentIsActive
+        this.rasterizationScale = rasterizationScale
         this.onDismissRequest = onDismissRequest
         this.currentContent = content
         dismissalState.update(
@@ -279,8 +286,12 @@ private class WinUIDialogHost(
         updateHostActivation()
         if (windowSize != IntSize.Zero) {
             composeView.setWindowContainerSize(windowSize)
-            composeView.rootFrameworkElement.width = windowSize.width.coerceAtLeast(1).toDouble()
-            composeView.rootFrameworkElement.height = windowSize.height.coerceAtLeast(1).toDouble()
+            val xamlSize = IntSize(
+                width = windowSize.width.coerceAtLeast(1),
+                height = windowSize.height.coerceAtLeast(1),
+            ).toWinUIXamlSize(rasterizationScale)
+            composeView.rootFrameworkElement.width = xamlSize.width
+            composeView.rootFrameworkElement.height = xamlSize.height
         }
         updateFlyout()
     }
@@ -324,8 +335,12 @@ private class WinUIDialogHost(
         val xamlRoot = runCatching { root.xamlRoot }.getOrNull() ?: return
         if (!runCatching { root.isLoaded }.getOrDefault(false)) return
         val size = windowSize.takeIf { it != IntSize.Zero } ?: return
-        composeView.rootFrameworkElement.width = size.width.coerceAtLeast(1).toDouble()
-        composeView.rootFrameworkElement.height = size.height.coerceAtLeast(1).toDouble()
+        val xamlSize = IntSize(
+            width = size.width.coerceAtLeast(1),
+            height = size.height.coerceAtLeast(1),
+        ).toWinUIXamlSize(rasterizationScale)
+        composeView.rootFrameworkElement.width = xamlSize.width
+        composeView.rootFrameworkElement.height = xamlSize.height
         if (!isOpen) {
             isOpen = true
             flyout.xamlRoot = xamlRoot
