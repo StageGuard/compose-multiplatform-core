@@ -158,10 +158,9 @@ internal class WinUIEnvironmentObserver(
 
     private fun handleSourceChange() {
         if (isClosed) return
-        val next = source.snapshot()
         dispatch {
             if (!isClosed) {
-                onChanged(next)
+                onChanged(source.snapshot())
             }
         }
     }

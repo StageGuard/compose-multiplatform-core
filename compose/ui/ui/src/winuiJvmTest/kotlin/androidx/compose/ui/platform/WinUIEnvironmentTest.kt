@@ -70,6 +70,30 @@ class WinUIEnvironmentTest {
     }
 
     @Test
+    fun observerSnapshotsUpdatesOnlyAfterDispatcherMarshalling() {
+        val source = FakeEnvironmentSource(WinUIEnvironment())
+        val pending = ArrayDeque<() -> Unit>()
+        val observer = WinUIEnvironmentObserver(
+            source = source,
+            dispatch = { block ->
+                pending.addLast(block)
+                true
+            },
+            onChanged = {},
+        )
+
+        assertEquals(1, source.snapshotCount)
+
+        source.emitChange()
+
+        assertEquals(1, source.snapshotCount)
+        pending.removeFirst().invoke()
+        assertEquals(2, source.snapshotCount)
+
+        observer.close()
+    }
+
+    @Test
     fun observerIgnoresPendingCallbacksAfterCloseAndClosesSourceOnce() {
         val source = FakeEnvironmentSource(WinUIEnvironment())
         val pending = ArrayDeque<() -> Unit>()
@@ -177,8 +201,12 @@ private class FakeEnvironmentSource(
     var current = initial
     var listener: (() -> Unit)? = null
     var closeCount = 0
+    var snapshotCount = 0
 
-    override fun snapshot(): WinUIEnvironment = current
+    override fun snapshot(): WinUIEnvironment {
+        snapshotCount += 1
+        return current
+    }
 
     override fun setChangeListener(listener: (() -> Unit)?) {
         this.listener = listener
