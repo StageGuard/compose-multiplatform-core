@@ -16,7 +16,11 @@
 
 package androidx.compose.ui.text.font
 
+import androidx.compose.ui.text.platform.FontLoader
+
 @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 internal object WinUIFontResourceLoader : Font.ResourceLoader {
-    override fun load(font: Font): Any = Any()
+    private val delegate by lazy { FontLoader() }
+
+    override fun load(font: Font): Any = delegate.load(font)
 }
