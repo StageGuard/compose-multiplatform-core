@@ -844,14 +844,10 @@ private fun Double.toComposeLayoutSize(density: Density): Int =
     }
 
 private fun Any?.asWinRTControl(): Control? =
-    asExistingInstance(Control::class.java) ?: runCatching { this?.asWinRT<Control>() }.getOrNull()
+    runCatching { this?.asWinRT<Control>() }.getOrNull()
 
 private fun Any?.asWinRTFrameworkElement(): FrameworkElement? =
-    asExistingInstance(FrameworkElement::class.java)
-        ?: runCatching { this?.asWinRT<FrameworkElement>() }.getOrNull()
-
-private fun <T> Any?.asExistingInstance(type: Class<T>): T? =
-    if (this != null && type.isInstance(this)) type.cast(this) else null
+    runCatching { this?.asWinRT<FrameworkElement>() }.getOrNull()
 
 private fun setClip(element: UIElement, clip: RectangleGeometry?) {
     element.clip = clip

@@ -323,15 +323,10 @@ private fun Any?.isComposeSource(
 }
 
 private fun Any?.asWinRTUIElement(): UIElement? =
-    asExistingInstance(UIElement::class.java)
-        ?: runCatching { this?.asWinRT<UIElement>() }.getOrNull()
+    runCatching { this?.asWinRT<UIElement>() }.getOrNull()
 
 private fun Any?.asWinRTFrameworkElement(): FrameworkElement? =
-    asExistingInstance(FrameworkElement::class.java)
-        ?: runCatching { this?.asWinRT<FrameworkElement>() }.getOrNull()
-
-private fun <T> Any?.asExistingInstance(type: Class<T>): T? =
-    if (this != null && type.isInstance(this)) type.cast(this) else null
+    runCatching { this?.asWinRT<FrameworkElement>() }.getOrNull()
 
 internal fun <T : Any> isComposeKeyEventSubtreeSource(
     source: T?,

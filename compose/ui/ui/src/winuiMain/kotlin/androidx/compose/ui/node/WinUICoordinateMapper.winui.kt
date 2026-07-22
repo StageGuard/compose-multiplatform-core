@@ -118,12 +118,8 @@ internal class WinUICoordinateMapper(
         }.getOrNull()
 
         private fun Any?.asWinRTUIElement(): UIElement? {
-            return asExistingInstance(UIElement::class.java)
-                ?: runCatching { this?.asWinRT<UIElement>() }.getOrNull()
+            return runCatching { this?.asWinRT<UIElement>() }.getOrNull()
         }
-
-        private fun <T> Any?.asExistingInstance(type: Class<T>): T? =
-            if (this != null && type.isInstance(this)) type.cast(this) else null
 
     }
 }
