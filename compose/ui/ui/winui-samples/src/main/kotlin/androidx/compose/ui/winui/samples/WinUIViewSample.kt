@@ -2980,21 +2980,24 @@ private object ComposeWinUiSmokeApp {
         val rootHost = currentComposeView.requiredRootHost()
         val localDensity: MutableState<Float> = mutableStateOf(1f)
         var observedDensity = 0f
+        var observedInteropSize = IntSize.Zero
         currentComposeView.setContent {
             CompositionLocalProvider(LocalDensity provides Density(localDensity.value)) {
                 WinUIView(
-                    modifier = Modifier.layout { measurable, _ ->
-                        observedDensity = this.density
-                        val placeable = measurable.measure(
-                            Constraints.fixed(
-                                width = maxOf(1, (40f * this.density).toInt()),
-                                height = maxOf(1, (20f * this.density).toInt()),
+                    modifier = Modifier
+                        .layout { measurable, _ ->
+                            observedDensity = this.density
+                            val placeable = measurable.measure(
+                                Constraints.fixed(
+                                    width = maxOf(1, (40f * this.density).toInt()),
+                                    height = maxOf(1, (20f * this.density).toInt()),
+                                )
                             )
-                        )
-                        layout(placeable.width, placeable.height) {
-                            placeable.place(0, 0)
+                            layout(placeable.width, placeable.height) {
+                                placeable.place(0, 0)
+                            }
                         }
-                    },
+                        .onPlaced { observedInteropSize = it.size },
                     properties = WinUIInteropProperties(clipToBounds = true),
                     factory = {
                         lifecycleProbe.factoryCount += 1
@@ -3019,6 +3022,7 @@ private object ComposeWinUiSmokeApp {
             val wrapper = (rootHost.content.asWinRTCanvas())?.requiredInteropChildren?.singleOrNull()
             val clip = wrapper?.readClipRectOrNull()
             observedDensity == 1f &&
+                observedInteropSize == IntSize(40, 20) &&
                 lifecycleProbe.lastButton != null &&
                 clip?.width == 40f &&
                 clip?.height == 20f &&
@@ -3039,11 +3043,12 @@ private object ComposeWinUiSmokeApp {
             val clip = currentWrapper?.readClipRectOrNull()
             currentWrapper?.nativeObject?.sameIdentity(wrapper.nativeObject) == true &&
                 observedDensity == 2f &&
+                observedInteropSize == IntSize(80, 40) &&
                 lifecycleProbe.lastButton === button &&
-                clip?.width == 80f &&
-                clip?.height == 40f &&
-                button.width == 80.0 &&
-                button.height == 40.0
+                clip?.width == 40f &&
+                clip?.height == 20f &&
+                button.width == 40.0 &&
+                button.height == 20.0
         }
         check(lifecycleProbe.factoryCount == 1) {
             "WinUIView density smoke recreated the Button, factory=" +
