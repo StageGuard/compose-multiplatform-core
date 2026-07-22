@@ -156,7 +156,7 @@ class WinUIEnvironmentTest {
     }
 
     @Test
-    fun explicitXamlThemeOverridesSystemColors() {
+    fun actualXamlThemeOverridesSystemColors() {
         val black = Color(a = 255u, r = 0u, g = 0u, b = 0u)
         val white = Color(a = 255u, r = 255u, g = 255u, b = 255u)
 
@@ -170,10 +170,26 @@ class WinUIEnvironmentTest {
             ),
         )
         assertEquals(
-            SystemTheme.Dark,
+            SystemTheme.Light,
             resolveWinUISystemTheme(
                 requestedTheme = ElementTheme.Default,
                 actualTheme = ElementTheme.Light,
+                foreground = white,
+                background = black,
+            ),
+        )
+    }
+
+    @Test
+    fun systemColorsAreFallbackWhenXamlThemeIsUnknown() {
+        val black = Color(a = 255u, r = 0u, g = 0u, b = 0u)
+        val white = Color(a = 255u, r = 255u, g = 255u, b = 255u)
+
+        assertEquals(
+            SystemTheme.Dark,
+            resolveWinUISystemTheme(
+                requestedTheme = ElementTheme.Default,
+                actualTheme = ElementTheme.Default,
                 foreground = white,
                 background = black,
             ),

@@ -168,11 +168,12 @@ internal fun resolveWinUISystemTheme(
     foreground: Color?,
     background: Color?,
 ): SystemTheme {
+    // Match the theme used by XAML controls; system colors only fill unresolved-theme gaps.
     val actualSystemTheme = actualTheme.toComposeSystemTheme()
-    if (requestedTheme != ElementTheme.Default) {
-        return actualSystemTheme.takeUnless { it == SystemTheme.Unknown }
-            ?: requestedTheme.toComposeSystemTheme()
-    }
+    if (actualSystemTheme != SystemTheme.Unknown) return actualSystemTheme
+
+    val requestedSystemTheme = requestedTheme.toComposeSystemTheme()
+    if (requestedSystemTheme != SystemTheme.Unknown) return requestedSystemTheme
 
     val systemTheme = if (foreground != null && background != null) {
         systemThemeFromColors(foreground, background)
