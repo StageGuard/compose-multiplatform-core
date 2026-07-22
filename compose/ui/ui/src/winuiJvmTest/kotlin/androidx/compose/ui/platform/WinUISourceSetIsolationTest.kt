@@ -75,16 +75,17 @@ class WinUISourceSetIsolationTest {
                 )
             }
         }
+        val winuiMainBlock = checkNotNull(sourceSetBlock(buildScript, "winuiMain"))
         assertTrue(
-            checkNotNull(sourceSetBlock(buildScript, "winuiMain"))
-                .contains("dependsOn(skikoRenderingMain)"),
-            "WinUI should depend on the shared Skiko rendering source set.",
+            winuiMainBlock.contains("dependsOn(skikoHostMain)"),
+            "WinUI should depend only on the shared Skiko host source set.",
         )
         assertFalse(
-            checkNotNull(sourceSetBlock(buildScript, "winuiMain"))
-                .contains("dependsOn(skikoMain)"),
+            winuiMainBlock.contains("dependsOn(skikoMain)") ||
+                winuiMainBlock.contains("dependsOn(skikoRenderingMain)"),
             "WinUI must not depend on all skikoMain sources because skikoMain also has generic " +
-                "or Desktop-backed actuals.",
+                "or Desktop-backed actuals, and must not inherit skikoRenderingMain generic " +
+                "platform actuals.",
         )
     }
 
@@ -129,9 +130,12 @@ class WinUISourceSetIsolationTest {
         val moduleRoot = findUiModuleRoot()
         val buildScript = moduleRoot.resolve("build.gradle").readText()
         val sharedSource = moduleRoot.resolve(
-            "src/skikoRenderingMain/kotlin/androidx/compose/ui/skiko/" +
+            "src/skikoHostMain/kotlin/androidx/compose/ui/skiko/" +
                 "RecordDrawRectRenderDecorator.skiko.kt"
         )
+        val skikoHostBlock = checkNotNull(sourceSetBlock(buildScript, "skikoHostMain")) {
+            "Could not find skikoHostMain in compose/ui/ui/build.gradle."
+        }
         val skikoRenderingBlock = checkNotNull(sourceSetBlock(buildScript, "skikoRenderingMain")) {
             "Could not find skikoRenderingMain in compose/ui/ui/build.gradle."
         }
@@ -144,9 +148,13 @@ class WinUISourceSetIsolationTest {
             "Shared Skiko rendering source should live in skikoRenderingMain.",
         )
         assertTrue(
-            skikoRenderingBlock.contains("dependsOn(commonMain)") &&
-                skikoRenderingBlock.contains("api(libs.skiko)"),
-            "skikoRenderingMain should carry shared Skiko API sources and dependencies.",
+            skikoHostBlock.contains("dependsOn(commonMain)") &&
+                skikoHostBlock.contains("api(libs.skiko)"),
+            "skikoHostMain should carry platform-neutral Skiko host sources and dependencies.",
+        )
+        assertTrue(
+            skikoRenderingBlock.contains("dependsOn(skikoHostMain)"),
+            "skikoRenderingMain should reuse the shared Skiko host source set.",
         )
         assertTrue(
             checkNotNull(sourceSetBlock(buildScript, "skikoMain"))
@@ -154,8 +162,9 @@ class WinUISourceSetIsolationTest {
             "skikoMain should reuse the shared Skiko rendering source set.",
         )
         assertTrue(
-            winuiMainBlock.contains("dependsOn(skikoRenderingMain)"),
-            "winuiMain should reuse the shared Skiko rendering source set.",
+            winuiMainBlock.contains("dependsOn(skikoHostMain)") &&
+                !winuiMainBlock.contains("dependsOn(skikoRenderingMain)"),
+            "winuiMain should reuse only the platform-neutral Skiko host source set.",
         )
         assertTrue(
             buildScript.contains("generated/kotlin-winrt/src/commonMain/kotlin") &&
@@ -180,8 +189,7 @@ class WinUISourceSetIsolationTest {
             "WinUI JVM runtime classpath should include skiko-winui.",
         )
 
-        // SKIKO-006: the current JVM Skiko API jar is still named skiko-awt,
-        // so keep the guard focused on Desktop/AWT native runtime artifacts.
+        // Keep the guard focused on Desktop/AWT native runtime artifacts.
         val forbiddenArtifacts = listOf(
             "skiko-awt-runtime",
         )

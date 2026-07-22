@@ -112,7 +112,7 @@ baseline, not every retest attempt.
   workaround from the sample run tasks and switched the MPP sample back to
   normal Gradle project dependencies for local WinUI artifacts.
 
-## SKIKO-006: WinUI JVM path still needs the skiko-awt API artifact
+## SKIKO-006: WinUI JVM path used to need the skiko-awt API artifact
 
 - **Status:** Closed.
 - **Observed in:** compose-winui dependency isolation while validating
@@ -139,15 +139,16 @@ baseline, not every retest attempt.
 - **2026-06-03 23:16 +08 snapshot retest:** with `skiko-winui`
   `0.0.0-20260603.150039-4`, Gradle dependency insight for
   `winuiJvmRuntimeClasspath` still resolves `org.jetbrains.skiko:skiko-awt`
-  through `org.jetbrains.skiko:skiko:0.0.0-SNAPSHOT`, so `SKIKO-006` remains
-  open.
+  through `org.jetbrains.skiko:skiko:0.0.0-SNAPSHOT`, so the issue was still
+  open at that snapshot.
 - **2026-07-04 snapshot retest:** with `skiko-winui`
   `0.0.0-SNAPSHOT:20260703.142141-28`, `skiko-winui-jvm`
   `0.0.0-SNAPSHOT:20260703.142141-11`, and Skiko snapshot
   `0.0.0-SNAPSHOT:20260630.121153-*`, Gradle dependency insight for both
   `winuiJvmRuntimeClasspath` and `winuiJvmTestRuntimeClasspath` still resolves
   `org.jetbrains.skiko:skiko-awt` through `org.jetbrains.skiko:skiko` and the
-  `skiko-winui-jvm -> skiko-winui` path, so `SKIKO-006` remains open.
+  `skiko-winui-jvm -> skiko-winui` path, so the issue was still open at that
+  snapshot.
 - **2026-07-05 validation:** GitHub Actions run `28713142890` published
   `skiko-winui` `0.0.0-SNAPSHOT:20260704.171250-30`,
   `skiko-winui-jvm` `0.0.0-SNAPSHOT:20260704.171250-13`, and
@@ -160,6 +161,12 @@ baseline, not every retest attempt.
   -PcomposeWinUi.enableJvmTarget=true --no-configuration-cache
   --no-configure-on-demand`. Both dependency insight commands report no
   matching dependencies, and `winuiJvmTest` completes successfully.
+- **2026-07-06 local validation:** with current `0.1.0-SNAPSHOT` kotlin-winrt
+  Maven artifacts and current `skiko-winui` snapshots, dependency insight for
+  `org.jetbrains.skiko:skiko-awt` reports no matching dependencies in both
+  `winuiJvmRuntimeClasspath` and `winuiJvmTestRuntimeClasspath`. The full
+  compose-winui baseline also passes `compileKotlinWinuiJvm`, `winuiJvmTest`,
+  `runWinUIViewSample`, and `runWinUIMppSample`.
 
 ## SKIKO-005: published render diagnostics API is still internal
 
@@ -225,20 +232,20 @@ baseline, not every retest attempt.
   validates Skiko accessibility actions dispatching back to Compose semantics
   for focus, click, expand, collapse, set-text, and progress
   increment/decrement. A focused `runWinUISkikoSample` task now runs just those
-  Skiko diagnostics and exits successfully without the full sample's known
-  `KWINRT-024` teardown crash. The current upstream diagnostics expose render
-  state/result metadata but no pixel-read or surface snapshot API, so nonblank
-  frame validation remains blocked on a stable attached-window pixel-read path.
+  Skiko diagnostics and exits successfully. The current upstream diagnostics
+  expose render state/result metadata but no pixel-read or surface snapshot API,
+  so nonblank frame validation remains blocked on a stable attached-window
+  pixel-read path.
 - **2026-06-03 23:00 +08 snapshot retest:** after clearing the targeted
   `skiko-winui` and `skiko-winui-windows` Gradle snapshot caches under
   `GRADLE_USER_HOME=F:\Dependencies\gradle`, Gradle resolved both artifacts to
   `0.0.0-20260603.150039-4`. With JDK 25,
   `:compose:ui:ui:compileKotlinWinuiJvm`, focused `WinUIOwnerTest`,
   `WinUISkikoRenderHostTest`, `WinUISourceSetIsolationTest`, and
-  `:compose:ui:ui:winui-samples:runWinUISkikoSample` pass. The full
-  `runWinUIViewSample` still reaches the final smoke log and exits with the
-  known non-blocking `KWINRT-024` `NTSTATUS 0xC0000005` teardown crash, without
-  producing a newer WER dump.
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample` pass. At this historical
+  snapshot, the full `runWinUIViewSample` still reached the final smoke log and
+  exited with the then-known non-blocking `KWINRT-024` `NTSTATUS 0xC0000005`
+  teardown crash, without producing a newer WER dump.
 - **2026-06-10 interactive retest:** the full attached
   `:compose:mpp:demo-winui:runWinUIMppSampleInteractive` sample became
   unresponsive after inactive/active window interaction. The actual Java

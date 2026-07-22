@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text
+package androidx.compose.ui.text.font
 
-import androidx.compose.ui.input.key.KeyEvent
-
-internal actual fun KeyEvent.cancelsTextSelection(): Boolean = false
-
-// WinUI does not expose a stable API for opening the system emoji panel.
-internal actual fun showCharacterPalette() {}
+internal actual fun createPlatformResolveInterceptor(): PlatformResolveInterceptor =
+    PlatformResolveInterceptor.Default

@@ -45,7 +45,7 @@ internal class WinUIFrameClock(
         if (!dispatchQueue.dispatch {
                 isFrameScheduled = false
                 if (!isCancelled) {
-                    frameClock.sendFrame(System.nanoTime())
+                    frameClock.sendFrame(winUINanoTime())
                     onFrame()
                 }
             }

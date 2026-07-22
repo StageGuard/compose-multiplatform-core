@@ -1118,7 +1118,6 @@ private class WinUIPointerEventSender(
 private class WinUISnapshotInvalidationTracker(
     private val invalidate: () -> Unit,
 ) {
-    private val lock = Any()
     private val commands = mutableListOf<() -> Unit>()
     private val commandsToRun = mutableListOf<() -> Unit>()
     private var isPerforming = false
@@ -1127,9 +1126,7 @@ private class WinUISnapshotInvalidationTracker(
         if (isPerforming) {
             command()
         } else {
-            synchronized(lock) {
-                commands += command
-            }
+            commands += command
             invalidate()
         }
     }
@@ -1137,11 +1134,9 @@ private class WinUISnapshotInvalidationTracker(
     fun sendAndPerformSnapshotChanges() {
         Snapshot.sendApplyNotifications()
         while (true) {
-            synchronized(lock) {
-                if (commands.isEmpty()) return
-                commandsToRun += commands
-                commands.clear()
-            }
+            if (commands.isEmpty()) return
+            commandsToRun += commands
+            commands.clear()
             isPerforming = true
             try {
                 commandsToRun.forEach { command -> command() }

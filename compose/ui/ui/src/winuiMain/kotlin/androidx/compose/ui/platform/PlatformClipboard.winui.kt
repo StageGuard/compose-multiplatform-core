@@ -20,14 +20,16 @@ package androidx.compose.ui.platform
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.text.AnnotatedString
-import io.github.composefluent.winrt.runtime.IUnknownReference
 import io.github.composefluent.winrt.runtime.await
+import io.github.composefluent.winrt.runtime.IUnknownReference
 import windows.applicationmodel.datatransfer.DataPackage
 import windows.applicationmodel.datatransfer.DataPackageView
 import windows.applicationmodel.datatransfer.Clipboard as WinRTClipboardClass
 import windows.applicationmodel.datatransfer.StandardDataFormats as WinRTStandardDataFormats
 
-actual typealias NativeClipboard = IUnknownReference
+actual class NativeClipboard internal constructor(
+    internal val reference: IUnknownReference,
+)
 
 @Suppress("DEPRECATION")
 internal class WinUIClipboardManager(
@@ -53,7 +55,7 @@ internal class WinUIClipboardManager(
 
     @Suppress("OVERRIDE_DEPRECATION")
     override val nativeClipboard: NativeClipboard
-        get() = winUIClipboardStatics
+        get() = NativeClipboard(winUIClipboardStatics)
 }
 
 internal class WinUIClipboard : Clipboard {
@@ -66,7 +68,7 @@ internal class WinUIClipboard : Clipboard {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override val nativeClipboard: NativeClipboard
-        get() = winUIClipboardStatics
+        get() = NativeClipboard(winUIClipboardStatics)
 
     internal fun hasText(): Boolean =
         lastPlainText != null || runCatching { getWinUIContent().contains(winUITextFormat) }
@@ -168,9 +170,7 @@ actual class ClipEntry constructor(val nativeClipEntry: Any?) {
     fun getPlainText(): String? = runCatching { clipMetadata.readPlainText() }.getOrNull()
 
     companion object {
-        @ExperimentalComposeUiApi
-        fun withPlainText(text: String): ClipEntry =
-            ClipEntry(text)
+        @ExperimentalComposeUiApi fun withPlainText(text: String): ClipEntry = ClipEntry(text)
     }
 }
 
@@ -190,7 +190,7 @@ private fun getWinUIContent(): DataPackageView =
     WinRTClipboardClass.getContent()
 
 private fun logClipboardReadFailure(throwable: Throwable) {
-    System.err.println(
+    println(
         "WinUIClipboard read failed: ${throwable::class.qualifiedName}: ${throwable.message}"
     )
 }

@@ -24,6 +24,7 @@
 
 import androidx.build.SoftwareType
 import androidx.build.PlatformIdentifier
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -38,6 +39,12 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 def composeWinUiSkikoWinUiVersion = providers
         .gradleProperty("composeWinUi.skikoWinUiVersion")
@@ -53,7 +60,7 @@ androidXMultiplatform {
             it.consumerKeepRules.files.add(new File("proguard-rules.pro"))
         }
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -184,7 +191,9 @@ kotlin {
         if (composeWinUiJvmTargetEnabled) {
             jvm("winuiJvm")
         }
-        // Enable a WinUI mingw target after kotlin-winrt provides its mingw runtime actuals.
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
             winuiMain {
@@ -208,6 +217,32 @@ kotlin {
                 }
             }
 
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                }
+                winuiMingwTest {
+                    dependsOn(winuiTest)
+                }
+            }
+
+        }
+    }
+}
+
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+    configurations.configureEach { configuration ->
+        def lowerName = configuration.name.toLowerCase(Locale.ROOT)
+        if (lowerName.contains("winui")) {
+            configuration.attributes.attribute(
+                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                    25
+            )
+            configuration.resolutionStrategy.dependencySubstitution {
+                substitute(module("org.jetbrains.skiko:skiko"))
+                        .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
+                        .because("compose-winui uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
+            }
         }
     }
 }
@@ -228,9 +263,16 @@ androidx {
 
 // TODO(b/407640608): Task :compose:ui:ui-inspection:connectedCheck fails without this block
 tasks.withType(KotlinCompile).configureEach { task ->
-    if (task.name != "compileAndroidMain") return
-    task.compilerOptions {
-        it.freeCompilerArgs.addAll("-Xlambdas=class")
+    if (task.name == "compileAndroidMain") {
+        task.compilerOptions {
+            it.freeCompilerArgs.addAll("-Xlambdas=class")
+        }
+    }
+    if (task.name.contains("Winui")) {
+        task.compilerOptions {
+            it.jvmTarget.set(JvmTarget.JVM_25)
+            it.freeCompilerArgs.add("-Xjdk-release=25")
+        }
     }
 }
 

@@ -18,6 +18,7 @@ package androidx.compose.ui.platform
 
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Runnable
 import microsoft.ui.dispatching.DispatcherQueue
 
 internal class WinUIDispatcher(

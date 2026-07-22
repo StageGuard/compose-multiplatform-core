@@ -30,11 +30,20 @@ plugins {
     id("JetBrainsAndroidXPlugin")
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.compose.ui.geometry"
     }
     desktop()
+    if (composeWinUiMingwTargetEnabled) {
+        mingwX64()
+    }
     mac()
     ios()
     js()

@@ -3184,8 +3184,7 @@ private object ComposeWinUiSmokeApp {
             "WinUI sample runtime classpath did not include skiko-winui."
         }
 
-        // SKIKO-006: the current JVM Skiko API jar is still named skiko-awt,
-        // so keep this runtime guard focused on Desktop/AWT native runtime artifacts.
+        // Keep this runtime guard focused on Desktop/AWT native runtime artifacts.
         val offenders = classpath.filter { entry ->
             entry.contains("skiko-awt-runtime")
         }

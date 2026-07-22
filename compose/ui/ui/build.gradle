@@ -41,7 +41,7 @@ plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
     id("JetBrainsAndroidXPlugin")
-    id("io.github.composefluent.winrt") apply false
+    id("io.github.compose-fluent.winrt") apply false
     alias(libs.plugins.atomicFu)
 }
 
@@ -50,9 +50,15 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginRuntimeAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 def composeWinUiGradlePluginAvailable =
-        composeWinUiJvmTargetEnabled && composeWinUiGradlePluginRuntimeAvailable
+        composeWinUiTargetEnabled && composeWinUiGradlePluginRuntimeAvailable
 def composeWinUiWindowsSdkVersion = providers
         .gradleProperty("composeWinUi.windowsSdkVersion")
         .orElse("10.0.26100.0")
@@ -70,12 +76,34 @@ def composeWinUiSkikoVersion = providers
         .gradleProperty("composeWinUi.skikoVersion")
         .orElse(composeWinUiSkikoWinUiVersion)
 
-if (composeWinUiJvmTargetEnabled && !composeWinUiGradlePluginRuntimeAvailable) {
-    throw new GradleException("compose-winui JVM target requires running Gradle on JDK 22 or newer.")
+def detachWinUiMingwFromDefaultNativeHierarchy = { sourceSet ->
+    sourceSet.dependsOn.removeAll { parent ->
+        parent.name in [
+                "nonJvmMain",
+                "nonJvmTest",
+                "nativeMain",
+                "nativeTest",
+        ]
+    }
+}
+
+if (composeWinUiTargetEnabled && !composeWinUiGradlePluginRuntimeAvailable) {
+    throw new GradleException("compose-winui targets require running Gradle on JDK 22 or newer.")
 }
 
 if (composeWinUiGradlePluginAvailable) {
-    apply plugin: "io.github.composefluent.winrt"
+    apply plugin: "io.github.compose-fluent.winrt"
+
+    configurations.matching { configuration ->
+        configuration.name == "commonMainImplementation"
+    }.configureEach { configuration ->
+        configuration.withDependencies { dependencies ->
+            dependencies.removeAll { dependency ->
+                dependency.group == "io.github.compose-fluent" &&
+                    dependency.name == "winrt-runtime"
+            }
+        }
+    }
 
     winRT {
         restoreNuGetPackages = providers
@@ -250,7 +278,7 @@ androidXMultiplatform {
             }
         }
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -394,13 +422,20 @@ androidXMultiplatform {
         }
 
         def lifecycleVersion = project.findProperty('artifactRedirection.version.androidx.lifecycle')
+        def navigationEventVersion = project.findProperty('artifactRedirection.version.androidx.navigationevent')
         // TODO: Align naming: nonAndroidMain
-        skikoRenderingMain {
+        skikoHostMain {
             dependsOn(commonMain)
+            dependencies {
+                api(libs.skiko)
+            }
+        }
+
+        skikoRenderingMain {
+            dependsOn(skikoHostMain)
             dependencies {
                 api(project(":compose:ui:ui-graphics"))
                 api(project(":compose:ui:ui-text"))
-                api(libs.skiko)
             }
         }
 
@@ -409,7 +444,7 @@ androidXMultiplatform {
             dependencies {
                 implementation(libs.atomicFu)
 
-                implementation("org.jetbrains.androidx.navigationevent:navigationevent-compose:1.1.0")
+                implementation("androidx.navigationevent:navigationevent-compose:$navigationEventVersion")
                 implementation("androidx.lifecycle:lifecycle-viewmodel-compose:$lifecycleVersion")
                 implementation("androidx.lifecycle:lifecycle-viewmodel-savedstate:$lifecycleVersion")
             }
@@ -509,11 +544,13 @@ kotlin {
         if (composeWinUiJvmTargetEnabled) {
             jvm("winuiJvm")
         }
-        // Enable a WinUI mingw target after kotlin-winrt provides its mingw runtime actuals.
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
             winuiMain {
-                dependsOn(skikoRenderingMain)
+                dependsOn(skikoHostMain)
                 dependencies {
                     def lifecycleVersion = project.findProperty('artifactRedirection.version.androidx.lifecycle')
                     def navigationEventVersion = project.findProperty('artifactRedirection.version.androidx.navigationevent')
@@ -540,8 +577,30 @@ kotlin {
                 }
             }
 
+            if (composeWinUiMingwTargetEnabled) {
+                mingwMain {
+                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
+                    dependsOn(commonMain)
+                }
+                mingwTest {
+                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
+                    dependsOn(commonTest)
+                }
+                winuiMingwMain {
+                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
+                    dependsOn(winuiMain)
+                }
+            }
+
             if (composeWinUiJvmTargetEnabled) {
                 winuiJvmTest {
+                    dependsOn(winuiTest)
+                }
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwTest {
+                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
                     dependsOn(winuiTest)
                 }
             }
@@ -621,11 +680,11 @@ if (composeWinUiGradlePluginAvailable) {
                     details.because("compose-winui consumes the skiko-winui snapshot built against this Skiko snapshot.")
                 }
             }
-            if (lowerName.contains("winuijvm")) {
+            if (lowerName.contains("winui")) {
                 configuration.resolutionStrategy.dependencySubstitution {
                     substitute(module("org.jetbrains.skiko:skiko"))
                             .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
-                            .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
+                            .because("compose-winui uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
                 }
             }
         }
@@ -794,7 +853,7 @@ tasks.register("updateTranslationsIos", UpdateTranslationsTask.class) {
     ]
 }
 
-if (!composeWinUiJvmTargetEnabled) {
+if (!composeWinUiTargetEnabled) {
     tasks.findByName("desktopTest").configure {
         systemProperties["GOLDEN_PATH"] = project.rootDir.absolutePath + "/golden"
     }

@@ -32,6 +32,12 @@ plugins {
     alias(libs.plugins.atomicFu)
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.compose.ui.unit"
@@ -41,6 +47,9 @@ androidXMultiplatform {
         }
     }
     desktop()
+    if (composeWinUiMingwTargetEnabled) {
+        mingwX64()
+    }
     mac()
     ios()
     js()

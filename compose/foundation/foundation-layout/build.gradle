@@ -37,7 +37,14 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
+
 androidXMultiplatform {
     androidLibrary {
         compileSdk = 35
@@ -47,7 +54,7 @@ androidXMultiplatform {
             it.consumerKeepRules.files.add(new File("proguard-rules.pro"))
         }
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -138,16 +145,39 @@ androidXMultiplatform {
 
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
-            winuiJvmMain {
+            winuiMain {
                 dependsOn(skikoMain)
             }
 
-            winuiJvmTest {
+            winuiTest {
                 dependsOn(skikoTest)
+            }
+
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                }
+                winuiJvmTest {
+                    dependsOn(winuiTest)
+                }
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                }
+                winuiMingwTest {
+                    dependsOn(winuiTest)
+                }
             }
         }
     }
