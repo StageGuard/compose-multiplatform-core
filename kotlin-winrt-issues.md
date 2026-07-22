@@ -14,11 +14,12 @@ baseline, not every retest attempt.
   `InputPaneInterop.getForWindow(RawAddress)` source addition, and compose-winui
   compiles and passes its focused InputPane tests against the republished Skiko
   WinUI snapshot.
-- **Open compose-winui validation gap:** `KWINRT-061`. Upstream
-  kotlin-winrt has a target-module/root identity fallback for this path, but
-  compose-winui has not yet validated a refreshed snapshot locally because the
-  `--refresh-dependencies` build is currently blocked by remote Maven TLS
-  handshake failures before Kotlin/Native compilation starts.
+- **Open Native projection identity/ownership gap:** `KWINRT-061`. Refreshed
+  kotlin-winrt and Skiko snapshots now reach Kotlin/Native compilation:
+  `ui-graphics` and `ui-text` compile for `winuiMingw`, but root `compose-ui`
+  still fails. Its projection-generator identity inputs do not include the
+  target-specific `skiko-winui-mingw` identity artifact, so upstream needs to
+  finish the Native dependency projection ownership handling.
 - **Closed upstream projection gap:** `KWINRT-062`. Snapshot
   `0.1.0-20260715.042347-81` resolves the duplicate interface IID failure and
   the repository-local `runWinUISkikoSample` passes end to end.
@@ -87,28 +88,43 @@ baseline, not every retest attempt.
   including compose-ui and foundation projection generation and compilation,
   sample authoring validation, application-host build, staging, and launch.
 
-## KWINRT-061: Native KMP projection ownership is unresolved for mingw consumers
+## KWINRT-061: Native KMP projection identity/ownership is unresolved for mingw consumers
 
-- **Status:** Open compose-winui validation gap after upstream fix.
+- **Status:** Open upstream kotlin-winrt issue. This is not a claim that
+  kotlin-winrt or Skiko lacks MinGW/WinRT support; both publish and resolve
+  the required MinGW artifacts. The remaining failure is when a downstream
+  Native KMP module needs its own explicit WinRT projections alongside Skiko's
+  dependency-owned projections.
 - **Observed in:** `:compose:ui:ui:compileKotlinWinuiMingw` after enabling the
   experimental `winuiMingw` target.
-- **Symptom:** the WinUI mingw compile fails with 683 `overrides nothing`
-  errors. The failures are not localized to one Compose API. They appear both
-  in compose-winui source wrappers, such as `WinUICoreTextInputSession`,
-  `WinUISkikoRenderHost`, `WinUIView`, and `Window`, and in kotlin-winrt
-  generated Native sources under `generated/kotlin-winrt/src/winuiMain`, such
-  as `microsoft_ui_input.kt`, `microsoft_ui_xaml_controls*.kt`,
-  `windows_foundation_collections.kt`, `windows_system*.kt`, and
-  `windows_ui_viewmanagement.kt`.
-- **Evidence:** the compile classpath resolves
-  `io.github.compose-fluent:skiko-winui-mingw:0.0.0-SNAPSHOT`
-  timestamped `20260707.150223-17`, while direct `klib info` on the resolved
-  artifact shows that it publishes WinRT/WinUI projection packages including
-  `microsoft.ui.*`, `windows.applicationmodel.*`, `windows.foundation.*`,
-  `windows.system`, `windows.ui.text.core`, and `windows.ui.viewmanagement`.
-  At the same time, compose-ui's kotlin-winrt plugin invocation generates
-  overlapping source projections in those packages for the explicit
-  compose-winui `type(...)` surface.
+- **Refreshed validation (2026-07-23):** JDK 25, the user `.konan` directory,
+  and `--refresh-dependencies --no-configuration-cache
+  --no-configure-on-demand` resolve and execute the MinGW task graph. Both
+  `:compose:ui:ui-graphics:compileKotlinWinuiMingw` and
+  `:compose:ui:ui-text:compileKotlinWinuiMingw` complete before root
+  `:compose:ui:ui:compileKotlinWinuiMingw` fails. The refreshed artifacts are:
+  `winrt-runtime-mingwx64:0.1.0-SNAPSHOT:20260719.055859-105`,
+  `winrt-authoring-mingwx64:0.1.0-SNAPSHOT:20260719.055859-56`,
+  `skiko-winui-mingw:0.0.0-SNAPSHOT:20260720.032816-22`, and its root
+  `skiko-winui:0.0.0-SNAPSHOT:20260720.032816-38` artifact.
+- **Symptom:** root `compose-ui` fails with broad `overrides nothing` errors.
+  The first failures are in `WinUICoreTextInputSession.winui.kt`; they also
+  occur in compose-winui wrappers such as `WinUISkikoRenderHost`, `WinUIView`,
+  and `Window`, and in kotlin-winrt-generated Native sources under
+  `generated/kotlin-winrt/src/winuiMain`, including `microsoft_ui_input.kt`,
+  `microsoft_ui_xaml_controls*.kt`, `windows_foundation_collections.kt`,
+  `windows_system*.kt`, and `windows_ui_viewmanagement.kt`.
+- **Dependency projection evidence:** direct `klib info` on the resolved
+  `skiko-winui-mingw` artifact confirms WinRT/WinUI projection packages such
+  as `microsoft.ui.*`, `windows.applicationmodel.*`,
+  `windows.foundation.*`, `windows.system`, `windows.ui.text.core`, and
+  `windows.ui.viewmanagement`.
+- **Identity-input evidence:** the root
+  `:compose:ui:ui:generateWinRTProjections` task receives only the local
+  `ui-text` `kotlin-winrt.json` and the root `skiko-winui` identity JSON. It
+  does not receive a target-specific `skiko-winui-mingw` identity artifact,
+  despite that artifact being resolved on the `winuiMingw` dependency graph.
+  This is the observed discrepancy; it is not yet a proven single root cause.
 - **Minimal repro finding:** a temporary repository-local KMP mingw probe under
   `.agent_tmp/minimal-winui-mingw-kmp` compiles when it only depends on
   `skiko-winui` and declares ordinary local interfaces. Adding a source
@@ -118,31 +134,36 @@ baseline, not every retest attempt.
   source and dependency symbols instead of producing a clean projection
   ownership model. The resulting diagnostics include redeclaration and
   impossible member/type errors. The full compose-ui build manifests the same
-  ownership conflict as broad `overrides nothing` failures.
-- **Expected behavior:** kotlin-winrt Native/KMP projection generation should
-  consume dependency-owned projection identity from klibs and avoid regenerating
-  the same WinRT/WinUI runtime classes into the downstream source set. If a
-  downstream module needs additional explicit `type(...)` declarations, the
-  plugin should generate only the missing owned types and matching support
-  sources, while treating dependency-owned projections and their compiler
-  support metadata as authoritative.
+  category of problem as broad `overrides nothing` failures.
+- **Upstream request / expected behavior:** kotlin-winrt Native/KMP projection
+  generation needs target-specific dependency identity and ownership handling.
+  A downstream module must be able to declare additional explicit `type(...)`
+  entries while consuming dependency-owned WinRT projections. The generator
+  should generate only the missing locally owned types and support sources,
+  while treating dependency-owned Native projections and their compiler support
+  metadata as authoritative.
 - **Current compose-winui action:** do not paper over this with hundreds of
-  stub overrides or by stripping `skiko-winui-mingw`. Excluding all locally
-  generated `microsoft/**` and `windows/**` projection sources reduces some
-  duplicate ownership pressure but leaves hundreds of unresolved references
-  because Skiko's projection surface is not the complete compose-ui explicit
-  projection surface and compose-ui's generated authoring/support sources still
-  expect the locally generated types.
-- **Validation:** with JDK 25 and `--no-configuration-cache`, the non-refresh
-  local-cache command
-  `:compose:ui:ui:compileKotlinWinuiMingw
-  -PcomposeWinUi.enableMingwTarget=true --no-configure-on-demand` still fails
-  on 2026-07-09 with broad generated `windows.*` / `microsoft.*`
-  `overrides nothing` errors. A same-day `--refresh-dependencies` validation
-  did not reach Kotlin/Native compilation because remote Maven dependency
-  resolution failed with TLS handshake errors for Android Gradle Plugin
-  transitive artifacts. Do not mark the compose-winui Mingw path fixed until a
-  refreshed dependency build reaches and passes `compileKotlinWinuiMingw`.
+  stub overrides, remove `skiko-winui-mingw`, or broadly exclude generated
+  projections. Those changes leave unresolved references because Skiko's
+  projection surface is not the complete compose-ui explicit projection surface
+  and compose-ui's generated authoring/support sources still need the locally
+  owned types.
+- **Repro command:**
+
+  ```powershell
+  $env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-25.0.3.9-hotspot'
+  $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+  $env:KONAN_DATA_DIR = "$env:USERPROFILE\.konan"
+  $env:HTTP_PROXY = $null
+  $env:HTTPS_PROXY = $null
+
+  .\gradlew.bat :compose:ui:ui:compileKotlinWinuiMingw `
+    '-PcomposeWinUi.enableMingwTarget=true' `
+    '-Dhttp.proxyHost=' '-Dhttp.proxyPort=0' `
+    '-Dhttps.proxyHost=' '-Dhttps.proxyPort=0' `
+    -Djava.net.useSystemProxies=false `
+    --refresh-dependencies --no-configuration-cache --no-configure-on-demand
+  ```
 
 ## KWINRT-060: Library-mode runtime injection wires projection tasks too broadly
 
