@@ -254,14 +254,14 @@ private class WinUIWindowNode(
         if (window.extendsContentIntoTitleBar && titleBar != null) {
             view.setWindowTitleBarInsets(
                 height = titleBar.height,
-                leftPadding = titleBar.leftInset,
-                rightPadding = titleBar.rightInset,
+                leftInset = titleBar.leftInset,
+                rightInset = titleBar.rightInset,
             )
         } else {
             view.setWindowTitleBarInsets(
                 height = 0,
-                leftPadding = 0,
-                rightPadding = 0,
+                leftInset = 0,
+                rightInset = 0,
             )
         }
     }
