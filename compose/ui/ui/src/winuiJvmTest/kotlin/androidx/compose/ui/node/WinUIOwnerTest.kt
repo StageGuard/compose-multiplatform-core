@@ -1133,7 +1133,6 @@ class WinUIOwnerTest {
 
             assertEquals(
                 listOf(
-                    PointerEventType.Enter,
                     PointerEventType.Press,
                 ),
                 events,
@@ -1153,7 +1152,6 @@ class WinUIOwnerTest {
 
             assertEquals(
                 listOf(
-                    PointerEventType.Enter,
                     PointerEventType.Press,
                     PointerEventType.Release,
                 ),
@@ -1175,10 +1173,8 @@ class WinUIOwnerTest {
 
             assertEquals(
                 listOf(
-                    PointerEventType.Enter,
                     PointerEventType.Press,
                     PointerEventType.Release,
-                    PointerEventType.Exit,
                 ),
                 events,
             )
