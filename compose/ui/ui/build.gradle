@@ -25,6 +25,8 @@ import androidx.build.SoftwareType
 import androidx.build.KotlinTarget
 import androidx.build.PlatformIdentifier
 import androidx.build.ProjectLayoutType
+import org.gradle.api.tasks.Input
+import org.gradle.process.CommandLineArgumentProvider
 import org.jetbrains.androidx.build.GenerateNotoFontFallbackDataTask
 import org.jetbrains.androidx.build.UpdateTranslationsTask
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
@@ -157,6 +159,7 @@ if (composeWinUiGradlePluginAvailable) {
         type("Windows.UI.Text.Core.CoreTextTextUpdatingResult")
         type("Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop")
         type("Microsoft.UI.Content.ContentIslandEnvironment")
+        type("Microsoft.UI.Dispatching.DispatcherQueueController")
         type("Microsoft.UI.Input.InputSystemCursor")
         type("Microsoft.UI.Input.InputSystemCursorShape")
         type("Microsoft.UI.Input.InputKeyboardSource")
@@ -580,6 +583,29 @@ tasks.withType(KotlinCompile).configureEach { task ->
 }
 
 if (composeWinUiGradlePluginAvailable) {
+    if (composeWinUiJvmTargetEnabled) {
+        def winUiTestRuntimeAssetsProject = project(":compose:ui:ui:winui-samples")
+        def winUiTestRuntimeAssetsDirectory =
+                winUiTestRuntimeAssetsProject.layout.buildDirectory.dir("kotlin-winrt/runtime-assets")
+        tasks.named("winuiJvmTest", KotlinJvmTest).configure {
+            dependsOn(":compose:ui:ui:winui-samples:stageWinRTRuntimeAssets")
+            maxParallelForks = 1
+            jvmArgs("--enable-native-access=ALL-UNNAMED")
+            systemProperty("kotlin.winrt.applicationManifestName", "winui-samples.exe.manifest")
+            jvmArgumentProviders.add(new CommandLineArgumentProvider() {
+                @Input
+                String getRuntimeAssetsRoot() {
+                    return winUiTestRuntimeAssetsDirectory.get().asFile.absolutePath
+                }
+
+                @Override
+                Iterable<String> asArguments() {
+                    return ["-Dkotlin.winrt.runtimeAssetsRoot=${runtimeAssetsRoot}"]
+                }
+            })
+        }
+    }
+
     configurations.configureEach { configuration ->
         def lowerName = configuration.name.toLowerCase(Locale.ROOT)
         if (lowerName.contains("winui")) {

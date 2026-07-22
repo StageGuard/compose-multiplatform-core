@@ -31,6 +31,7 @@ import androidx.compose.ui.node.LayoutNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.WinUIOwner
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.WinUITestRuntime
 import androidx.compose.ui.platform.renderWinUIDragDecoration
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
@@ -354,6 +355,7 @@ private class TargetDragAndDropElement(
 }
 
 private fun createOwner(manager: WinUIDragAndDropManager): WinUIOwner {
+    WinUITestRuntime.ensureInitialized()
     val root = LayoutNode().also {
         it.measurePolicy = RootMeasurePolicy
     }

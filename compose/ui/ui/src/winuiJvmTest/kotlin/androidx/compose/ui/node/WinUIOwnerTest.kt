@@ -44,6 +44,7 @@ import androidx.compose.ui.layout.RootMeasurePolicy
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.TextToolbarStatus
+import androidx.compose.ui.platform.WinUITestRuntime
 import androidx.compose.ui.platform.WinUITextToolbar
 import androidx.compose.ui.platform.WinUIPointerSample
 import androidx.compose.ui.platform.toXamlPoint
@@ -1372,6 +1373,7 @@ class WinUIOwnerTest {
         scheduleOutOfFrame: (() -> Unit) -> Unit = { it() },
         coordinateMapper: WinUICoordinateMapper = WinUICoordinateMapper(),
     ): WinUIOwner {
+        WinUITestRuntime.ensureInitialized()
         val root = LayoutNode().also {
             it.measurePolicy = RootMeasurePolicy
         }

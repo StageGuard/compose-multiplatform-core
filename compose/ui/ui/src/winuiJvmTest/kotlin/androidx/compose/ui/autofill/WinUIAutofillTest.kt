@@ -25,6 +25,7 @@ import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.RootMeasurePolicy
 import androidx.compose.ui.node.LayoutNode
 import androidx.compose.ui.node.WinUIOwner
+import androidx.compose.ui.platform.WinUITestRuntime
 import androidx.compose.ui.semantics.contentDataType
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.onAutofillText
@@ -251,6 +252,7 @@ class WinUIAutofillTest {
 }
 
 private fun createOwner(): WinUIOwner {
+    WinUITestRuntime.ensureInitialized()
     val root = LayoutNode().also {
         it.measurePolicy = RootMeasurePolicy
     }
