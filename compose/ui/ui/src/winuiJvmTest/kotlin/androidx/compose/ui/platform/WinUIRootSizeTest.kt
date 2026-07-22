@@ -130,9 +130,26 @@ class WinUIRootSizeTest {
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIRootSize.winui.kt")
             .readText()
             .filterNot { it.isWhitespace() }
-        val composeView = moduleRoot
+        val composeViewRaw = moduleRoot
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt")
             .readText()
+        val composeView = composeViewRaw
+            .filterNot { it.isWhitespace() }
+        val flushPendingRenderRequest = composeViewRaw
+            .substringAfter("private fun flushPendingRenderRequest()")
+            .substringBefore("private fun scheduleRenderRequestFlush()")
+            .filterNot { it.isWhitespace() }
+        val setContentWhenWindowReady = composeViewRaw
+            .substringAfter("internal fun setContentWhenWindowReady(")
+            .substringBefore("internal fun setContent(")
+            .filterNot { it.isWhitespace() }
+        val setWindowContainerSizeFromRoot = composeViewRaw
+            .substringAfter("private fun setWindowContainerSizeFromRoot(")
+            .substringBefore("private fun applyWindowContainerSize(")
+            .filterNot { it.isWhitespace() }
+        val setWindowBootstrapSize = composeViewRaw
+            .substringAfter("internal fun setWindowBootstrapSize(size: IntSize)")
+            .substringBefore("private fun setWindowContainerSizeFromRoot(")
             .filterNot { it.isWhitespace() }
         val window = moduleRoot
             .resolve("src/winuiMain/kotlin/androidx/compose/ui/window/Window.winui.kt")
@@ -156,13 +173,18 @@ class WinUIRootSizeTest {
         assertTrue(composeView.contains("rootSizeBinding.refresh()"))
         assertTrue(composeView.contains("rootSizeBinding.close()"))
         assertTrue(composeView.contains("setContentWhenWindowReady("))
-        assertTrue(composeView.contains("consumePendingWindowContent()"))
-        assertTrue(composeView.contains("requestRender=content!=null&&!hasPendingWindowContent"))
+        assertTrue(setContentWhenWindowReady.contains("setContent(content)"))
+        assertFalse(setContentWhenWindowReady.contains("pendingWindowContent"))
+        assertFalse(setWindowContainerSizeFromRoot.contains("consumePendingWindowContent()"))
+        assertTrue(setWindowBootstrapSize.contains("if(isDisposed||rootContentControl.isLoaded)return"))
+        assertTrue(setWindowBootstrapSize.contains("applyWindowContainerSize(size,requestRender=false)"))
         assertTrue(composeView.contains("if(content!=null){scheduleRootContentSync()requestRender()}"))
+        assertTrue(flushPendingRenderRequest.contains("if(!rootContentControl.isLoaded){"))
         assertTrue(window.contains("view.setContentWhenWindowReady"))
+        assertTrue(updateWindowInfo.contains("view.setWindowBootstrapSize("))
         assertTrue(
             window.indexOf("view.setContentWhenWindowReady") < window.indexOf("window.activate()"),
-            "Window content must be pending before activation can synchronously report the root size.",
+            "Window content must be installed before activation begins XAML layout.",
         )
         assertFalse(updateWindowInfo.contains("setWindowContainerSize"))
     }

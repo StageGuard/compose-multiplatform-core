@@ -22,6 +22,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.platform.WinUIComposeView
 import androidx.compose.ui.platform.debugRender
+import androidx.compose.ui.unit.IntSize
 import windows.foundation.EventRegistrationToken
 import microsoft.ui.composition.Compositor
 import microsoft.ui.dispatching.DispatcherQueue
@@ -243,6 +244,12 @@ private class WinUIWindowNode(
             "window info size=${appWindowSize.width}x${appWindowSize.height} " +
                 "extendsTitleBar=${window.extendsContentIntoTitleBar}"
         }
+        view.setWindowBootstrapSize(
+            IntSize(
+                width = appWindowSize.width,
+                height = appWindowSize.height,
+            ),
+        )
         val titleBar = appWindow.titleBar
         if (window.extendsContentIntoTitleBar && titleBar != null) {
             view.setWindowTitleBarInsets(

@@ -316,7 +316,6 @@ class WinUIComposeView internal constructor(
     private var saveableState: Map<String, List<Any?>>? = null
     private var saveableStateRegistry: SaveableStateRegistry? = null
     private var content: (@Composable () -> Unit)? = null
-    private var pendingWindowContent: (@Composable () -> Unit)? = null
     private var platformWindowInsets: PlatformWindowInsets by mutableStateOf(EmptyPlatformWindowInsets)
     private var captionBarHeight = 0
     private var titleBarLeftInset = 0
@@ -386,12 +385,7 @@ class WinUIComposeView internal constructor(
         check(!isDisposed) {
             "Cannot set content on a disposed WinUIComposeView."
         }
-        val size = owner.windowInfo.containerSize
-        if (composition != null || (size.width > 0 && size.height > 0)) {
-            setContent(content)
-        } else {
-            pendingWindowContent = content
-        }
+        setContent(content)
     }
 
     internal fun setContent(
@@ -461,7 +455,6 @@ class WinUIComposeView internal constructor(
         frameRecomposer = null
         parentCompositionContext = null
         content = null
-        pendingWindowContent = null
         clearLoadedRenderSchedulerRequest()
         renderHost.detachSurface()
         updateRootContent(emptyList())
@@ -473,7 +466,6 @@ class WinUIComposeView internal constructor(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
-        pendingWindowContent = null
         runWinUIDragAndDropCleanup(
             { disposeComposition() },
             { keyInputAdapter.dispose() },
@@ -558,21 +550,20 @@ class WinUIComposeView internal constructor(
         applyWindowContainerSize(size)
     }
 
+    internal fun setWindowBootstrapSize(size: IntSize) {
+        if (isDisposed || rootContentControl.isLoaded) return
+        if (size.width <= 0 || size.height <= 0) return
+        if (owner.windowInfo.containerSize.width > 0 && owner.windowInfo.containerSize.height > 0) return
+        applyWindowContainerSize(size, requestRender = false)
+    }
+
     private fun setWindowContainerSizeFromRoot(size: IntSize) {
         if (isDisposed) return
         updateDensityFromXamlRoot()
-        val hasPendingWindowContent = pendingWindowContent != null
         applyWindowContainerSize(
             size,
-            requestRender = content != null && !hasPendingWindowContent,
+            requestRender = content != null,
         )
-        consumePendingWindowContent()
-    }
-
-    private fun consumePendingWindowContent() {
-        val pendingContent = pendingWindowContent ?: return
-        pendingWindowContent = null
-        setContent(pendingContent)
     }
 
     private fun applyWindowContainerSize(
@@ -809,6 +800,10 @@ class WinUIComposeView internal constructor(
 
     private fun flushPendingRenderRequest() {
         if (isDisposed || !hasPendingRenderRequest) return
+        if (!rootContentControl.isLoaded) {
+            debugRender { "flushRender waiting for root loaded" }
+            return
+        }
         if (isDrawingFrame || isApplyingOwnerChanges || owner.isMeasureLayoutInProgress) {
             debugRender {
                 "flushRender deferred drawing=$isDrawingFrame applying=$isApplyingOwnerChanges " +
