@@ -316,6 +316,7 @@ class WinUIComposeView internal constructor(
     private var saveableState: Map<String, List<Any?>>? = null
     private var saveableStateRegistry: SaveableStateRegistry? = null
     private var content: (@Composable () -> Unit)? = null
+    private var pendingWindowContent: (@Composable () -> Unit)? = null
     private var platformWindowInsets: PlatformWindowInsets by mutableStateOf(EmptyPlatformWindowInsets)
     private var captionBarHeight = 0
     private var titleBarLeftInset = 0
@@ -335,6 +336,10 @@ class WinUIComposeView internal constructor(
     private var xamlRootChangedHandler: TypedEventHandler<XamlRoot, XamlRootChangedEventArgs>? =
         null
     private var xamlRootChangedToken: EventRegistrationToken? = null
+    private val rootSizeBinding = WinUIRootSizeBinding(
+        root = rootContentControl,
+        onSizeChanged = ::setWindowContainerSizeFromRoot,
+    )
     private var systemEnvironment by mutableStateOf(WinUIEnvironment())
     private val motionDurationScale = WinUIMotionDurationScale()
     private val lifecycleController = WinUIViewLifecycleController(
@@ -375,6 +380,18 @@ class WinUIComposeView internal constructor(
 
     fun setContent(content: @Composable () -> Unit) {
         setContentInternal(parentCompositionContext = null, content = content)
+    }
+
+    internal fun setContentWhenWindowReady(content: @Composable () -> Unit) {
+        check(!isDisposed) {
+            "Cannot set content on a disposed WinUIComposeView."
+        }
+        val size = owner.windowInfo.containerSize
+        if (composition != null || (size.width > 0 && size.height > 0)) {
+            setContent(content)
+        } else {
+            pendingWindowContent = content
+        }
     }
 
     internal fun setContent(
@@ -444,6 +461,7 @@ class WinUIComposeView internal constructor(
         frameRecomposer = null
         parentCompositionContext = null
         content = null
+        pendingWindowContent = null
         clearLoadedRenderSchedulerRequest()
         renderHost.detachSurface()
         updateRootContent(emptyList())
@@ -455,6 +473,7 @@ class WinUIComposeView internal constructor(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
+        pendingWindowContent = null
         runWinUIDragAndDropCleanup(
             { disposeComposition() },
             { keyInputAdapter.dispose() },
@@ -465,6 +484,7 @@ class WinUIComposeView internal constructor(
             { environmentObserver.close() },
             { windowActivationBinding?.close() },
             { lifecycleBinding.close() },
+            { rootSizeBinding.close() },
             {
                 if (dispatchQueueDelegate.isInitialized()) {
                     dispatchQueueDelegate.value.close()
@@ -527,16 +547,44 @@ class WinUIComposeView internal constructor(
         owner.updateLayoutDirection(environment.layoutDirection)
         owner.updateDensity(Density(owner.density.density, environment.fontScale))
         motionDurationScale.updateAnimationsEnabled(environment.animationsEnabled)
-        scheduleRootContentSync()
-        requestRender()
+        if (content != null) {
+            scheduleRootContentSync()
+            requestRender()
+        }
     }
 
     internal fun setWindowContainerSize(size: IntSize) {
         updateDensityFromXamlRoot()
+        applyWindowContainerSize(size)
+    }
+
+    private fun setWindowContainerSizeFromRoot(size: IntSize) {
+        if (isDisposed) return
+        updateDensityFromXamlRoot()
+        val hasPendingWindowContent = pendingWindowContent != null
+        applyWindowContainerSize(
+            size,
+            requestRender = content != null && !hasPendingWindowContent,
+        )
+        consumePendingWindowContent()
+    }
+
+    private fun consumePendingWindowContent() {
+        val pendingContent = pendingWindowContent ?: return
+        pendingWindowContent = null
+        setContent(pendingContent)
+    }
+
+    private fun applyWindowContainerSize(
+        size: IntSize,
+        requestRender: Boolean = true,
+    ) {
         owner.setWindowContainerSize(size)
         renderHost.setSize(size, owner.density)
         updatePlatformWindowInsets()
-        requestRender()
+        if (requestRender) {
+            requestRender()
+        }
     }
 
     internal fun setTransparentRootBackground() {
@@ -657,12 +705,13 @@ class WinUIComposeView internal constructor(
 
     private fun startRenderSchedulerWhenLoaded() {
         if (runCatching { rootContentControl.isLoaded }.getOrDefault(false)) {
+            updateRootMetricsFromXamlRoot()
             startRenderScheduler()
         } else if (loadedRenderSchedulerToken == null) {
             val handler: RoutedEventHandler = { _, _ ->
                 clearLoadedRenderSchedulerRequest()
                 if (!isDisposed) {
-                    updateDensityFromXamlRoot()
+                    updateRootMetricsFromXamlRoot()
                     startRenderScheduler()
                     requestRender()
                 }
@@ -694,7 +743,7 @@ class WinUIComposeView internal constructor(
             if (currentXamlRoot != null) {
                 val handler: TypedEventHandler<XamlRoot, XamlRootChangedEventArgs> = { _, _ ->
                     if (!isDisposed) {
-                        updateDensityFromXamlRoot()
+                        updateRootMetricsFromXamlRoot()
                         scheduleRootContentSync()
                         requestRender()
                     }
@@ -709,10 +758,16 @@ class WinUIComposeView internal constructor(
             ?.takeIf { it.isFinite() && it > 0f }
             ?: 1f
         owner.updateDensity(Density(scale, owner.density.fontScale))
-        owner.windowInfo.containerSize.takeIf { it.width > 0 && it.height > 0 }?.let { size ->
-            renderHost.setSize(size, owner.density)
-        }
         updatePlatformWindowInsets()
+    }
+
+    private fun updateRootMetricsFromXamlRoot() {
+        updateDensityFromXamlRoot()
+        if (!rootSizeBinding.refresh()) {
+            owner.windowInfo.containerSize.takeIf { it.width > 0 && it.height > 0 }?.let { size ->
+                renderHost.setSize(size, owner.density)
+            }
+        }
     }
 
     private fun clearXamlRootDensityObserver() {

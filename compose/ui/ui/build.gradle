@@ -171,6 +171,8 @@ if (composeWinUiGradlePluginAvailable) {
         type("Microsoft.UI.Xaml.LaunchActivatedEventArgs")
         type("Microsoft.UI.Xaml.ResourceDictionary")
         type("Microsoft.UI.Xaml.RoutedEventHandler")
+        type("Microsoft.UI.Xaml.SizeChangedEventArgs")
+        type("Microsoft.UI.Xaml.SizeChangedEventHandler")
         type("Microsoft.UI.Xaml.Setter")
         type("Microsoft.UI.Xaml.Style")
         type("Microsoft.UI.Xaml.Thickness")
