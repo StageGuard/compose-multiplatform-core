@@ -124,9 +124,7 @@ androidXMultiplatform {
         }
 
         nonJvmMain {
-            if (!composeWinUiTargetEnabled) {
-                dependsOn(skikoMain)
-            }
+            dependsOn(skikoMain)
         }
 
         nonJvmTest {

@@ -14,17 +14,9 @@
  * limitations under the License.
  */
 
-package androidx.compose.ui.platform
+package androidx.compose.ui
 
-import io.github.composefluent.winrt.runtime.RawAddress
-import microsoft.ui.xaml.Window
-import windows.ui.viewmanagement.InputPane
-import windows.ui.viewmanagement.InputPaneInterop
-import winrt.interop.WindowNative
+import androidx.compose.ui.platform.winUIProcessProperty
 
-internal actual fun acquireWinUIInputPane(window: Window): InputPane? =
-    runCatching {
-        val windowHandle = WindowNative.getWindowHandle(window)
-        check(windowHandle != RawAddress.Null) { "WinUI window does not have an HWND." }
-        InputPaneInterop.getForWindow(windowHandle)
-    }.getOrNull()
+internal actual fun composeLayerTypeProperty(): String? =
+    winUIProcessProperty("compose.layers.type")

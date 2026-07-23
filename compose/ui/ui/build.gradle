@@ -439,6 +439,14 @@ androidXMultiplatform {
             }
         }
 
+        skikoNonJvmMain {
+            dependsOn(skikoMain)
+        }
+
+        skikoNativeMain {
+            dependsOn(skikoMain)
+        }
+
         skikoTest {
             dependsOn(commonTest)
             dependencies {
@@ -473,7 +481,7 @@ androidXMultiplatform {
 
         nonJvmMain {
             if (!composeWinUiTargetEnabled) {
-                dependsOn(skikoMain)
+                dependsOn(skikoNonJvmMain)
             }
             dependencies {
                 // To comply with Klib resolver until https://youtrack.jetbrains.com/issue/KT-61096 is fixed
@@ -491,6 +499,9 @@ androidXMultiplatform {
 
         nativeMain {
             dependsOn(nonJvmMain)
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoNativeMain)
+            }
         }
 
         nativeTest {
@@ -571,6 +582,9 @@ kotlin {
             if (composeWinUiMingwTargetEnabled) {
                 winuiMingwMain {
                     dependsOn(winuiMain)
+                    dependencies {
+                        implementation(libs.atomicFu)
+                    }
                 }
             }
 

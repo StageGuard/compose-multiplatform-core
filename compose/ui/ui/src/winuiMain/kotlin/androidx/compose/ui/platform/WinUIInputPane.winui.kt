@@ -16,11 +16,14 @@
 
 package androidx.compose.ui.platform
 
+import io.github.composefluent.winrt.runtime.RawAddress
 import microsoft.ui.xaml.Window
 import windows.foundation.Rect
 import windows.foundation.TypedEventHandler
 import windows.ui.viewmanagement.InputPane
+import windows.ui.viewmanagement.InputPaneInterop
 import windows.ui.viewmanagement.InputPaneVisibilityEventArgs
+import winrt.interop.WindowNative
 import kotlin.math.roundToInt
 
 internal data class WinUIInputPaneOccludedRect(
@@ -151,7 +154,12 @@ internal fun createWinUIInputPaneController(
     )
 }.getOrNull()
 
-internal expect fun acquireWinUIInputPane(window: Window): InputPane?
+internal fun acquireWinUIInputPane(window: Window): InputPane? =
+    runCatching {
+        val windowHandle = WindowNative.getWindowHandle(window)
+        check(windowHandle != RawAddress.Null) { "WinUI window does not have an HWND." }
+        InputPaneInterop.getForWindow(windowHandle)
+    }.getOrNull()
 
 private class ProjectedWinUIInputPaneAdapter(
     private val inputPane: InputPane,

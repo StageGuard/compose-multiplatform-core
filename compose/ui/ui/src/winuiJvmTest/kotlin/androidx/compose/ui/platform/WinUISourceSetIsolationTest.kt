@@ -37,7 +37,7 @@ class WinUISourceSetIsolationTest {
             "androidx.compose.ui.awt.",
             "org.jetbrains.skiko.SkiaLayer",
         )
-        val offenders = listOf("winuiMain", "winuiJvmMain").flatMap { sourceSet ->
+        val offenders = listOf("winuiMain", "winuiJvmMain", "winuiMingwMain").flatMap { sourceSet ->
             kotlinFiles(moduleRoot.resolve("src/$sourceSet/kotlin")).flatMap { file ->
                 val text = file.readText()
                 forbiddenReferences.mapNotNull { reference ->
@@ -253,13 +253,19 @@ class WinUISourceSetIsolationTest {
     }
 
     @Test
-    fun winuiInputPaneUsesDesktopWindowInteropAndOwnerRegistration() {
+    fun winuiInputPaneUsesSharedWindowInteropAndOwnerRegistration() {
         val moduleRoot = findUiModuleRoot()
+        val sharedInteropFile = moduleRoot.resolve(
+            "src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIInputPane.winui.kt"
+        )
         val jvmInteropFile = moduleRoot.resolve(
             "src/winuiJvmMain/kotlin/androidx/compose/ui/platform/WinUIInputPane.winuiJvm.kt"
         )
-        assertTrue(jvmInteropFile.exists(), "WinUI JVM InputPane interop source is missing.")
-        val jvmInteropSource = jvmInteropFile.readText()
+        assertFalse(
+            jvmInteropFile.exists(),
+            "Generated InputPane window interop is shared by WinUI JVM and MinGW.",
+        )
+        val sharedInteropSource = sharedInteropFile.readText()
         val composeViewSource = moduleRoot.resolve(
             "src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt"
         ).readText()
@@ -269,8 +275,8 @@ class WinUISourceSetIsolationTest {
             "InputPaneInterop.getForWindow(windowHandle)",
         ).forEach { expected ->
             assertTrue(
-                jvmInteropSource.contains(expected),
-                "Desktop InputPane interop should contain $expected.",
+                sharedInteropSource.contains(expected),
+                "Shared InputPane interop should contain $expected.",
             )
         }
         listOf(
@@ -295,7 +301,7 @@ class WinUISourceSetIsolationTest {
             "powershell.exe",
         ).forEach { forbidden ->
             assertFalse(
-                jvmInteropSource.contains(forbidden),
+                sharedInteropSource.contains(forbidden),
                 "Compose InputPane acquisition must use the generated interop helper: found $forbidden.",
             )
         }
@@ -304,13 +310,7 @@ class WinUISourceSetIsolationTest {
     @Test
     fun winuiMingwKeepsDefaultNativeHierarchyWithoutNativeSkikoAncestry() {
         val repositoryRoot = findRepositoryRoot()
-        val sourceSetBuildScripts = listOf(
-            "compose/ui/ui/build.gradle",
-            "compose/ui/ui-graphics/build.gradle",
-            "compose/ui/ui-text/build.gradle",
-            "compose/foundation/foundation/build.gradle",
-            "compose/foundation/foundation-layout/build.gradle",
-        )
+        val sourceSetBuildScripts = listOf("compose/ui/ui/build.gradle")
 
         sourceSetBuildScripts.forEach { relativePath ->
             val buildScript = repositoryRoot.resolve(relativePath).readText()
@@ -319,8 +319,8 @@ class WinUISourceSetIsolationTest {
             }
             assertTrue(
                 nonJvmMainBlock.contains("if (!composeWinUiTargetEnabled)") &&
-                    nonJvmMainBlock.contains("dependsOn(skikoMain)"),
-                "$relativePath must keep nonJvmMain -> skikoMain only outside WinUI mode.",
+                    nonJvmMainBlock.contains("dependsOn(skikoNonJvmMain)"),
+                "$relativePath must keep nonJvmMain -> skikoNonJvmMain only outside WinUI mode.",
             )
         }
 
@@ -357,6 +357,101 @@ class WinUISourceSetIsolationTest {
             pluginSource.contains("compilerPluginClasspath = plugins"),
             "Compose must not replace kotlin-winrt or other Kotlin/Native compiler plugins.",
         )
+    }
+
+    @Test
+    fun skikoOnlyNativeActualsAreOutsideWinuiNativeFragments() {
+        val moduleRoot = findUiModuleRoot()
+        val buildScript = moduleRoot.resolve("build.gradle").readText()
+        val nonJvmActuals = moduleRoot.resolve(
+            "src/nonJvmMain/kotlin/androidx/compose/ui/Actuals.nonJvm.kt"
+        ).readText()
+        val skikoNonJvmActuals = moduleRoot.resolve(
+            "src/skikoNonJvmMain/kotlin/androidx/compose/ui/Actuals.skikoNonJvm.kt"
+        )
+        val nativeThreading = moduleRoot.resolve(
+            "src/nativeMain/kotlin/androidx/compose/ui/internal/Threading.native.kt"
+        )
+        val skikoNativeThreading = moduleRoot.resolve(
+            "src/skikoNativeMain/kotlin/androidx/compose/ui/internal/Threading.skikoNative.kt"
+        )
+        val nativeSnapshots = moduleRoot.resolve(
+            "src/nativeMain/kotlin/androidx/compose/ui/platform/GlobalSnapshotManager.native.kt"
+        )
+        val skikoNativeSnapshots = moduleRoot.resolve(
+            "src/skikoNativeMain/kotlin/androidx/compose/ui/platform/" +
+                "GlobalSnapshotManager.skikoNative.kt"
+        )
+
+        assertFalse(nonJvmActuals.contains("PostDelayedDispatcher"))
+        assertTrue(skikoNonJvmActuals.exists())
+        assertFalse(nativeThreading.exists())
+        assertTrue(skikoNativeThreading.exists())
+        assertFalse(nativeSnapshots.exists())
+        assertTrue(skikoNativeSnapshots.exists())
+
+        listOf("skikoNonJvmMain", "skikoNativeMain").forEach { sourceSet ->
+            val block = checkNotNull(sourceSetBlock(buildScript, sourceSet)) {
+                "Could not find $sourceSet in compose/ui/ui/build.gradle."
+            }
+            assertTrue(block.contains("dependsOn(skikoMain)"))
+        }
+        val nonJvmMainBlock = checkNotNull(sourceSetBlock(buildScript, "nonJvmMain"))
+        val nativeMainBlock = checkNotNull(sourceSetBlock(buildScript, "nativeMain"))
+        assertTrue(
+            nonJvmMainBlock.contains("dependsOn(skikoNonJvmMain)") &&
+                nonJvmMainBlock.contains("if (!composeWinUiTargetEnabled)"),
+        )
+        assertTrue(
+            nativeMainBlock.contains("dependsOn(skikoNativeMain)") &&
+                nativeMainBlock.contains("if (!composeWinUiTargetEnabled)"),
+        )
+    }
+
+    @Test
+    fun winuiMingwNativeHooksUseKotlinNativeWindowsApis() {
+        val moduleRoot = findUiModuleRoot()
+        val filesWithRequiredSymbols = mapOf(
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/platform/" +
+                "PlatformActuals.winuiMingw.kt" to listOf(
+                "kotlinx.atomicfu.locks.SynchronizedObject",
+                "kotlinx.atomicfu.locks.synchronized",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/" +
+                "ComposeFeatureFlags.winuiMingw.kt" to listOf(
+                "winUIProcessProperty(\"compose.layers.type\")",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/platform/" +
+                "WinUIPlatformProperties.winuiMingw.kt" to listOf(
+                "getenv(name)",
+                "fopen(logFile, \"a\")",
+                "fputs",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/window/" +
+                "WinUIWindowNative.winuiMingw.kt" to listOf(
+                "DwmEnableBlurBehindWindow",
+                "DwmSetWindowAttribute",
+                "CreateRectRgn",
+                "DeleteObject",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/window/" +
+                "WindowCaptureProtection.winuiMingw.kt" to listOf(
+                "SetWindowDisplayAffinity",
+                "WDA_EXCLUDEFROMCAPTURE",
+            ),
+        )
+
+        filesWithRequiredSymbols.forEach { (relativePath, requiredSymbols) ->
+            val file = moduleRoot.resolve(relativePath)
+            assertTrue(file.exists(), "Missing WinUI MinGW implementation: $relativePath")
+            val source = file.readText()
+            requiredSymbols.forEach { symbol ->
+                assertTrue(source.contains(symbol), "$relativePath must use $symbol")
+            }
+            listOf("ProcessBuilder", "rundll32", "powershell.exe", "TODO").forEach { forbidden ->
+                assertFalse(source.contains(forbidden), "$relativePath contains $forbidden")
+            }
+        }
     }
 
     private fun kotlinFiles(root: Path): List<Path> {
