@@ -51,6 +51,7 @@ class ArtifactRedirectionTest {
         )
         assertNull(redirection.coordinatesForTarget("winuiJvm"))
         assertNull(redirection.coordinatesForTarget("winuiMingw"))
+        assertNull(redirection.coordinatesForConfiguration("winuiJvmApiElements"))
         assertNull(redirection.coordinatesForConfiguration("winuiMingwApiElements"))
     }
 
@@ -62,9 +63,7 @@ class ArtifactRedirectionTest {
             ArtifactRedirectCoordinates("androidx.compose.ui", "1.12.0-alpha03"),
             redirection.coordinatesForTarget("android"),
         )
-        assertNull(redirection.coordinatesForTarget("desktop"))
-        assertNull(redirection.coordinatesForTarget("iosArm64"))
-        assertNull(redirection.coordinatesForTarget("mingwX64"))
+        assertEquals(setOf("android"), redirection.targetNames)
     }
 
     @Test
