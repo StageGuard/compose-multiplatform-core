@@ -145,14 +145,28 @@ internal class CustomRootComponent(
     override fun getCoordinates(): ModuleVersionIdentifier =
         rootComponent.coordinates
 
-    override fun getUsages(): Set<UsageContext> = rootComponent.usages + extraUsages.map { it() }
+    override fun getUsages(): Set<UsageContext> =
+        rootComponent.usages.filterNot { it.name in replacedRootUsages }.toSet() +
+            extraUsages.map { it() }
 
     private val replacedTargets = mutableSetOf<String>()
+    private val replacedRootUsages = mutableSetOf<String>()
     private val extraUsages = mutableSetOf<() -> UsageContext>()
 
     fun replaceUsagesFor(targetName: String, configuration: Configuration, defaultUsage: KotlinUsageContext) {
         replacedTargets.add(targetName)
         extraUsages.add { usageFor(configuration, defaultUsage) }
+    }
+
+    fun replaceRootUsageFor(usageName: String, configuration: Configuration) {
+        replacedRootUsages.add(usageName)
+        extraUsages.add {
+            CustomUsage(
+                name = configuration.name,
+                attributes = configuration.attributes,
+                dependencies = setOf(customizeDependencyPerConfiguration(configuration)),
+            )
+        }
     }
 
     private fun usageFor(configuration: Configuration, defaultUsage: KotlinUsageContext): CustomUsage {

@@ -25,6 +25,7 @@ data class ArtifactRedirectCoordinates(
 
 data class ArtifactRedirection(
     private val coordinatesByTarget: Map<String, ArtifactRedirectCoordinates>,
+    private val rootMetadataCoordinates: ArtifactRedirectCoordinates? = null,
 ) {
     val targetNames: Set<String> = coordinatesByTarget.keys
 
@@ -34,6 +35,9 @@ data class ArtifactRedirection(
     fun coordinatesForConfiguration(
         configurationName: String,
     ): ArtifactRedirectCoordinates? {
+        if (configurationName.equals(ROOT_METADATA_CONFIGURATION, ignoreCase = true)) {
+            return rootMetadataCoordinates
+        }
         // Configuration names are target-prefixed in Kotlin KMP publications, for example:
         // "desktopApiElements" or "iosArm64MetadataElements".
         return targetNames
@@ -42,8 +46,13 @@ data class ArtifactRedirection(
             ?.let(coordinatesByTarget::getValue)
     }
 
-    fun allCoordinates(): Set<ArtifactRedirectCoordinates> = coordinatesByTarget.values.toSet()
+    fun allCoordinates(): Set<ArtifactRedirectCoordinates> = buildSet {
+        addAll(coordinatesByTarget.values)
+        rootMetadataCoordinates?.let(::add)
+    }
 }
+
+private const val ROOT_METADATA_CONFIGURATION = "metadataApiElements"
 
 private val redirectionCache = mutableMapOf<Project, ArtifactRedirection?>()
 
@@ -118,6 +127,7 @@ fun Project.readArtifactRedirection(): ArtifactRedirection? {
         }
     }
 
+    var rootMetadataCoordinates: ArtifactRedirectCoordinates? = null
     if (isComposeWinUiTargetMode() && group.toString().startsWith("org.jetbrains.compose")) {
         val cmpVersion = strProperty("composeWinUi.cmpVersion")
             ?.takeIf(String::isNotBlank)
@@ -126,6 +136,7 @@ fun Project.readArtifactRedirection(): ArtifactRedirection? {
                     "so non-WinUI variants can redirect to Compose Multiplatform."
             )
         val cmpCoordinates = ArtifactRedirectCoordinates(group.toString(), cmpVersion)
+        rootMetadataCoordinates = cmpCoordinates
         composeWinUiCmpTargetNames.forEach { targetName ->
             coordinatesByTarget.putIfAbsent(targetName, cmpCoordinates)
         }
@@ -133,7 +144,7 @@ fun Project.readArtifactRedirection(): ArtifactRedirection? {
 
     return coordinatesByTarget
         .takeIf(Map<*, *>::isNotEmpty)
-        ?.let(::ArtifactRedirection)
+        ?.let { ArtifactRedirection(it, rootMetadataCoordinates) }
 }
 
 private fun Project.strProperty(name: String): String? = findProperty(name)?.toString()

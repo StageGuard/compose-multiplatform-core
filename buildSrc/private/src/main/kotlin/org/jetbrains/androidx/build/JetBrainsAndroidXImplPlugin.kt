@@ -217,6 +217,13 @@ private fun enableArtifactRedirectionPublishing(project: Project) {
         }
     }
 
+    redirection.coordinatesForConfiguration("metadataApiElements")?.let {
+        newRootComponent.replaceRootUsageFor(
+            usageName = "metadataApiElements",
+            configuration = project.configurations.getByName("metadataApiElements"),
+        )
+    }
+
     @OptIn(InternalKotlinGradlePluginApi::class)
     ext.targets.all { target ->
         if (target.name.lowercase() in redirection.targetNames) {

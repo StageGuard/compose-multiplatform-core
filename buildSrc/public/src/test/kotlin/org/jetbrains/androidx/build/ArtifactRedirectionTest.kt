@@ -49,6 +49,10 @@ class ArtifactRedirectionTest {
             ArtifactRedirectCoordinates("org.jetbrains.compose.ui", "1.10.0"),
             redirection.coordinatesForConfiguration("iosArm64MetadataElements"),
         )
+        assertEquals(
+            ArtifactRedirectCoordinates("org.jetbrains.compose.ui", "1.10.0"),
+            redirection.coordinatesForConfiguration("metadataApiElements"),
+        )
         assertNull(redirection.coordinatesForTarget("winuiJvm"))
         assertNull(redirection.coordinatesForTarget("winuiMingw"))
         assertNull(redirection.coordinatesForConfiguration("winuiJvmApiElements"))
@@ -64,6 +68,7 @@ class ArtifactRedirectionTest {
             redirection.coordinatesForTarget("android"),
         )
         assertEquals(setOf("android"), redirection.targetNames)
+        assertNull(redirection.coordinatesForConfiguration("metadataApiElements"))
     }
 
     @Test
