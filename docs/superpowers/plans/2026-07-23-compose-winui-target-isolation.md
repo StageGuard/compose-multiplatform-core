@@ -4,7 +4,7 @@
 
 **Goal:** Make `winuiJvm` and `winuiMingw` the only locally owned Compose platform variants in WinUI mode, keep the WinUI Native source-set graph connected without importing `skikoMain` through `nativeMain`, and redirect every other published target to its Jetpack Compose or Compose Multiplatform owner.
 
-**Architecture:** Extend artifact redirection from one owner per module to one owner per target, preserving Android-to-AndroidX redirection and adding CMP ownership for non-WinUI targets at `composeWinUi.cmpVersion=1.10.0`. In WinUI mode, retain Kotlin's default `winuiMingwMain -> mingwMain -> nativeMain -> nonJvmMain` hierarchy, remove only the `nonJvmMain -> skikoMain` edge, and join WinUI behavior through `winuiMingwMain -> winuiMain`. Compose compiler configuration appends to the Native compiler-plugin classpath so kotlin-winrt remains active.
+**Architecture:** Extend artifact redirection from one owner per module to one owner per target, preserving Android-to-AndroidX redirection and adding CMP ownership for non-WinUI targets and root metadata at `composeWinUi.cmpVersion=1.10.0`. In normal mode, route Skiko-only actuals through `skikoNonJvmMain` and `skikoNativeMain`. In WinUI mode, retain Kotlin's connected `winuiMingwMain -> mingwMain -> nativeMain -> nonJvmMain` hierarchy, omit only the two edges into those Skiko-only source sets, and join WinUI behavior through `winuiMingwMain -> winuiMain`. Compose compiler configuration appends to the Native compiler-plugin classpath so kotlin-winrt remains active.
 
 **Tech Stack:** Gradle/Kotlin build logic, Kotlin Multiplatform source sets, Kotlin/Native MinGW, Compose compiler plugin, kotlin-winrt generated projections, Windows App SDK/WinUI 3, JUnit 4, Kotlin test.
 
@@ -14,8 +14,8 @@
 - Android target variants continue redirecting to `androidx.compose.*` with the existing `artifactRedirection.version.androidx.compose` family properties.
 - Desktop, JVM, JS, Wasm, Apple, Linux, and standard MinGW variants redirect to the matching `org.jetbrains.compose.*` module at `composeWinUi.cmpVersion` only while a WinUI target is enabled.
 - `winuiJvm` and `winuiMingw` always remain local and must never match a redirection rule.
-- Normal non-WinUI mode preserves `nativeMain -> nonJvmMain -> skikoMain`.
-- WinUI mode preserves one connected Native graph and removes only `nonJvmMain -> skikoMain`; it must not mutate `dependsOn` collections after hierarchy creation.
+- Normal non-WinUI mode preserves `nonJvmMain -> skikoNonJvmMain -> skikoMain` and `nativeMain -> skikoNativeMain -> skikoMain`.
+- WinUI mode preserves one connected Native graph and omits only `nonJvmMain -> skikoNonJvmMain` and `nativeMain -> skikoNativeMain`; it must not mutate `dependsOn` collections after hierarchy creation.
 - Keep `winuiMain` independent from Desktop, AWT, Swing, and `SkiaLayer`.
 - Use generated kotlin-winrt projections and Kotlin/Native Windows APIs; do not add process-shell fallbacks, projection stubs, or no-op Native actuals.
 - Use JDK 25, `$env:USERPROFILE\.konan`, direct Maven access, and `--no-configuration-cache --no-configure-on-demand` for WinUI validation.
@@ -26,7 +26,7 @@
 ### Task 1: Add target-owned artifact redirection
 
 **Files:**
-- Create: `buildSrc-tests/src/test/java/org/jetbrains/androidx/build/ArtifactRedirectionTest.kt`
+- Create: `buildSrc/public/src/test/kotlin/org/jetbrains/androidx/build/ArtifactRedirectionTest.kt`
 - Modify: `buildSrc/public/src/main/kotlin/org/jetbrains/androidx/build/ArtifactRedirection.kt`
 - Modify: `buildSrc/private/src/main/kotlin/org/jetbrains/androidx/build/JetBrainsAndroidXImplPlugin.kt`
 - Modify: `buildSrc/private/src/main/kotlin/org/jetbrains/androidx/build/JetBrainsCapabilityRule.kt`
@@ -40,7 +40,7 @@
 - Consumes: existing `artifactRedirection.targetNames`, group replacement, default version, and per-target version properties.
 - Consumes: `composeWinUi.enableJvmTarget`, `composeWinUi.enableMingwTarget`, and `composeWinUi.cmpVersion`.
 
-- [ ] **Step 1: Write failing multi-owner tests**
+- [x] **Step 1: Write failing multi-owner tests**
 
 Create JUnit tests with `ProjectBuilder` that assert:
 
@@ -89,19 +89,19 @@ fun winuiModeRequiresCmpVersion() {
 }
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
 ```powershell
-.\gradlew.bat :buildSrc-tests:test `
+.\gradlew.bat -p buildSrc :public:test `
   --tests org.jetbrains.androidx.build.ArtifactRedirectionTest `
   --no-configuration-cache --no-configure-on-demand
 ```
 
 Expected: test compilation fails because target-specific coordinate APIs do not exist.
 
-- [ ] **Step 3: Implement the target-to-owner model**
+- [x] **Step 3: Implement the target-to-owner model**
 
 Replace the single group/default-version data model with:
 
@@ -134,11 +134,11 @@ data class ArtifactRedirection(
 
 Parse existing Android redirection properties into this map. When either WinUI property is true and the project group starts with `org.jetbrains.compose`, add CMP owners for `desktop`, `jvm`, `js`, `wasmjs`, macOS, iOS, tvOS, watchOS, Linux, and regular `mingwx64`; never add `winuijvm` or `winuimingw`. Require `composeWinUi.cmpVersion` at that point.
 
-- [ ] **Step 4: Make every publication and capability consumer target-aware**
+- [x] **Step 4: Make every publication and capability consumer target-aware**
 
 Use `coordinatesForTarget` in Native dependency substitution and POM redirection. Use `coordinatesForConfiguration` when creating the redirect dependency and outgoing capability. If a consumable configuration has no redirected target prefix, add only the local capability; this is the guard that keeps WinUI configurations local.
 
-- [ ] **Step 5: Add the centralized CMP baseline**
+- [x] **Step 5: Add the centralized CMP baseline**
 
 Add to root `gradle.properties` beside the artifact-redirection versions:
 
@@ -147,9 +147,9 @@ Add to root `gradle.properties` beside the artifact-redirection versions:
 composeWinUi.cmpVersion=1.10.0
 ```
 
-- [ ] **Step 6: Run tests, formatting checks, and commit**
+- [x] **Step 6: Run tests, formatting checks, and commit**
 
-Run the focused test, `:buildSrc-tests:ktCheck`, and `:buildSrc-tests:test --tests org.jetbrains.androidx.build.ArtifactRedirectionTest`. Expected: PASS. Commit with `git.exe` using `build: support target-owned compose redirection`.
+Run the focused `-p buildSrc :public:test` test plus `:public:check :private:check`. Expected: PASS. Commit with `git.exe` using `build: support target-owned compose redirection`.
 
 ### Task 2: Restore the connected WinUI Native hierarchy and compose compiler plugins
 
@@ -164,15 +164,16 @@ Run the focused test, `:buildSrc-tests:ktCheck`, and `:buildSrc-tests:test --tes
 - Create for diagnostic execution only: `.agent_tmp/verify-winui-target-isolation.init.gradle`
 
 **Interfaces:**
-- Produces in WinUI mode: `nonJvmMain` without `skikoMain` as a parent.
+- Produces in normal mode: Skiko-only actual ancestry through `skikoNonJvmMain` and `skikoNativeMain`.
+- Produces in WinUI mode: `nonJvmMain` and `nativeMain` without those Skiko-only parents.
 - Produces: implicit `winuiMingwMain -> mingwMain -> nativeMain -> nonJvmMain` plus explicit `winuiMingwMain -> winuiMain`.
 - Produces: additive Native `compilerPluginClasspath.from(plugins)`.
 
-- [ ] **Step 1: Add failing source-wiring guards**
+- [x] **Step 1: Add failing source-wiring guards**
 
-Extend `WinUISourceSetIsolationTest` to assert that the detach closure/string is absent, the `nonJvmMain` block gates `dependsOn(skikoMain)` with `if (!composeWinUiTargetEnabled)`, `winuiMingwMain` depends on `winuiMain`, and `AndroidXComposeImplPlugin.kt` contains `compilerPluginClasspath.from(plugins)` without `compilerPluginClasspath = plugins`.
+Extend `WinUISourceSetIsolationTest` to assert that the detach closure/string is absent, `nonJvmMain` and `nativeMain` gate their `skikoNonJvmMain` / `skikoNativeMain` parents with `if (!composeWinUiTargetEnabled)`, `winuiMingwMain` depends on `winuiMain`, and `AndroidXComposeImplPlugin.kt` contains `compilerPluginClasspath.from(plugins)` without `compilerPluginClasspath = plugins`.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -185,16 +186,30 @@ Run:
 
 Expected: FAIL on the detach helper, unconditional Skiko edge, and replacing plugin assignment.
 
-- [ ] **Step 3: Remove hierarchy mutation and gate Skiko ancestry**
+- [x] **Step 3: Remove hierarchy mutation and gate Skiko ancestry**
 
-Delete `detachWinUiMingwFromDefaultNativeHierarchy`. In `compose/ui/ui/build.gradle`, use:
+Delete `detachWinUiMingwFromDefaultNativeHierarchy`. In `compose/ui/ui/build.gradle`, route normal-mode actuals through dedicated source sets:
 
 ```groovy
+skikoNonJvmMain {
+    dependsOn(skikoMain)
+}
+
+skikoNativeMain {
+    dependsOn(skikoMain)
+}
+
 nonJvmMain {
     if (!composeWinUiTargetEnabled) {
-        dependsOn(skikoMain)
+        dependsOn(skikoNonJvmMain)
     }
-    // existing dependencies remain unchanged
+}
+
+nativeMain {
+    dependsOn(nonJvmMain)
+    if (!composeWinUiTargetEnabled) {
+        dependsOn(skikoNativeMain)
+    }
 }
 ```
 
@@ -206,9 +221,9 @@ winuiMingwMain {
 }
 ```
 
-Apply the same conditional `nonJvmMain -> skikoMain` rule to other WinUI-Mingw-enabled Compose modules that declare that edge.
+Keep the ordinary `nonJvmMain -> skikoMain` edges in the other Compose modules; the selective actual split is required only in the root `compose-ui` module where WinUI owns the conflicting platform actuals.
 
-- [ ] **Step 4: Append the Compose Native compiler plugin**
+- [x] **Step 4: Append the Compose Native compiler plugin**
 
 Change the Native branch to:
 
@@ -216,13 +231,13 @@ Change the Native branch to:
 is AbstractKotlinNativeCompile<*, *> -> compilerPluginClasspath.from(plugins)
 ```
 
-- [ ] **Step 5: Verify the realized graph and plugin files**
+- [x] **Step 5: Verify the realized graph and plugin files**
 
 Use the ignored init script to fail unless `winuiMingwMain` has one compiled fragment root, reaches both `nativeMain` and `winuiMain`, `nativeMain` cannot reach `skikoMain`, and the task classpath filenames include both `kotlin-compose-compiler-plugin-embeddable` and `winrt-compiler-plugin`.
 
 Run `:compose:ui:ui:tasks` with `-PcomposeWinUi.enableMingwTarget=true` and the init script. Then run the focused JVM test again. Expected: PASS.
 
-- [ ] **Step 6: Commit the structural fix**
+- [x] **Step 6: Commit the structural fix**
 
 Commit tracked graph, test, and compiler-plugin changes with `git.exe` using `build: isolate winui native source sets`.
 
@@ -237,15 +252,15 @@ Commit tracked graph, test, and compiler-plugin changes with `git.exe` using `bu
 - Produces: shared `acquireWinUIInputPane(window: Window): InputPane?` using `WindowNative.getWindowHandle` and `InputPaneInterop.getForWindow`.
 - Removes: target-specific `expect`/`actual` pair for projected APIs available to JVM and Native.
 
-- [ ] **Step 1: Change the isolation test to require shared acquisition and verify RED**
+- [x] **Step 1: Change the isolation test to require shared acquisition and verify RED**
 
 Require the generated interop calls in the `winuiMain` file and require the JVM acquisition file to be absent. Run the focused test; expected FAIL.
 
-- [ ] **Step 2: Implement shared projected acquisition**
+- [x] **Step 2: Implement shared projected acquisition**
 
 Import `RawAddress`, `InputPaneInterop`, and `WindowNative` in `WinUIInputPane.winui.kt`, replace the `expect` declaration with the existing guarded acquisition body, and delete the JVM actual file.
 
-- [ ] **Step 3: Compile both targets and commit**
+- [x] **Step 3: Compile both targets and commit**
 
 Run `compileKotlinWinuiJvm`, then `compileKotlinWinuiMingw`. The MinGW compile may now stop only on the three target-native actual groups from Task 4; it must have zero `overrides nothing` and zero duplicate-actual diagnostics. Commit with `git.exe` using `refactor: share WinUI InputPane projection`.
 
@@ -262,23 +277,23 @@ Run `compileKotlinWinuiJvm`, then `compileKotlinWinuiMingw`. The MinGW compile m
 - Implements: `setWindowTransparentBackdrop`, `setWindowTransparentBackdropDirect`, and `setWindowCaptureProtection`.
 - Consumes: shared `winuiWindowHwnd(window): Long` and Kotlin/Native `platform.windows`/`platform.posix` APIs.
 
-- [ ] **Step 1: Run MinGW compilation and preserve the exact RED diagnostics**
+- [x] **Step 1: Run MinGW compilation and preserve the exact RED diagnostics**
 
 Run `compileKotlinWinuiMingw`, tee output to `.agent_tmp/compile-winui-mingw-isolated-red.log`, and verify the remaining missing actuals are limited to these files/signatures.
 
-- [ ] **Step 2: Implement process property and logging behavior**
+- [x] **Step 2: Implement process property and logging behavior**
 
 Read the named value from the Native process environment, parse only strict `true`/`false`, print `[compose-winui:<tag>] <message>`, and append to the configured debug log path when present. Use Native file APIs directly; do not launch a shell.
 
-- [ ] **Step 3: Implement DWM transparency and corner preference**
+- [x] **Step 3: Implement DWM transparency and corner preference**
 
 Use `winuiWindowHwnd`, `CreateRectRgn`, `DwmEnableBlurBehindWindow`, `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND)`, `DeleteObject`, and `memScoped`. Return `false` for a null HWND and return Win32/DWM success values without swallowing resource cleanup.
 
-- [ ] **Step 4: Implement capture protection**
+- [x] **Step 4: Implement capture protection**
 
 Call `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` when protected and `SetWindowDisplayAffinity(hwnd, WDA_NONE)` otherwise; return the native Boolean result.
 
-- [ ] **Step 5: Compile MinGW to GREEN and commit**
+- [x] **Step 5: Compile MinGW to GREEN and commit**
 
 Run `compileKotlinWinuiMingw` again and save output under `.agent_tmp/compile-winui-mingw-isolated-green.log`. Expected: PASS with both compiler plugins and no source stubs. Commit with `git.exe` using `feat: implement WinUI MinGW native hooks`.
 
@@ -287,25 +302,25 @@ Run `compileKotlinWinuiMingw` again and save output under `.agent_tmp/compile-wi
 **Files:**
 - Modify: `kotlin-winrt-issues.md`
 - Modify: `compose/ui/compose-winui-plan.md`
-- Modify if integration assertions require it: `buildSrc-tests/src/test/java/org/jetbrains/androidx/build/ArtifactRedirectionTest.kt`
+- Modify if integration assertions require it: `buildSrc/public/src/test/kotlin/org/jetbrains/androidx/build/ArtifactRedirectionTest.kt`
 
 **Interfaces:**
 - Produces: final `KWINRT-061` record closed as a Compose fragment-graph misdiagnosis.
 - Produces: current compose-winui plan state for MinGW, CMP fallback ownership, and additive compiler plugins.
 
-- [ ] **Step 1: Generate representative publication metadata**
+- [x] **Step 1: Generate representative publication metadata**
 
-Generate module metadata for `:compose:ui:ui` in WinUI mode. Inspect Android, desktop, iOS, JS/Wasm, regular Native, `winuiJvm`, and `winuiMingw` usages. Assert Android points to AndroidX, non-WinUI CMP targets point to `org.jetbrains.compose.ui:ui:1.10.0`, and WinUI targets retain local artifacts/version.
+Generate module metadata for `:compose:ui:ui` in both WinUI modes. Inspect Android, configured iOS/macOS/JS/Wasm variants, root `metadataApiElements`, `winuiJvm`, and `winuiMingw` usages. Assert Android points to AndroidX, non-WinUI variants and dependency-only root metadata point to `org.jetbrains.compose.ui:ui:1.10.0`, and WinUI targets retain local JAR/KLIB publications and versions without compiling redirected Web/Apple metadata.
 
-- [ ] **Step 2: Verify normal mode remains unchanged**
+- [x] **Step 2: Verify normal mode remains unchanged**
 
-Configure the same project without either WinUI property and use the graph diagnostic to assert `nativeMain -> nonJvmMain -> skikoMain`. Run a representative normal configuration task; expected: PASS and no CMP fallback owners are injected.
+Configure the same project without either WinUI property and use the graph diagnostic to assert `nonJvmMain -> skikoNonJvmMain -> skikoMain` and `nativeMain -> skikoNativeMain -> skikoMain`. Run a representative normal configuration task; expected: PASS and no CMP fallback owners are injected.
 
-- [ ] **Step 3: Close KWINRT-061 accurately**
+- [x] **Step 3: Close KWINRT-061 accurately**
 
-Replace the upstream ownership diagnosis with the confirmed disconnected-fragment evidence: ordinary same-file overrides failed with two roots; one root reduced 794 override errors to zero; reconnecting Native exposed 41 duplicate actuals plus 10 target actuals; selective hierarchy isolation fixed the Compose graph. State that refreshed kotlin-winrt and Skiko MinGW artifacts compile and remain consumed normally.
+Replace the upstream ownership diagnosis with the confirmed disconnected-fragment evidence: ordinary same-file overrides failed with two roots; one root reduced 794 override errors to zero; reconnecting Native kept override errors at zero and exposed 51 duplicate actual declarations; selective hierarchy isolation fixed the Compose graph. State that refreshed kotlin-winrt and Skiko MinGW artifacts compile and remain consumed normally.
 
-- [ ] **Step 4: Update the compose-winui plan and commit**
+- [x] **Step 4: Update the compose-winui plan and commit**
 
 Mark the MinGW target/source set/backend items complete only after the compile is green, and record CMP redirection plus compiler-plugin composition. Commit with `git.exe` using `docs: close compose winui mingw isolation issue`.
 
