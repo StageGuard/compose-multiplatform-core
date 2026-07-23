@@ -53,6 +53,7 @@ internal actual fun setWindowTransparentBackdrop(
     return memScoped {
         val blurBehind = alloc<DWM_BLURBEHIND>()
         val blurRegion = if (enabled) CreateRectRgn(-2, -2, -1, -1) else null
+        if (enabled && blurRegion == null) return@memScoped false
         try {
             blurBehind.dwFlags = if (enabled) {
                 (DWM_BB_ENABLE or DWM_BB_BLURREGION).toUInt()
