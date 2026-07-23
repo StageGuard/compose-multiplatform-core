@@ -99,10 +99,9 @@ open class JetBrainsExtensions(
                     // we are not interested in intermediate (structural) projects which are not published.
                     // they have a group name with rootProjectName in it
                     !it.group.toString().contains(rootProjectName)
-                }?.artifactRedirection()?.takeIf {
-                    it.targetNames.contains(targetName)
-                }?.let {
-                    project.path to it.groupId + ":" + project.name + ":" + it.versionForTargetOrDefault(targetName)
+                }?.artifactRedirection()?.coordinatesForTarget(targetName)?.let { coordinates ->
+                    project.path to
+                        "${coordinates.groupId}:${project.name}:${coordinates.version}"
                 }
             }
         }
@@ -207,8 +206,14 @@ private fun enableArtifactRedirectionPublishing(project: Project) {
             .getByName("kotlin")
 
         CustomRootComponent(rootComponent) { configuration ->
-            val targetVersion = redirection.versionForConfigurationOrDefault(configuration.name)
-            project.dependencies.create("${redirection.groupId}:${project.name}:${targetVersion}") as org.gradle.api.artifacts.ModuleDependency
+            val coordinates = checkNotNull(
+                redirection.coordinatesForConfiguration(configuration.name)
+            ) {
+                "No artifact redirection owner for configuration ${configuration.name}"
+            }
+            project.dependencies.create(
+                "${coordinates.groupId}:${project.name}:${coordinates.version}"
+            ) as org.gradle.api.artifacts.ModuleDependency
         }
     }
 

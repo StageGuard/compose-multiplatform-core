@@ -182,10 +182,8 @@ tasks.register("printAllArtifactRedirectionVersions") {
 fun ArtifactRedirection?.prettyText(): String {
     val allLines = if (this != null) {
         arrayOf(
-            "redirectGroupId = ${this.groupId}",
-            "redirectDefaultVersion = ${this.defaultVersion}",
             "redirectForTargets = [${this.targetNames.joinToString().takeIf { it.isNotBlank() } ?: "android"}]",
-            "redirectTargetVersions = ${this.targetVersions}"
+            "redirectOwners = ${this.targetNames.associateWith { coordinatesForTarget(it) }}"
         )
     } else {
         arrayOf("disabled")

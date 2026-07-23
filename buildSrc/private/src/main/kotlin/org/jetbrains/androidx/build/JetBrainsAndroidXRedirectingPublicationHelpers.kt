@@ -212,15 +212,17 @@ internal fun Project.originalToRedirectedDependency(
             .mapNotNull { project.findProject(it) }
             .flatMap { project ->
                 val redirecting = project.artifactRedirection() ?: return@flatMap emptyList()
-                redirecting.targetNames.filter { it.isNotEmpty() }.map {
+                redirecting.targetNames.filter { it.isNotEmpty() }.mapNotNull {
                     val group = project.group.toString()
                     val name = project.name
                     val target = it
+                    val coordinates = redirecting.coordinatesForTarget(target)
+                        ?: return@mapNotNull null
                     val original = DefaultModuleIdentifier.newId(group, "$name-$target")
                     val redirected = DefaultModuleVersionIdentifier.newId(
-                        redirecting.groupId,
+                        coordinates.groupId,
                         "$name-$target",
-                        redirecting.versionForTargetOrDefault(target)
+                        coordinates.version
                     )
                     original to redirected
                 }

@@ -119,8 +119,11 @@ fun Project.configureRedirectionCapability() {
             configuration.outgoing.capability("$group:$name:$version")
 
             // Add the androidx.* capability in addition to the implicit project capability
-            val redirectedVersion = redirection.versionForConfigurationOrDefault(configuration.name)
-            configuration.outgoing.capability("${redirection.groupId}:$name:$redirectedVersion")
+            val coordinates = redirection.coordinatesForConfiguration(configuration.name)
+                ?: return@configureEach
+            configuration.outgoing.capability(
+                "${coordinates.groupId}:$name:${coordinates.version}"
+            )
         }
     }
 }
@@ -131,9 +134,8 @@ internal fun Project.publishedRedirectionCapabilities(): Set<String> {
 
     return buildSet {
         add("$group:$name:$version")
-        add("${redirection.groupId}:$name:${redirection.defaultVersion}")
-        redirection.targetVersions.values.forEach { redirectedVersion ->
-            add("${redirection.groupId}:$name:$redirectedVersion")
+        redirection.allCoordinates().forEach { coordinates ->
+            add("${coordinates.groupId}:$name:${coordinates.version}")
         }
     }
 }
