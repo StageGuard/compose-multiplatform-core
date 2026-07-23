@@ -332,7 +332,7 @@ Mark the MinGW target/source set/backend items complete only after the compile i
 **Interfaces:**
 - Verifies every success criterion from the approved design.
 
-- [ ] **Step 1: Set the validated environment**
+- [x] **Step 1: Set the validated environment**
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-25.0.3.9-hotspot'
@@ -342,7 +342,7 @@ $env:HTTP_PROXY = $null
 $env:HTTPS_PROXY = $null
 ```
 
-- [ ] **Step 2: Validate the MinGW target**
+- [x] **Step 2: Validate the MinGW target**
 
 Run:
 
@@ -358,7 +358,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 3: Validate the established JVM target**
+- [x] **Step 3: Validate the established JVM target**
 
 Run:
 
@@ -376,10 +376,26 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 4: Run the repository-local WinUI sample**
+- [x] **Step 4: Run the repository-local WinUI sample**
 
 Run `:compose:ui:ui:winui-samples:runWinUISkikoSample` with the same JVM property and flags. Expected: the application launches, renders the established Skiko/Compose smoke path, and exits through its normal completion marker.
 
-- [ ] **Step 5: Review the final diff and commit any verification-only tracked updates**
+**Validation result (2026-07-24):**
+
+- `compileKotlinWinuiMingw --rerun-tasks`: 79 tasks executed, BUILD SUCCESSFUL.
+- `compileKotlinWinuiJvm winuiJvmTest --rerun-tasks`: 97 tasks executed;
+  342 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESSFUL.
+- `runWinUISkikoSample --rerun-tasks`: 102 tasks executed; the validation log
+  records application start, Skiko WinUI runtime isolation, deferred
+  unattached scheduling, and attached Direct3D render diagnostics.
+- JVM and MinGW decorated publication metadata both redirect
+  `metadataApiElements` and configured non-WinUI variants to CMP `1.10.0`,
+  retain AndroidX ownership for Android, keep the WinUI target JAR/KLIB local,
+  and do not compile redirected Web/Apple metadata.
+- Fresh normal and WinUI realized-graph assertions pass; the WinUI Native
+  compile has one fragment root and both Compose and kotlin-winrt compiler
+  plugins.
+
+- [x] **Step 5: Review the final diff and commit any verification-only tracked updates**
 
 Use `git.exe status --short`, `git.exe diff --check`, and focused `git.exe diff` review. Confirm no untracked local notes or `.agent_tmp` artifacts are staged. If documentation/test expectation adjustments were required by final evidence, commit them with a narrow message; otherwise leave the verified implementation commits unchanged.
