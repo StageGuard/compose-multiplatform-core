@@ -301,6 +301,64 @@ class WinUISourceSetIsolationTest {
         }
     }
 
+    @Test
+    fun winuiMingwKeepsDefaultNativeHierarchyWithoutNativeSkikoAncestry() {
+        val repositoryRoot = findRepositoryRoot()
+        val sourceSetBuildScripts = listOf(
+            "compose/ui/ui/build.gradle",
+            "compose/ui/ui-graphics/build.gradle",
+            "compose/ui/ui-text/build.gradle",
+            "compose/foundation/foundation/build.gradle",
+            "compose/foundation/foundation-layout/build.gradle",
+        )
+
+        sourceSetBuildScripts.forEach { relativePath ->
+            val buildScript = repositoryRoot.resolve(relativePath).readText()
+            val nonJvmMainBlock = checkNotNull(sourceSetBlock(buildScript, "nonJvmMain")) {
+                "Could not find nonJvmMain in $relativePath."
+            }
+            assertTrue(
+                nonJvmMainBlock.contains("if (!composeWinUiTargetEnabled)") &&
+                    nonJvmMainBlock.contains("dependsOn(skikoMain)"),
+                "$relativePath must keep nonJvmMain -> skikoMain only outside WinUI mode.",
+            )
+        }
+
+        val uiBuildScript = repositoryRoot.resolve("compose/ui/ui/build.gradle").readText()
+        assertFalse(
+            uiBuildScript.contains("detachWinUiMingwFromDefaultNativeHierarchy"),
+            "WinUI MinGW must keep Kotlin's connected default Native hierarchy.",
+        )
+        val winuiMingwMainBlock = checkNotNull(
+            sourceSetBlock(uiBuildScript, "winuiMingwMain"),
+        )
+        assertTrue(
+            winuiMingwMainBlock.contains("dependsOn(winuiMain)"),
+            "winuiMingwMain must add WinUI behavior to the default Native hierarchy.",
+        )
+        assertFalse(
+            winuiMingwMainBlock.contains("dependsOn(commonMain)") ||
+                winuiMingwMainBlock.contains("dependsOn(nativeMain)"),
+            "winuiMingwMain should receive common/native ancestry from the hierarchy template.",
+        )
+    }
+
+    @Test
+    fun nativeComposeCompilerPluginClasspathIsAdditive() {
+        val pluginSource = findRepositoryRoot().resolve(
+            "buildSrc/private/src/main/kotlin/androidx/build/AndroidXComposeImplPlugin.kt"
+        ).readText()
+
+        assertTrue(
+            pluginSource.contains("compilerPluginClasspath?.plus(plugins) ?: plugins"),
+            "Compose must append its plugin to an existing Kotlin/Native plugin classpath.",
+        )
+        assertFalse(
+            pluginSource.contains("compilerPluginClasspath = plugins"),
+            "Compose must not replace kotlin-winrt or other Kotlin/Native compiler plugins.",
+        )
+    }
+
     private fun kotlinFiles(root: Path): List<Path> {
         if (!root.exists()) return emptyList()
         Files.walk(root).use { paths ->
@@ -320,6 +378,19 @@ class WinUISourceSetIsolationTest {
             if (fromRepoRoot.exists()) return candidate.resolve("compose/ui/ui")
         }
         error("Could not find compose/ui/ui module root from $start.")
+    }
+
+    private fun findRepositoryRoot(): Path {
+        val start = Paths.get("").toAbsolutePath()
+        generateSequence(start) { it.parent }.forEach { candidate ->
+            if (
+                candidate.resolve("buildSrc").exists() &&
+                candidate.resolve("compose/ui/ui/build.gradle").exists()
+            ) {
+                return candidate
+            }
+        }
+        error("Could not find repository root from $start.")
     }
 
     private fun sourceSetBlock(buildScript: String, sourceSet: String): String? {

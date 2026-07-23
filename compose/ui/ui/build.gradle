@@ -76,17 +76,6 @@ def composeWinUiSkikoVersion = providers
         .gradleProperty("composeWinUi.skikoVersion")
         .orElse(composeWinUiSkikoWinUiVersion)
 
-def detachWinUiMingwFromDefaultNativeHierarchy = { sourceSet ->
-    sourceSet.dependsOn.removeAll { parent ->
-        parent.name in [
-                "nonJvmMain",
-                "nonJvmTest",
-                "nativeMain",
-                "nativeTest",
-        ]
-    }
-}
-
 if (composeWinUiTargetEnabled && !composeWinUiGradlePluginRuntimeAvailable) {
     throw new GradleException("compose-winui targets require running Gradle on JDK 22 or newer.")
 }
@@ -483,7 +472,9 @@ androidXMultiplatform {
         }
 
         nonJvmMain {
-            dependsOn(skikoMain)
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoMain)
+            }
             dependencies {
                 // To comply with Klib resolver until https://youtrack.jetbrains.com/issue/KT-61096 is fixed
                 implementation("org.jetbrains.compose.annotation-internal:annotation:1.10.0")
@@ -578,16 +569,7 @@ kotlin {
             }
 
             if (composeWinUiMingwTargetEnabled) {
-                mingwMain {
-                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
-                    dependsOn(commonMain)
-                }
-                mingwTest {
-                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
-                    dependsOn(commonTest)
-                }
                 winuiMingwMain {
-                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
                     dependsOn(winuiMain)
                 }
             }
@@ -600,7 +582,6 @@ kotlin {
 
             if (composeWinUiMingwTargetEnabled) {
                 winuiMingwTest {
-                    detachWinUiMingwFromDefaultNativeHierarchy(delegate)
                     dependsOn(winuiTest)
                 }
             }
