@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,11 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text.contextmenu.internal
+package androidx.compose.animation.core
 
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
+import kotlin.native.concurrent.ThreadLocal
 
-@Composable
-internal actual fun ProvideDefaultPlatformTextContextMenuProviders(
-    modifier: Modifier,
-    content: @Composable () -> Unit
-) {
-    // TODO: https://youtrack.jetbrains.com/issue/CMP-7819
-}
+@ThreadLocal
+private var currentThreadToken: Any = Any()
+
+internal actual fun getCurrentThread(): Any = currentThreadToken

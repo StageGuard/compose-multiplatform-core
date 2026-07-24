@@ -16,12 +16,7 @@
 
 package androidx.compose.foundation.text
 
-import androidx.compose.foundation.InternalFoundationApi
-import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.utf16CodePoint
-
-internal expect fun Char.isWinUIPrintable(): Boolean
-
-@InternalFoundationApi
-actual val KeyEvent.isTypedEvent: Boolean
-    get() = utf16CodePoint.toChar().isWinUIPrintable()
+internal actual fun Char.isWinUIPrintable(): Boolean =
+    code !in 0x0000..0x001F &&
+        code !in 0x007F..0x009F &&
+        code !in 0xFFF0..0xFFFF

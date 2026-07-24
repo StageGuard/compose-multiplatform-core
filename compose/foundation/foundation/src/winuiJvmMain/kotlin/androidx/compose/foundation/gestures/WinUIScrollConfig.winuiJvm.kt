@@ -14,14 +14,7 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text
+package androidx.compose.foundation.gestures
 
-import androidx.compose.foundation.InternalFoundationApi
-import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.utf16CodePoint
-
-internal expect fun Char.isWinUIPrintable(): Boolean
-
-@InternalFoundationApi
-actual val KeyEvent.isTypedEvent: Boolean
-    get() = utf16CodePoint.toChar().isWinUIPrintable()
+internal actual fun isWinUISmoothScrollingEnabled(): Boolean =
+    System.getProperty("compose.scrolling.smooth.enabled") != "false"

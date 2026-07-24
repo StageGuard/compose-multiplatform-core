@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,9 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package androidx.compose.foundation.text
 
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+package androidx.compose.foundation.gestures
 
-internal actual val DefaultCursorThickness: Dp = 2.dp
+import kotlinx.cinterop.toKString
+import platform.posix.getenv
+
+internal actual fun isWinUISmoothScrollingEnabled(): Boolean =
+    getenv("COMPOSE_SCROLLING_SMOOTH_ENABLED")?.toKString() != "false"

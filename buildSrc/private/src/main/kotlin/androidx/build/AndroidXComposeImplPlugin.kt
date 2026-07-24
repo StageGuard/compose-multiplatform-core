@@ -42,6 +42,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinNativeCompile
 /** Plugin to apply common configuration for Compose projects. */
 class AndroidXComposeImplPlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        configureComposeWinUiSkikoDependencySubstitution(project)
         project.plugins.configureEach { plugin ->
             when (plugin) {
                 is AppPlugin,
@@ -69,6 +70,33 @@ class AndroidXComposeImplPlugin : Plugin<Project> {
                 "-opt-in=kotlinx.cinterop.ExperimentalForeignApi",
                 "-opt-in=kotlin.experimental.ExperimentalNativeApi"
             )
+        }
+    }
+
+    private fun configureComposeWinUiSkikoDependencySubstitution(project: Project) {
+        val composeWinUiJvmTargetEnabled = project.providers
+            .gradleProperty("composeWinUi.enableJvmTarget")
+            .map(String::toBoolean)
+            .orNull ?: false
+        val composeWinUiMingwTargetEnabled = project.providers
+            .gradleProperty("composeWinUi.enableMingwTarget")
+            .map(String::toBoolean)
+            .orNull ?: false
+        val composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
+        if (!composeWinUiTargetEnabled) return
+
+        val skikoWinUiVersion = project.providers
+            .gradleProperty("composeWinUi.skikoWinUiVersion")
+            .orElse("0.0.0-SNAPSHOT")
+            .get()
+        project.configurations.configureEach { configuration ->
+            if (configuration.name.contains("winui", ignoreCase = true)) {
+                configuration.resolutionStrategy.dependencySubstitution { substitution ->
+                    substitution.substitute(substitution.module("org.jetbrains.skiko:skiko"))
+                        .using(substitution.module("io.github.compose-fluent:skiko-winui:$skikoWinUiVersion"))
+                        .because("compose-winui uses skiko-winui as the WinUI replacement for regular Skiko.")
+                }
+            }
         }
     }
 

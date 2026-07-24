@@ -158,6 +158,14 @@ androidXMultiplatform {
             }
         }
 
+        skikoNonJvmMain {
+            dependsOn(skikoMain)
+        }
+
+        skikoNativeMain {
+            dependsOn(skikoMain)
+        }
+
         desktopMain {
             dependsOn(skikoMain)
             dependencies {
@@ -181,7 +189,9 @@ androidXMultiplatform {
         }
 
         nonJvmMain {
-            dependsOn(skikoMain)
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoNonJvmMain)
+            }
         }
 
         nonJvmTest {
@@ -190,6 +200,9 @@ androidXMultiplatform {
 
         nativeMain {
             dependsOn(nonJvmMain)
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoNativeMain)
+            }
         }
 
         nativeTest {
@@ -249,8 +262,25 @@ kotlin {
         }
 
         sourceSets {
+            winuiSkikoMain {
+                dependsOn(commonMain)
+                kotlin.srcDir("src/skikoMain/kotlin")
+                kotlin.exclude(
+                    "**/BasicContextMenuRepresentation.skiko.kt",
+                    "**/DefaultTextContextMenuDropdownProvider.skiko.kt",
+                )
+                dependencies {
+                    api(libs.skiko)
+                    implementation(libs.atomicFu)
+                }
+            }
+
+            nonJvmMain {
+                dependsOn(winuiSkikoMain)
+            }
+
             winuiMain {
-                dependsOn(skikoMain)
+                dependsOn(winuiSkikoMain)
                 dependencies {
                     implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
                 }
@@ -307,8 +337,6 @@ if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
 
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
     if (task.name.contains("Winui")) {
-        task.exclude("**/BasicContextMenuRepresentation.skiko.kt")
-        task.exclude("**/DefaultTextContextMenuDropdownProvider.skiko.kt")
         task.compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
             freeCompilerArgs.add("-Xjdk-release=25")

@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 The Android Open Source Project
+ * Copyright 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,15 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package androidx.compose.foundation.text
 
-import androidx.compose.foundation.InternalFoundationApi
-import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
-internal expect fun Char.isWinUIPrintable(): Boolean
-
-@InternalFoundationApi
-actual val KeyEvent.isTypedEvent: Boolean
-    get() = utf16CodePoint.toChar().isWinUIPrintable()
+internal actual val DefaultCursorThickness: Dp = 2.dp

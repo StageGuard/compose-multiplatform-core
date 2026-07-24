@@ -344,6 +344,83 @@ class WinUISourceSetIsolationTest {
     }
 
     @Test
+    fun winuiMingwDependencyModulesExposeNativeVariantsWithoutSkikoSources() {
+        val repositoryRoot = findRepositoryRoot()
+        val animationCoreBuild = repositoryRoot.resolve("compose/animation/animation-core/build.gradle")
+        val animationBuild = repositoryRoot.resolve("compose/animation/animation/build.gradle")
+        val foundationBuild = repositoryRoot.resolve("compose/foundation/foundation/build.gradle")
+
+        mapOf(
+            animationCoreBuild to "jbMain",
+            animationBuild to "nonAndroidMain",
+        ).forEach { (buildScript, platformNeutralSourceSet) ->
+            val source = buildScript.readText()
+            assertTrue(
+                source.contains("composeWinUiMingwTargetEnabled") &&
+                    source.contains("mingwX64(\"winuiMingw\")"),
+                "${repositoryRoot.relativize(buildScript)} must define the WinUI MinGW target.",
+            )
+            val nonJvmMain = checkNotNull(sourceSetBlock(source, "nonJvmMain"))
+            val nativeMain = checkNotNull(sourceSetBlock(source, "nativeMain"))
+            assertTrue(
+                nonJvmMain.contains("dependsOn($platformNeutralSourceSet)") &&
+                    nativeMain.contains("dependsOn(nonJvmMain)"),
+                "${repositoryRoot.relativize(buildScript)} must expose its platform-neutral " +
+                    "source set through the default Native hierarchy.",
+            )
+        }
+
+        val foundationSource = foundationBuild.readText()
+        val foundationNonJvmMain = checkNotNull(sourceSetBlock(foundationSource, "nonJvmMain"))
+        val foundationNativeMain = checkNotNull(sourceSetBlock(foundationSource, "nativeMain"))
+        val foundationWinuiMain = checkNotNull(sourceSetBlock(foundationSource, "winuiMain"))
+        assertTrue(
+            foundationNonJvmMain.contains("if (!composeWinUiTargetEnabled)") &&
+                foundationNonJvmMain.contains("dependsOn(skikoNonJvmMain)"),
+            "Foundation nonJvmMain must keep Skiko ancestry out of WinUI mode.",
+        )
+        assertTrue(
+            foundationNativeMain.contains("if (!composeWinUiTargetEnabled)") &&
+                foundationNativeMain.contains("dependsOn(skikoNativeMain)"),
+            "Foundation nativeMain must keep generic Native actuals out of WinUI mode.",
+        )
+        assertFalse(
+            foundationWinuiMain.contains("dependsOn(skikoMain)"),
+            "Foundation winuiMain must not import conflicting skikoMain sources.",
+        )
+
+        val foundationRoot = repositoryRoot.resolve("compose/foundation/foundation")
+        listOf(
+            "androidx/compose/foundation/text/NativeCursorHandle.native.kt",
+            "androidx/compose/foundation/text/KeyEventHelpers.native.kt",
+            "androidx/compose/foundation/text/TextFieldCursor.native.kt",
+            "androidx/compose/foundation/text/contextmenu/internal/" +
+                "ProvideDefaultPlatformTextContextMenuProviders.native.kt",
+        ).forEach { relativePath ->
+            assertFalse(foundationRoot.resolve("src/nativeMain/kotlin/$relativePath").exists())
+            assertTrue(foundationRoot.resolve("src/skikoNativeMain/kotlin/$relativePath").exists())
+        }
+        listOf(
+            "androidx/compose/foundation/lazy/layout/Lazy.winui.kt",
+            "androidx/compose/foundation/v2/Actuals.winui.kt",
+        ).forEach { relativePath ->
+            assertFalse(foundationRoot.resolve("src/winuiMain/kotlin/$relativePath").exists())
+            assertTrue(foundationRoot.resolve("src/winuiJvmMain/kotlin/$relativePath").exists())
+        }
+        val sharedSelectionManager = foundationRoot.resolve(
+            "src/winuiMain/kotlin/androidx/compose/foundation/text/selection/" +
+                "TextFieldSelectionManager.winui.kt"
+        ).readText()
+        assertFalse(sharedSelectionManager.contains("hasAvailableTextToPaste"))
+        assertTrue(
+            foundationRoot.resolve(
+                "src/winuiJvmMain/kotlin/androidx/compose/foundation/text/selection/" +
+                    "TextFieldSelectionManager.winuiJvm.kt"
+            ).exists()
+        )
+    }
+
+    @Test
     fun nativeComposeCompilerPluginClasspathIsAdditive() {
         val pluginSource = findRepositoryRoot().resolve(
             "buildSrc/private/src/main/kotlin/androidx/build/AndroidXComposeImplPlugin.kt"

@@ -14,14 +14,10 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text
+package androidx.compose.foundation.text.selection
 
-import androidx.compose.foundation.InternalFoundationApi
-import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.foundation.internal.hasText
 
-internal expect fun Char.isWinUIPrintable(): Boolean
-
-@InternalFoundationApi
-actual val KeyEvent.isTypedEvent: Boolean
-    get() = utf16CodePoint.toChar().isWinUIPrintable()
+internal actual suspend fun TextFieldSelectionManager.hasAvailableTextToPaste(): Boolean {
+    return clipboard?.getClipEntry()?.hasText() == true
+}

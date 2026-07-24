@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 The Android Open Source Project
+ * Copyright 2025 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text
+package androidx.compose.foundation.text.contextmenu.internal
 
-import androidx.compose.foundation.InternalFoundationApi
-import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 
-internal expect fun Char.isWinUIPrintable(): Boolean
-
-@InternalFoundationApi
-actual val KeyEvent.isTypedEvent: Boolean
-    get() = utf16CodePoint.toChar().isWinUIPrintable()
+@Composable
+internal actual fun ProvideDefaultPlatformTextContextMenuProviders(
+    modifier: Modifier,
+    content: @Composable () -> Unit
+) {
+    // TODO: https://youtrack.jetbrains.com/issue/CMP-7819
+}

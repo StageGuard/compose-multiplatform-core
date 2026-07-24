@@ -18,6 +18,7 @@ import io.github.composefluent.winrt.gradle.BuildWinRTApplicationHostTask
 import io.github.composefluent.winrt.gradle.GenerateWinRTProjectionsTask
 import io.github.composefluent.winrt.gradle.RunWinRTApplicationHostTask
 import io.github.composefluent.winrt.gradle.registerWinRTApplicationHostRunTask
+import org.gradle.api.tasks.Sync
 import java.util.zip.ZipFile
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -52,6 +53,8 @@ val navigationEventVersion = providers
 val composeVersion = providers
     .gradleProperty("artifactRedirection.version.androidx.compose")
     .orElse("1.12.0-alpha02")
+val materialIconsCoreSources = configurations.create("materialIconsCoreSources")
+materialIconsCoreSources.isTransitive = false
 
 val localWinUiJarProjects = listOf(
     ":compose:ui:ui",
@@ -183,12 +186,26 @@ val stageWinUIMppSampleResources = tasks.register<Copy>("stageWinUIMppSampleReso
     into(winUiMppSampleResourcesDir)
 }
 
+dependencies {
+    add(materialIconsCoreSources.name, "org.jetbrains.compose.material:material-icons-core:1.7.3:sources")
+}
+
+val extractWinUIMaterialIconsSources = tasks.register<Sync>("extractWinUIMaterialIconsSources") {
+    from(materialIconsCoreSources.map { files(it).map(::zipTree) })
+    include("commonMain/**/*.kt")
+    eachFile { path = path.removePrefix("commonMain/") }
+    into(layout.buildDirectory.dir("generated/winui-material-icons"))
+}
+
 kotlin {
     jvmToolchain(25)
     jvm("winuiJvm")
+    mingwX64("winuiMingw") {
+        binaries.executable()
+    }
 
     sourceSets {
-        commonMain {
+        val commonMain by getting {
             kotlin.srcDir("src/commonMain/kotlin")
             kotlin.srcDir("../demo/src/commonMain/kotlin")
             kotlin.exclude("androidx/compose/mpp/demo/components/dialog/DialogExample.kt")
@@ -228,23 +245,40 @@ kotlin {
                 implementation(project(":navigation:navigation-common"))
                 implementation(project(":navigation:navigation-compose"))
                 implementation(project(":navigation:navigation-runtime"))
-                implementation("org.jetbrains.compose.material:material-icons-core:1.7.3") {
-                    exclude(group = "org.jetbrains.compose.runtime")
-                    exclude(group = "org.jetbrains.compose.ui")
-                }
                 implementation("androidx.savedstate:savedstate-compose:1.4.0")
                 implementation("androidx.navigationevent:navigationevent-compose:${navigationEventVersion.get()}")
                 implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
             }
         }
 
-        named("winuiJvmMain") {
+        val winuiMain by getting {
+            kotlin.srcDir("../demo/src/winuiMain/kotlin")
+            kotlin.srcDir(extractWinUIMaterialIconsSources)
+        }
+
+        val winuiJvmMain by getting {
+            dependsOn(winuiMain)
             kotlin.srcDir("../demo/src/winuiJvmMain/kotlin")
             resources.srcDir("../demo/src/desktopMain/resources")
             resources.srcDir(stageWinUIMppSampleResources.map { it.destinationDir })
             dependencies {
                 runtimeOnly("io.github.compose-fluent:skiko-winui-windows:${composeWinUiSkikoWinUiVersion.get()}")
             }
+        }
+
+        val winuiMingwMain by getting {
+            dependsOn(winuiMain)
+            kotlin.srcDir("../demo/src/winuiMingwMain/kotlin")
+        }
+    }
+}
+
+configurations.configureEach {
+    if (name.contains("winui", ignoreCase = true)) {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("org.jetbrains.skiko:skiko"))
+                .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
+                .because("The WinUI sample uses the Skiko WinUI variants on JVM and MinGW.")
         }
     }
 }
