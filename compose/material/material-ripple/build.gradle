@@ -36,13 +36,19 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.compose.material.ripple"
         compileSdk = 35
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -112,16 +118,23 @@ androidXMultiplatform {
 
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
-            winuiJvmMain {
-                dependsOn(nonAndroidMain)
-            }
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(nonAndroidMain)
+                }
 
-            winuiJvmTest {
-                dependsOn(nonAndroidTest)
+                winuiJvmTest {
+                    dependsOn(nonAndroidTest)
+                }
             }
         }
     }

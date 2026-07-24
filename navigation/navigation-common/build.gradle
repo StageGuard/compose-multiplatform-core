@@ -34,6 +34,12 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.navigation.common"
@@ -52,6 +58,9 @@ androidXMultiplatform {
     watchos()
     tvos()
     ios()
+    if (composeWinUiMingwTargetEnabled) {
+        mingwX64()
+    }
     js()
     wasmJs()
 
@@ -64,11 +73,19 @@ androidXMultiplatform {
 
         commonMain.dependencies {
             api("androidx.annotation:annotation:1.9.1")
-            api("androidx.lifecycle:lifecycle-common:2.11.0-beta01")
-            api("androidx.lifecycle:lifecycle-runtime:2.11.0-beta01")
-            api("androidx.lifecycle:lifecycle-viewmodel:2.11.0-beta01")
-            api("androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0-beta01")
-            api("androidx.savedstate:savedstate:1.5.0")
+            if (composeWinUiMingwTargetEnabled) {
+                api(project(":lifecycle:lifecycle-common"))
+                api(project(":lifecycle:lifecycle-runtime"))
+                api(project(":lifecycle:lifecycle-viewmodel"))
+                api(project(":lifecycle:lifecycle-viewmodel-savedstate"))
+                api(project(":savedstate:savedstate"))
+            } else {
+                api("androidx.lifecycle:lifecycle-common:2.11.0-beta01")
+                api("androidx.lifecycle:lifecycle-runtime:2.11.0-beta01")
+                api("androidx.lifecycle:lifecycle-viewmodel:2.11.0-beta01")
+                api("androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0-beta01")
+                api("androidx.savedstate:savedstate:1.5.0")
+            }
             implementation("androidx.collection:collection:1.5.0")
             implementation(libs.kotlinSerializationCore)
         }
@@ -112,6 +129,9 @@ androidXMultiplatform {
         create("nonAndroidMain").dependsOn(commonMain)
         desktopMain.dependsOn(nonAndroidMain)
         nativeMain.dependsOn(nonAndroidMain)
+        create("posixMain").dependsOn(nativeMain)
+        appleMain.dependsOn(posixMain)
+        linuxMain.dependsOn(posixMain)
         webMain.dependsOn(nonAndroidMain)
 
         create("nonAndroidTest").dependsOn(commonTest)

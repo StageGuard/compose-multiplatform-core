@@ -38,6 +38,12 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 androidXMultiplatform {
     androidLibrary {
@@ -45,7 +51,7 @@ androidXMultiplatform {
         namespace = "androidx.compose.material"
         androidResources.enable = true
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -125,6 +131,10 @@ androidXMultiplatform {
             dependsOn(commonTest)
         }
 
+        skikoNonJvmMain {
+            dependsOn(skikoMain)
+        }
+
         desktopMain {
             dependsOn(skikoMain)
         }
@@ -140,7 +150,9 @@ androidXMultiplatform {
         }
 
         nonJvmMain {
-            dependsOn(skikoMain)
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoNonJvmMain)
+            }
         }
 
         nonJvmTest {
@@ -166,16 +178,45 @@ androidXMultiplatform {
 
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
-            winuiJvmMain {
-                dependsOn(skikoMain)
+            winuiSkikoMain {
+                dependsOn(commonMain)
+                kotlin.srcDir("src/skikoMain/kotlin")
+                dependencies {
+                    implementation(libs.atomicFu)
+                }
             }
 
-            winuiJvmTest {
-                dependsOn(skikoTest)
+            nonJvmMain {
+                dependsOn(winuiSkikoMain)
+            }
+
+            winuiMain {
+                dependsOn(winuiSkikoMain)
+            }
+
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                }
+
+                winuiJvmTest {
+                    dependsOn(skikoTest)
+                }
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                }
             }
         }
     }

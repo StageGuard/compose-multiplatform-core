@@ -37,14 +37,23 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
+def composeWinUiWindowCoreCoordinates = composeWinUiMingwTargetEnabled
+        ? "androidx.window:window-core:1.5.0"
+        : "org.jetbrains.androidx.window:window-core:1.5.0"
 androidXMultiplatform {
     androidLibrary {
         compileSdk = 35
         namespace = "androidx.compose.material3.adaptive.layout"
         androidResources.enable = true
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -64,7 +73,7 @@ androidXMultiplatform {
             implementation(project(":compose:foundation:foundation"))
             implementation(project(":compose:foundation:foundation-layout"))
             implementation(project(":compose:ui:ui-geometry"))
-            implementation("org.jetbrains.androidx.window:window-core:1.5.0")
+            implementation(composeWinUiWindowCoreCoordinates)
         }
 
         commonTest.dependencies {
@@ -125,8 +134,14 @@ androidXMultiplatform {
             dependsOn(skikoTest)
         }
 
-        nativeMain {
+        skikoNativeMain {
             dependsOn(skikoMain)
+        }
+
+        nativeMain {
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoNativeMain)
+            }
         }
 
         nativeTest {
@@ -147,16 +162,42 @@ androidXMultiplatform {
 
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
-            winuiJvmMain {
-                dependsOn(skikoMain)
+            winuiSkikoMain {
+                dependsOn(commonMain)
+                kotlin.srcDir("src/skikoMain/kotlin")
             }
 
-            winuiJvmTest {
-                dependsOn(skikoTest)
+            nativeMain {
+                dependsOn(winuiSkikoMain)
+            }
+
+            winuiMain {
+                dependsOn(winuiSkikoMain)
+            }
+
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                }
+
+                winuiJvmTest {
+                    dependsOn(skikoTest)
+                }
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                }
             }
         }
     }

@@ -41,6 +41,12 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 def composeWinUiSkikoWinUiVersion = providers
         .gradleProperty("composeWinUi.skikoWinUiVersion")
@@ -49,7 +55,7 @@ def composeWinUiWindowsSdkVersion = providers
         .gradleProperty("composeWinUi.windowsSdkVersion")
         .orElse("10.0.26100.0")
 
-if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
     apply plugin: "io.github.compose-fluent.winrt"
 
     winRT {
@@ -68,7 +74,7 @@ androidXMultiplatform {
         namespace = "androidx.compose.material3"
         androidResources.enable = true
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -158,6 +164,10 @@ androidXMultiplatform {
             }
         }
 
+        skikoNonJvmMain {
+            dependsOn(skikoMain)
+        }
+
         desktopMain {
             dependsOn(skikoMain)
         }
@@ -173,7 +183,9 @@ androidXMultiplatform {
         }
 
         nonJvmMain {
-            dependsOn(skikoMain)
+            if (!composeWinUiTargetEnabled) {
+                dependsOn(skikoNonJvmMain)
+            }
             dependencies {
                 implementation(libs.atomicFu)
             }
@@ -225,29 +237,60 @@ androidXMultiplatform {
 
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
+            winuiSkikoMain {
+                dependsOn(commonMain)
+                kotlin.srcDir("src/skikoMain/kotlin")
+                kotlin.exclude("**/PrecisionPointer.skiko.kt")
+                kotlin.exclude("**/ModalBottomSheet.skiko.kt")
+                kotlin.exclude("**/WideNavigationRail.skiko.kt")
+                kotlin.exclude("**/BasicEdgeToEdgeDialog.skiko.kt")
+                dependencies {
+                    implementation(libs.datetime)
+                    implementation(libs.atomicFu)
+                    implementation(project(":compose:ui:ui-backhandler"))
+                }
+            }
+
+            nonJvmMain {
+                dependsOn(winuiSkikoMain)
+            }
+
             winuiMain {
-                dependsOn(skikoMain)
+                dependsOn(winuiSkikoMain)
                 dependencies {
                     implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
                 }
             }
 
-            winuiJvmMain {
-                dependsOn(winuiMain)
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                }
+
+                winuiJvmTest {
+                    // The default JVM hierarchy also routes through jvmAndAndroidTest, which reaches
+                    // commonTest and its :compose:ui:ui-test dependency.
+                    dependsOn.removeAll { parent ->
+                        parent.name == "commonTest" || parent.name == "jvmAndAndroidTest"
+                    }
+                    dependencies {
+                        implementation(kotlin("test"))
+                    }
+                }
             }
 
-            winuiJvmTest {
-                // The default JVM hierarchy also routes through jvmAndAndroidTest, which reaches
-                // commonTest and its :compose:ui:ui-test dependency.
-                dependsOn.removeAll { parent ->
-                    parent.name == "commonTest" || parent.name == "jvmAndAndroidTest"
-                }
-                dependencies {
-                    implementation(kotlin("test"))
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
                 }
             }
         }

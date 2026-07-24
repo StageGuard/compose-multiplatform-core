@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-// TODO This should not be part of material, but we cannot change it in fork.
-//  This is a part of bigger task - we need to remove all Popup/Dialog copies from material
-//  See https://youtrack.jetbrains.com/issue/CMP-7224
-
 @Composable
 internal actual fun BasicEdgeToEdgeDialog(
     onDismissRequest: () -> Unit,
@@ -33,7 +29,7 @@ internal actual fun BasicEdgeToEdgeDialog(
     properties: DialogProperties,
     lightStatusBars: Boolean,
     lightNavigationBars: Boolean,
-    content: @Composable (PredictiveBackState) -> Unit
+    content: @Composable (PredictiveBackState) -> Unit,
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,

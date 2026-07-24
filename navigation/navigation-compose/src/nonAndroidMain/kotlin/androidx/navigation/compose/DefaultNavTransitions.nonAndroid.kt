@@ -23,6 +23,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.navigation.NavBackStackEntry
+import kotlin.jvm.JvmName
 
 public actual object DefaultNavTransitions {
     public actual val enterTransition:
@@ -40,7 +41,6 @@ public actual object DefaultNavTransitions {
     public actual val predictivePopExitTransition:
         AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> ExitTransition =
         { ExitTransition.None }
-
 
     public actual val sizeTransform:
         (AnimatedContentTransitionScope<NavBackStackEntry>.() -> SizeTransform?)? =

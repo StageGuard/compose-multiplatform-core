@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@
 
 package androidx.compose.material3
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
@@ -57,9 +55,9 @@ actual object ModalBottomSheetDefaults {
 @Composable
 internal actual fun ModalBottomSheetDialog(
     onDismissRequest: () -> Unit,
-    contentColor: Color, // TODO: https://youtrack.jetbrains.com/issue/CMP-7147
+    contentColor: Color,
     properties: ModalBottomSheetProperties,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -68,6 +66,6 @@ internal actual fun ModalBottomSheetDialog(
             dismissOnClickOutside = properties.shouldDismissOnClickOutside,
             usePlatformDefaultWidth = false,
         ),
-        content = content
+        content = content,
     )
 }

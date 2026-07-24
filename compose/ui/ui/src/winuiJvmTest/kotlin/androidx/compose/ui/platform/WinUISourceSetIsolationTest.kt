@@ -349,6 +349,30 @@ class WinUISourceSetIsolationTest {
         val animationCoreBuild = repositoryRoot.resolve("compose/animation/animation-core/build.gradle")
         val animationBuild = repositoryRoot.resolve("compose/animation/animation/build.gradle")
         val foundationBuild = repositoryRoot.resolve("compose/foundation/foundation/build.gradle")
+        val settingsGradle = repositoryRoot.resolve("settings.gradle").readText()
+
+        assertTrue(settingsGradle.contains("composeWinUi.enableMingwTarget"))
+        mapOf(
+            ":navigation:navigation-common" to
+                "navigation/navigation-common-compatibility-stub",
+            ":navigation:navigation-runtime" to
+                "navigation/navigation-runtime-compatibility-stub",
+        ).forEach { (projectPath, compatibilityStub) ->
+            val conditionalMapping = Regex(
+                """includeProject\(\s*"$projectPath",\s*""" +
+                    """composeWinUiMingwTargetEnabled \? null :\s*""" +
+                    """"$compatibilityStub"\s*\)""",
+            )
+            val projectDeclarations = Regex(
+                """includeProject\(\s*"$projectPath"""",
+            ).findAll(settingsGradle).count()
+            assertTrue(
+                conditionalMapping.containsMatchIn(settingsGradle) &&
+                    projectDeclarations == 1,
+                "settings.gradle must declare $projectPath once and use its real source " +
+                    "directory instead of $compatibilityStub when WinUI MinGW is enabled.",
+            )
+        }
 
         mapOf(
             animationCoreBuild to "jbMain",
@@ -367,6 +391,198 @@ class WinUISourceSetIsolationTest {
                     nativeMain.contains("dependsOn(nonJvmMain)"),
                 "${repositoryRoot.relativize(buildScript)} must expose its platform-neutral " +
                     "source set through the default Native hierarchy.",
+            )
+        }
+
+        val remainingNativeVariantBuilds = listOf(
+            "compose/material/material/build.gradle",
+            "compose/material/material-ripple/build.gradle",
+            "compose/material3/material3/build.gradle",
+            "compose/material3/material3-window-size-class/build.gradle",
+            "compose/material3/adaptive/adaptive/build.gradle",
+            "compose/material3/adaptive/adaptive-layout/build.gradle",
+            "compose/material3/adaptive/adaptive-navigation/build.gradle",
+            "navigation/navigation-common/build.gradle",
+            "navigation/navigation-compose/build.gradle",
+            "navigation/navigation-runtime/build.gradle",
+        )
+        remainingNativeVariantBuilds.forEach { relativePath ->
+            val source = repositoryRoot.resolve(relativePath).readText()
+            val isPlainMingwTarget =
+                relativePath == "navigation/navigation-common/build.gradle" ||
+                relativePath == "navigation/navigation-runtime/build.gradle"
+            val targetDeclaration = if (isPlainMingwTarget) {
+                "mingwX64()"
+            } else {
+                "mingwX64(\"winuiMingw\")"
+            }
+            assertTrue(
+                source.contains("composeWinUiMingwTargetEnabled") &&
+                    source.contains(targetDeclaration),
+                "$relativePath must define the WinUI MinGW target.",
+            )
+        }
+
+        val navigationCommonSource = repositoryRoot
+            .resolve("navigation/navigation-common/build.gradle")
+            .readText()
+        val navigationCommonDependencies = navigationCommonSource
+            .substringAfter("commonMain.dependencies {")
+            .substringBefore("commonTest.dependencies {")
+        listOf(
+            ":lifecycle:lifecycle-common",
+            ":lifecycle:lifecycle-runtime",
+            ":lifecycle:lifecycle-viewmodel",
+            ":lifecycle:lifecycle-viewmodel-savedstate",
+            ":savedstate:savedstate",
+        ).forEach { projectPath ->
+            assertTrue(
+                navigationCommonDependencies.contains("api(project(\"$projectPath\"))"),
+                "navigation-common must use $projectPath for WinUI MinGW so Gradle selects " +
+                    "the CMP-backed Native variant.",
+            )
+        }
+        assertTrue(
+            navigationCommonDependencies.contains("if (composeWinUiMingwTargetEnabled)") &&
+                navigationCommonDependencies.contains(
+                    "api(\"androidx.savedstate:savedstate:1.5.0\")",
+                ),
+            "navigation-common must keep its upstream dependencies outside WinUI MinGW mode.",
+        )
+        val navigationCommonRoot = repositoryRoot.resolve("navigation/navigation-common")
+        val synchronizedObjectPath =
+            "kotlin/androidx/navigation/internal/SynchronizedObject.native.kt"
+        assertFalse(
+            navigationCommonRoot.resolve("src/nativeMain/$synchronizedObjectPath").exists(),
+            "navigation-common nativeMain must not expose its POSIX mutex actual to MinGW.",
+        )
+        assertTrue(
+            navigationCommonRoot.resolve("src/posixMain/$synchronizedObjectPath").exists(),
+            "navigation-common must keep its pthread mutex actual in posixMain.",
+        )
+        assertTrue(
+            navigationCommonSource.contains("create(\"posixMain\").dependsOn(nativeMain)") &&
+                navigationCommonSource.contains("appleMain.dependsOn(posixMain)") &&
+                navigationCommonSource.contains("linuxMain.dependsOn(posixMain)"),
+            "navigation-common must attach its POSIX mutex actual only to Apple and Linux.",
+        )
+        val mingwSynchronizedObject = navigationCommonRoot.resolve(
+            "src/mingwX64Main/kotlin/androidx/navigation/internal/" +
+                "SynchronizedObject.mingwX64.kt",
+        )
+        assertTrue(mingwSynchronizedObject.exists())
+        val mingwSynchronizedObjectSource = mingwSynchronizedObject.readText()
+        listOf(
+            "CRITICAL_SECTION",
+            "InitializeCriticalSection",
+            "EnterCriticalSection",
+            "LeaveCriticalSection",
+            "DeleteCriticalSection",
+        ).forEach { requiredApi ->
+            assertTrue(
+                mingwSynchronizedObjectSource.contains(requiredApi),
+                "navigation-common MinGW synchronization must use $requiredApi.",
+            )
+        }
+
+        val uiBackhandlerBuild = repositoryRoot
+            .resolve("compose/ui/ui-backhandler/build.gradle")
+            .readText()
+        assertTrue(
+            uiBackhandlerBuild.contains("composeWinUiMingwTargetEnabled") &&
+                uiBackhandlerBuild.contains("mingwX64()"),
+            "ui-backhandler must publish a standard MinGW variant for Material3.",
+        )
+        val material3Build = repositoryRoot.resolve("compose/material3/material3/build.gradle")
+        val material3WinuiSkikoMain = checkNotNull(
+            sourceSetBlock(material3Build.readText(), "winuiSkikoMain"),
+        )
+        val winuiMaterial3Actuals = listOf(
+            "androidx/compose/material3/ModalBottomSheet.winui.kt" to
+                "ModalBottomSheet.skiko.kt",
+            "androidx/compose/material3/WideNavigationRail.winui.kt" to
+                "WideNavigationRail.skiko.kt",
+            "androidx/compose/material3/internal/BasicEdgeToEdgeDialog.winui.kt" to
+                "BasicEdgeToEdgeDialog.skiko.kt",
+        )
+        winuiMaterial3Actuals.forEach { (winuiPath, skikoFile) ->
+            assertTrue(
+                material3WinuiSkikoMain.contains("kotlin.exclude(\"**/$skikoFile\")"),
+                "Material3 WinUI must exclude the Skiko-specific $skikoFile actual.",
+            )
+            val winuiActual = repositoryRoot.resolve(
+                "compose/material3/material3/src/winuiMain/kotlin/$winuiPath",
+            )
+            assertTrue(winuiActual.exists(), "Missing Material3 WinUI actual: $winuiPath")
+            val winuiJvmActual = repositoryRoot.resolve(
+                "compose/material3/material3/src/winuiJvmMain/kotlin/$winuiPath",
+            )
+            assertFalse(
+                winuiJvmActual.exists(),
+                "Shared Material3 WinUI actual must not also remain in winuiJvmMain: $winuiPath",
+            )
+            val winuiActualSource = winuiActual.readText()
+            listOf(
+                "usePlatformInsets",
+                "useSoftwareKeyboardInset",
+                "scrimColor",
+                "animateTransition",
+            ).forEach { skikoDialogProperty ->
+                assertFalse(
+                    winuiActualSource.contains(skikoDialogProperty),
+                    "$winuiPath must use WinUI DialogProperties rather than " +
+                        "$skikoDialogProperty.",
+                )
+            }
+        }
+
+        val navigationComposeRoot = repositoryRoot.resolve("navigation/navigation-compose")
+        val defaultNavTransitionsPath =
+            "kotlin/androidx/navigation/compose/DefaultNavTransitions.nonAndroid.kt"
+        assertFalse(
+            navigationComposeRoot.resolve(
+                "src/desktopMain/kotlin/androidx/navigation/compose/" +
+                    "DefaultNavTransitions.desktop.kt",
+            ).exists(),
+            "Platform-neutral default Navigation transitions must not remain desktop-only.",
+        )
+        val nonAndroidDefaultNavTransitions = navigationComposeRoot.resolve(
+            "src/nonAndroidMain/$defaultNavTransitionsPath",
+        )
+        assertTrue(
+            nonAndroidDefaultNavTransitions.exists(),
+            "Navigation Compose must expose default transitions to all non-Android targets.",
+        )
+        val nonAndroidDefaultNavTransitionsSource = nonAndroidDefaultNavTransitions.readText()
+        assertTrue(
+            nonAndroidDefaultNavTransitionsSource.contains("EnterTransition.None") &&
+                nonAndroidDefaultNavTransitionsSource.contains("ExitTransition.None"),
+            "Non-Android default Navigation transitions must retain the Desktop behavior.",
+        )
+
+        listOf(
+            "navigation/navigation-common-compatibility-stub/build.gradle",
+            "navigation/navigation-runtime-compatibility-stub/build.gradle",
+        ).forEach { relativePath ->
+            val source = repositoryRoot.resolve(relativePath).readText()
+            assertFalse(
+                source.contains("mingwX64()"),
+                "$relativePath must not publish a fake MinGW variant because its upstream " +
+                    "AndroidX dependency does not publish one.",
+            )
+        }
+
+        mapOf(
+            "compose/material/material/build.gradle" to "nonJvmMain",
+            "compose/material3/material3/build.gradle" to "nonJvmMain",
+            "compose/material3/material3-window-size-class/build.gradle" to "nonJvmMain",
+            "compose/material3/adaptive/adaptive-layout/build.gradle" to "nativeMain",
+        ).forEach { (relativePath, nativeSourceSet) ->
+            val source = repositoryRoot.resolve(relativePath).readText()
+            val block = checkNotNull(sourceSetBlock(source, nativeSourceSet))
+            assertTrue(
+                block.contains("if (!composeWinUiTargetEnabled)"),
+                "$relativePath must keep skikoMain out of the WinUI Native hierarchy.",
             )
         }
 

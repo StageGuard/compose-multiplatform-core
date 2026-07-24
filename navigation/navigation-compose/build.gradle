@@ -34,6 +34,12 @@ def composeWinUiJvmTargetEnabled = providers
         .map { it.toBoolean() }
         .orElse(false)
         .get()
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
 def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 
 androidXMultiplatform {
@@ -42,7 +48,7 @@ androidXMultiplatform {
         namespace = "androidx.navigation.compose"
         androidResources.enable = true
     }
-    if (!composeWinUiJvmTargetEnabled) {
+    if (!composeWinUiTargetEnabled) {
         desktop()
     }
     mac()
@@ -56,21 +62,38 @@ androidXMultiplatform {
         commonMain.dependencies {
             api(project(":navigation:navigation-runtime"))
             api(project(":navigation:navigation-common"))
-            api("org.jetbrains.compose.animation:animation:1.10.0")
-            api("org.jetbrains.compose.runtime:runtime:1.10.0")
-            api("org.jetbrains.compose.runtime:runtime-saveable:1.10.0")
-            api("org.jetbrains.compose.ui:ui:1.10.0")
-            api("org.jetbrains.compose.animation:animation:1.10.0")
-            implementation("org.jetbrains.compose.animation:animation-core:1.10.0")
-            implementation("org.jetbrains.compose.foundation:foundation-layout:1.10.0")
+            if (composeWinUiMingwTargetEnabled) {
+                api(project(":compose:animation:animation"))
+                api(project(":compose:runtime:runtime"))
+                api(project(":compose:runtime:runtime-saveable"))
+                api(project(":compose:ui:ui"))
+                api(project(":compose:animation:animation"))
+                implementation(project(":compose:animation:animation-core"))
+                implementation(project(":compose:foundation:foundation-layout"))
+                implementation(project(":lifecycle:lifecycle-common"))
+                implementation(project(":lifecycle:lifecycle-runtime-compose"))
+                implementation(project(":lifecycle:lifecycle-viewmodel-savedstate"))
+                implementation(project(":lifecycle:lifecycle-viewmodel"))
+                implementation(project(":lifecycle:lifecycle-viewmodel-compose"))
+                implementation(project(":savedstate:savedstate"))
+                implementation(project(":savedstate:savedstate-compose"))
+            } else {
+                api("org.jetbrains.compose.animation:animation:1.10.0")
+                api("org.jetbrains.compose.runtime:runtime:1.10.0")
+                api("org.jetbrains.compose.runtime:runtime-saveable:1.10.0")
+                api("org.jetbrains.compose.ui:ui:1.10.0")
+                api("org.jetbrains.compose.animation:animation:1.10.0")
+                implementation("org.jetbrains.compose.animation:animation-core:1.10.0")
+                implementation("org.jetbrains.compose.foundation:foundation-layout:1.10.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-common:2.11.0-beta01")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0-beta01")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0-beta01")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel:2.11.0-beta01")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0-beta01")
+                implementation("androidx.savedstate:savedstate:1.4.0")
+                implementation("androidx.savedstate:savedstate-compose:1.4.0")
+            }
             implementation("androidx.collection:collection:1.5.0")
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-common:2.11.0-beta01")
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0-beta01")
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0-beta01")
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel:2.11.0-beta01")
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0-beta01")
-            implementation("androidx.savedstate:savedstate:1.4.0")
-            implementation("androidx.savedstate:savedstate-compose:1.4.0")
             implementation(libs.kotlinCoroutinesCore)
             implementation(libs.kotlinSerializationCore)
         }
@@ -156,10 +179,12 @@ androidXMultiplatform {
 
         nonJvmMain {
             dependsOn(nonAndroidMain)
-            dependencies {
+            if (!composeWinUiMingwTargetEnabled) {
                 // To comply with Klib resolver until https://youtrack.jetbrains.com/issue/KT-61096 is fixed
-                implementation("org.jetbrains.androidx.savedstate:savedstate:1.4.0")
-                implementation("org.jetbrains.androidx.savedstate:savedstate-compose:1.4.0")
+                dependencies {
+                    implementation("org.jetbrains.androidx.savedstate:savedstate:1.4.0")
+                    implementation("org.jetbrains.androidx.savedstate:savedstate-compose:1.4.0")
+                }
             }
         }
 
@@ -186,20 +211,27 @@ androidXMultiplatform {
 }
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
-            winuiJvmMain {
-                dependsOn(nonAndroidMain)
-                kotlin.srcDir("src/desktopMain/kotlin")
-                dependencies {
-                    implementation(project(":compose:ui:ui-backhandler"))
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(nonAndroidMain)
+                    kotlin.srcDir("src/desktopMain/kotlin")
+                    dependencies {
+                        implementation(project(":compose:ui:ui-backhandler"))
+                    }
                 }
-            }
 
-            winuiJvmTest {
-                dependsOn(nonAndroidTest)
+                winuiJvmTest {
+                    dependsOn(nonAndroidTest)
+                }
             }
         }
     }

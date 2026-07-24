@@ -15,6 +15,7 @@
  */
 
 import io.github.composefluent.winrt.gradle.BuildWinRTApplicationHostTask
+import io.github.composefluent.winrt.gradle.GenerateWinRTMingwApplicationEntryTask
 import io.github.composefluent.winrt.gradle.GenerateWinRTProjectionsTask
 import io.github.composefluent.winrt.gradle.RunWinRTApplicationHostTask
 import io.github.composefluent.winrt.gradle.registerWinRTApplicationHostRunTask
@@ -79,8 +80,10 @@ val navigationWinUiCompileTasks = listOf(
     ":navigation3:navigation3-ui:compileKotlinWinuiJvm",
 )
 val winUiMppSampleResourcesDir = layout.buildDirectory.dir("winui-mpp-sample-resources")
+val winUiMppVariableFontResource =
+    project.file("../demo/src/commonMain/resources/RobotoFlex-VariableFont.ttf")
 val winUiMppSampleResourceFiles = listOf(
-    project.file("../demo/src/commonMain/resources/RobotoFlex-VariableFont.ttf"),
+    winUiMppVariableFontResource,
     project.file("../demo/src/desktopMain/resources/NotoColorEmoji.ttf"),
 )
 val winUiMppPriRoot = project.file("src/winuiPri")
@@ -208,6 +211,7 @@ kotlin {
         val commonMain by getting {
             kotlin.srcDir("src/commonMain/kotlin")
             kotlin.srcDir("../demo/src/commonMain/kotlin")
+            kotlin.srcDir(extractWinUIMaterialIconsSources)
             kotlin.exclude("androidx/compose/mpp/demo/components/dialog/DialogExample.kt")
             kotlin.exclude("androidx/compose/mpp/demo/components/popup/ConfigurablePopup.kt")
             kotlin.exclude("androidx/compose/mpp/demo/components/text/FontRasterization.kt")
@@ -253,7 +257,6 @@ kotlin {
 
         val winuiMain by getting {
             kotlin.srcDir("../demo/src/winuiMain/kotlin")
-            kotlin.srcDir(extractWinUIMaterialIconsSources)
         }
 
         val winuiJvmMain by getting {
@@ -294,6 +297,7 @@ winRT {
         projectPriPage(winUiMppPriPage, "Views/MainPage.xaml")
         projectPriApplicationDefinition(winUiMppPriApplicationDefinition, "App.xaml")
         projectPriContent(winUiMppPriContent, "Assets/Sample.txt")
+        projectPriContent(winUiMppVariableFontResource, "RobotoFlex-VariableFont.ttf")
         projectPriEmbedFile(winUiMppPriEmbed, "Embedded/Payload.bin")
     }
     windowsSdk(composeWinUiWindowsSdkVersion.get(), includeExtensions = false)
@@ -303,6 +307,10 @@ winRT {
 
 tasks.named<GenerateWinRTProjectionsTask>("generateWinRTProjections") {
     sourceRoots.setFrom(project.file("../demo/src/winuiJvmMain/kotlin"))
+}
+
+tasks.named<GenerateWinRTMingwApplicationEntryTask>("generateWinRTMingwApplicationEntry") {
+    mainClass.set("androidx.compose.mpp.demo.main")
 }
 
 tasks.named("compileKotlinWinuiJvm") {

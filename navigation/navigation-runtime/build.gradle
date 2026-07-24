@@ -32,6 +32,12 @@ plugins {
     alias(libs.plugins.atomicFu)
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.navigation"
@@ -44,6 +50,9 @@ androidXMultiplatform {
     watchos()
     tvos()
     ios()
+    if (composeWinUiMingwTargetEnabled) {
+        mingwX64()
+    }
     js()
     wasmJs()
 

@@ -433,8 +433,14 @@ includeProject(":lifecycle:lifecycle-viewmodel", "lifecycle/lifecycle-viewmodel-
 includeProject(":lifecycle:lifecycle-viewmodel-compose", "lifecycle/lifecycle-viewmodel-compose-compatibility-stub")
 includeProject(":lifecycle:lifecycle-viewmodel-navigation3", "lifecycle/lifecycle-viewmodel-navigation3-compatibility-stub")
 includeProject(":lifecycle:lifecycle-viewmodel-savedstate", "lifecycle/lifecycle-viewmodel-savedstate-compatibility-stub")
-includeProject(":navigation:navigation-common", "navigation/navigation-common-compatibility-stub")
-includeProject(":navigation:navigation-runtime", "navigation/navigation-runtime-compatibility-stub")
+def composeWinUiMingwTargetEnabled =
+        startParameter.projectProperties["composeWinUi.enableMingwTarget"]?.toBoolean() ?: false
+includeProject(
+        ":navigation:navigation-common",
+        composeWinUiMingwTargetEnabled ? null : "navigation/navigation-common-compatibility-stub")
+includeProject(
+        ":navigation:navigation-runtime",
+        composeWinUiMingwTargetEnabled ? null : "navigation/navigation-runtime-compatibility-stub")
 includeProject(":navigationevent:navigationevent-compose", "navigationevent/navigationevent-compose-compatibility-stub")
 includeProject(":savedstate:savedstate", "savedstate/savedstate-compatibility-stub")
 includeProject(":savedstate:savedstate-compose", "savedstate/savedstate-compose-compatibility-stub")

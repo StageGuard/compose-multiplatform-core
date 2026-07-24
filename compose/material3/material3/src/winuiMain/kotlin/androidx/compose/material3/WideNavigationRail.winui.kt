@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,10 +33,7 @@ actual constructor(
         return shouldDismissOnBackPress == other.shouldDismissOnBackPress
     }
 
-    override fun hashCode(): Int {
-        var result = shouldDismissOnBackPress.hashCode()
-        return result
-    }
+    override fun hashCode(): Int = shouldDismissOnBackPress.hashCode()
 }
 
 internal actual fun createDefaultModalWideNavigationRailProperties() =
@@ -49,7 +46,7 @@ internal actual fun ModalWideNavigationRailDialog(
     onPredictiveBack: (Float) -> Unit,
     onPredictiveBackCancelled: () -> Unit,
     predictiveBackState: RailPredictiveBackState,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -57,6 +54,6 @@ internal actual fun ModalWideNavigationRailDialog(
             dismissOnBackPress = properties.shouldDismissOnBackPress,
             usePlatformDefaultWidth = false,
         ),
-        content = content
+        content = content,
     )
 }
