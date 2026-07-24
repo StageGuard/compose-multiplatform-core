@@ -97,6 +97,8 @@ val winUiMppSampleSourceFiles = listOf(
     project.file("../demo/src/commonMain/kotlin"),
     project.file("../demo/src/winuiJvmMain/kotlin/androidx/compose/mpp/demo/Main.winui.kt"),
 )
+val winUiMppMingwMainSource =
+    project.file("../demo/src/winuiMingwMain/kotlin/androidx/compose/mpp/demo/Main.winuiMingw.kt")
 val winUiMppSampleForbiddenSourceTokens = listOf(
     "androidx.compose.ui.awt",
     "java.awt.",
@@ -511,6 +513,7 @@ tasks.register("validateWinUIMppSampleSourceIsolation") {
     group = "verification"
     description = "Validates the WinUI MPP sample does not use Desktop/AWT/Swing-only sources or runtimes."
     inputs.files(winUiMppSampleSourceFiles)
+    inputs.file(winUiMppMingwMainSource)
     outputs.file(layout.buildDirectory.file("validation/winui-mpp-sample-source-isolation.txt"))
 
     doLast {
@@ -524,6 +527,11 @@ tasks.register("validateWinUIMppSampleSourceIsolation") {
                 "WinUI MPP sample source ${sourceFile.absolutePath} uses Desktop/AWT/Swing-only APIs: " +
                     forbiddenTokens
             }
+        }
+
+        val mingwMainSource = winUiMppMingwMainSource.readText()
+        check("extendsContentIntoTitleBar = true" in mingwMainSource) {
+            "WinUI MinGW MPP sample must extend Compose content into the title bar."
         }
 
         val runtimeArtifacts = configurations.named("winuiJvmRuntimeClasspath").get().files

@@ -29,6 +29,7 @@ fun main() {
         Window(
             title = "Compose MPP demo",
             onCloseRequest = { exitApplication() },
+            extendsContentIntoTitleBar = true,
         ) {
             val app = remember { App() }
             MaterialTheme(
