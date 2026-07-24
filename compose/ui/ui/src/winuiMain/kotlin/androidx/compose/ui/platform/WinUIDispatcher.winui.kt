@@ -26,8 +26,9 @@ internal class WinUIDispatcher(
 ) : CoroutineDispatcher() {
     private val dispatchQueue = WinUIDispatchQueue(dispatcherQueue)
 
-    override fun isDispatchNeeded(context: CoroutineContext): Boolean =
-        runCatching { !dispatcherQueue.hasThreadAccess }.getOrDefault(true)
+    // Frame recomposition and layout are separate host phases. Always queue continuations so a
+    // coroutine resumed during recomposition cannot re-enter and advance animation before layout.
+    override fun isDispatchNeeded(context: CoroutineContext): Boolean = true
 
     override fun dispatch(context: CoroutineContext, block: Runnable) {
         if (!dispatchQueue.dispatch { block.run() }) {
