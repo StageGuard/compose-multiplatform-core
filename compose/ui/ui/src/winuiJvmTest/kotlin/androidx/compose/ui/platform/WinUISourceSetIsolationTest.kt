@@ -179,6 +179,23 @@ class WinUISourceSetIsolationTest {
     }
 
     @Test
+    fun winuiUsesKotlinWinrtCompositeSubmodule() {
+        val repositoryRoot = findRepositoryRoot()
+        val gitmodules = repositoryRoot.resolve(".gitmodules")
+        val settings = repositoryRoot.resolve("settings.gradle").readText()
+
+        assertTrue(gitmodules.exists(), "kotlin-winrt must be a repository submodule.")
+        assertTrue(
+            gitmodules.readText().contains("path = external/kotlin-winrt"),
+            "The kotlin-winrt submodule must live at external/kotlin-winrt.",
+        )
+        assertTrue(
+            settings.contains("external/kotlin-winrt/winrt-gradle-plugin"),
+            "Plugin resolution must prefer the local kotlin-winrt composite.",
+        )
+    }
+
+    @Test
     fun winuiJvmRuntimeUsesSkikoWinuiWithoutSkikoAwtNativeRuntime() {
         val classpath = System.getProperty("java.class.path")
             .split(System.getProperty("path.separator"))

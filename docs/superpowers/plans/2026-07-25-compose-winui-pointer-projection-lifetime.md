@@ -97,11 +97,12 @@ Run:
 
 ```powershell
 git.exe submodule add https://github.com/compose-fluent/kotlin-winrt.git external/kotlin-winrt
-git.exe -C external/kotlin-winrt checkout cf3ff1e
+git.exe -C external/kotlin-winrt checkout 8aa74e09
 git.exe -C external/kotlin-winrt rev-parse HEAD
 ```
 
-Expected base revision: `cf3ff1e`.
+Expected base revision: `8aa74e09`, which includes the generated Windows COM
+interop source additions required by the repository's closed `KWINRT-063` path.
 
 - [ ] **Step 4: Prefer the local plugin composite**
 

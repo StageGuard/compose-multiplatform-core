@@ -1,0 +1,3 @@
+[submodule "external/kotlin-winrt"]
+	path = external/kotlin-winrt
+	url = https://github.com/compose-fluent/kotlin-winrt.git

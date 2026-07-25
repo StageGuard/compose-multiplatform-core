@@ -1,6 +1,10 @@
 import groovy.transform.Field
 
 pluginManagement {
+    def localKotlinWinRtPluginBuild = file("external/kotlin-winrt/winrt-gradle-plugin")
+    if (localKotlinWinRtPluginBuild.isDirectory()) {
+        includeBuild(localKotlinWinRtPluginBuild)
+    }
     repositories {
         /*
         maven {
@@ -27,7 +31,10 @@ pluginManagement {
     }
     resolutionStrategy {
         eachPlugin {
-            if (requested.id.id == "io.github.compose-fluent.winrt") {
+            if (
+                requested.id.id == "io.github.compose-fluent.winrt" &&
+                    !localKotlinWinRtPluginBuild.isDirectory()
+            ) {
                 useModule("io.github.compose-fluent:winrt-gradle-plugin:${requested.version ?: "0.1.0-SNAPSHOT"}")
             }
         }
