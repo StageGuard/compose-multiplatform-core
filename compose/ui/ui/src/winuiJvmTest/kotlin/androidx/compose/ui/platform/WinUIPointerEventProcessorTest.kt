@@ -30,14 +30,11 @@ import kotlin.test.assertEquals
 class WinUIPointerEventProcessorTest {
     @Test
     fun pointerEventSamplePreservesPressureHistoryAndHover() {
-        val history = listOf(
-            HistoricalChange(uptimeMillis = 4L, position = Offset(1f, 2f)),
-        )
-        val sample = samplePointerEvent().copy(
-            pressure = 0.6f,
-            activeHover = true,
-            historical = history,
-        ).toPointerSample()
+        val history = listOf(HistoricalChange(uptimeMillis = 4L, position = Offset(1f, 2f)))
+        val sample =
+            samplePointerEvent()
+                .copy(pressure = 0.6f, activeHover = true, historical = history)
+                .toPointerSample()
 
         assertEquals(0.6f, sample.pressure)
         assertEquals(history, sample.historical)
@@ -49,12 +46,11 @@ class WinUIPointerEventProcessorTest {
         val processor = WinUIPointerEventProcessor()
         var dispatchCount = 0
 
-        val handled = processor.process(
-            event = samplePointerEvent(),
-        ) { _, _, _, _, _, _, _, _, _, _, _, _ ->
-            dispatchCount += 1
-            true
-        }
+        val handled =
+            processor.process(event = samplePointerEvent()) { _, _, _, _, _, _, _, _, _, _, _, _ ->
+                dispatchCount += 1
+                true
+            }
 
         assertEquals(true, handled)
         assertEquals(1, dispatchCount)
@@ -79,31 +75,90 @@ class WinUIPointerEventProcessorTest {
     }
 
     @Test
+    fun acceptedDragTransferKeepsPointUntilSlotIsCleared() {
+        val events = mutableListOf<String>()
+        val closed = mutableListOf<String>()
+        val slot = WinUIOwnedResourceSlot<String> { closed += it }
+
+        WinUIOwnedResource("point") { closed += it }
+            .use { pointOwner ->
+                WinUIPointerEventProcessor().process(
+                    event = samplePointerEvent(),
+                    onBeforeDispatch = {
+                        val update = slot.replace(pointOwner.value)
+                        if (update.ownsIncoming) pointOwner.releaseOwnership()
+                        update.failure?.let { throw it }
+                        events += "source"
+                    },
+                ) { _, _, _, _, _, _, _, _, _, _, _, _ ->
+                    events += "compose"
+                    true
+                }
+            }
+
+        assertEquals(listOf("source", "compose"), events)
+        assertEquals(emptyList(), closed)
+        slot.clear().failure?.let { throw it }
+        assertEquals(listOf("point"), closed)
+    }
+
+    @Test
+    fun rejectedDragTransferLeavesPointWithOriginalOwner() {
+        val closed = mutableListOf<String>()
+
+        WinUIOwnedResource("point") { closed += it }
+            .use { pointOwner ->
+                WinUIPointerEventProcessor().process(
+                    event = samplePointerEvent(),
+                    onBeforeDispatch = {
+                        val update = WinUIOwnedResourceUpdate(ownsIncoming = false)
+                        if (update.ownsIncoming) pointOwner.releaseOwnership()
+                    },
+                ) { _, _, _, _, _, _, _, _, _, _, _, _ ->
+                    true
+                }
+            }
+
+        assertEquals(listOf("point"), closed)
+    }
+
+    @Test
     fun dispatchesUnhandledNativeEvents() {
         val processor = WinUIPointerEventProcessor()
         var dispatchedEvent: WinUIPointerEvent? = null
         val event = samplePointerEvent()
 
-        val handled = processor.process(
-            event = event,
-        ) { eventType, position, uptimeMillis, pointerId, down, type, buttons,
-                keyboardModifiers, button, scrollDelta, isInBounds, nativeEvent ->
-            dispatchedEvent = WinUIPointerEvent(
-                eventType = eventType,
-                position = position,
-                uptimeMillis = uptimeMillis,
-                pointerId = pointerId,
-                down = down,
-                type = type,
-                buttons = buttons,
-                keyboardModifiers = keyboardModifiers,
-                button = button,
-                scrollDelta = scrollDelta,
-                isInBounds = isInBounds,
-                nativeEvent = nativeEvent,
-            )
-            true
-        }
+        val handled =
+            processor.process(event = event) {
+                eventType,
+                position,
+                uptimeMillis,
+                pointerId,
+                down,
+                type,
+                buttons,
+                keyboardModifiers,
+                button,
+                scrollDelta,
+                isInBounds,
+                nativeEvent ->
+                dispatchedEvent =
+                    WinUIPointerEvent(
+                        eventType = eventType,
+                        position = position,
+                        uptimeMillis = uptimeMillis,
+                        pointerId = pointerId,
+                        down = down,
+                        type = type,
+                        buttons = buttons,
+                        keyboardModifiers = keyboardModifiers,
+                        button = button,
+                        scrollDelta = scrollDelta,
+                        isInBounds = isInBounds,
+                        nativeEvent = nativeEvent,
+                    )
+                true
+            }
 
         assertEquals(true, handled)
         assertEquals(event, dispatchedEvent)
@@ -111,30 +166,18 @@ class WinUIPointerEventProcessorTest {
 
     @Test
     fun preservesWinUIRenderSurfaceRootCoordinates() {
-        assertEquals(
-            Offset(10f, 20f),
-            winUIPositionToComposeOffset(10f, 20f),
-        )
+        assertEquals(Offset(10f, 20f), winUIPositionToComposeOffset(10f, 20f))
     }
 
     @Test
     fun doesNotApplyWindowTransformToRenderSurfaceRootCoordinates() {
-        assertEquals(
-            Offset(60f, 120f),
-            winUIPositionToComposeOffset(60f, 120f),
-        )
+        assertEquals(Offset(60f, 120f), winUIPositionToComposeOffset(60f, 120f))
     }
 
     @Test
     fun convertsWinUIDipsToComposeRootPixels() {
-        assertEquals(
-            Offset(20f, 40f),
-            winUIPositionToComposeOffset(10f, 20f, Density(2f)),
-        )
-        assertEquals(
-            Offset(15f, 30f),
-            winUIPositionToComposeOffset(10f, 20f, Density(1.5f)),
-        )
+        assertEquals(Offset(20f, 40f), winUIPositionToComposeOffset(10f, 20f, Density(2f)))
+        assertEquals(Offset(15f, 30f), winUIPositionToComposeOffset(10f, 20f, Density(1.5f)))
     }
 
     @Test
@@ -162,17 +205,18 @@ private fun samplePointerEvent(
     eventType: PointerEventType = PointerEventType.Press,
     down: Boolean = true,
     buttons: PointerButtons = PointerButtons(isPrimaryPressed = true),
-) = WinUIPointerEvent(
-    eventType = eventType,
-    position = Offset(3f, 4f),
-    uptimeMillis = 17L,
-    pointerId = 23L,
-    down = down,
-    type = PointerType.Mouse,
-    buttons = buttons,
-    keyboardModifiers = PointerKeyboardModifiers(isCtrlPressed = true),
-    button = PointerButton.Primary,
-    scrollDelta = Offset.Zero,
-    isInBounds = true,
-    nativeEvent = "native",
-)
+) =
+    WinUIPointerEvent(
+        eventType = eventType,
+        position = Offset(3f, 4f),
+        uptimeMillis = 17L,
+        pointerId = 23L,
+        down = down,
+        type = PointerType.Mouse,
+        buttons = buttons,
+        keyboardModifiers = PointerKeyboardModifiers(isCtrlPressed = true),
+        button = PointerButton.Primary,
+        scrollDelta = Offset.Zero,
+        isInBounds = true,
+        nativeEvent = "native",
+    )
