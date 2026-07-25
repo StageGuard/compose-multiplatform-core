@@ -361,11 +361,17 @@ fun RunWinRTApplicationHostTask.configureWinUIMppSampleApplicationHost(
     outputs.file(reportFile)
     outputLog.set(logFile)
     jvmArgs.set(providers.provider {
-        // Keep this MPP host on ParallelGC; SerialGC/Tier1 can hit a
-        // CoreMessaging fail-fast after the auto-traverse shutdown path.
+        // Keep this sample host on the low-footprint SerialGC profile. The
+        // staged host passes the full auto-traverse smoke with these bounds.
         listOf(
-            "-Xmx512m",
-            "-XX:+UseParallelGC",
+            // Keep the sample's initial private footprint bounded. The host
+            // can still be overridden through KOTLIN_WINRT_JVM_OPTIONS when
+            // running a larger application workload.
+            "-Xms16m",
+            "-Xmx64m",
+            "-XX:+UseSerialGC",
+            "-XX:TieredStopAtLevel=1",
+            "-XX:ReservedCodeCacheSize=32m",
             "-Dfile.encoding=UTF-8",
             "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
             "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",

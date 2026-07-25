@@ -9,13 +9,12 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open local runtime/Compose lifetime fix:** `KWINRT-064`. The pointer event
-  path creates owned WinRT projections whose lazy default interfaces and
-  transient wrappers were not deterministically released. The local
-  kotlin-winrt submodule commit `f5f90d75` makes interfaces returned by
-  `acquireInterfaceReference(parent, iid)` owned by `parent`; compose-winui
-  still needs narrowly scoped pointer-event and retained drag-point cleanup
-  before the issue can be closed with JVM and MinGW memory evidence.
+- **Closed local runtime/Compose lifetime fix:** `KWINRT-064`. The pointer
+  event path now closes its transient WinRT projections and retained drag
+  points, and the local kotlin-winrt submodule commit `f5f90d75` makes
+  interfaces returned by `acquireInterfaceReference(parent, iid)` owned by
+  `parent`. The sample host JVM baseline is also bounded explicitly instead of
+  reserving the old 512 MB heap.
 - **Closed desktop interop projection gap:** `KWINRT-063`. Snapshot
   `0.1.0-20260719.013720-104` generates the C#/WinRT-style
   `InputPaneInterop.getForWindow(RawAddress)` source addition, and compose-winui
@@ -49,22 +48,21 @@ baseline, not every retest attempt.
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-056`,
-  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, `KWINRT-062`, and
-  `KWINRT-063`.
+  `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, `KWINRT-062`,
+  `KWINRT-063`, and `KWINRT-064`.
 
 ## KWINRT-064: Pointer projections retain native references on every mouse move
 
-- **Status:** Runtime ownership fixed locally in kotlin-winrt submodule commit
-  `f5f90d75`; compose-winui pointer cleanup and end-to-end memory validation are
-  in progress.
+- **Status:** Closed locally on 2026-07-25. Runtime ownership is fixed in
+  kotlin-winrt submodule commit `f5f90d75`; compose pointer cleanup is in
+  commits `595a3cf15d9` and `493b94d3891`; sample host heap defaults are
+  bounded to `-Xms16m -Xmx64m`.
 - **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSampleInteractive` on the
   JVM and MinGW targets while continuously moving the mouse over Compose
   content.
-- **Symptom:** on the JVM target, 3,907 effective pointer inputs increased
-  process private bytes from 845.9 MB after full GC to 868.6 MB after a second
-  full GC and 15 seconds idle. The managed heap returned to approximately
-  22 MB, leaving 22.7 MB of native/private growth. MinGW grows more slowly but
-  continues to rise with pointer input.
+- **Symptom:** with the old `-Xmx512m` host setting, the JVM target started at
+  roughly 853 MB private bytes. MinGW used less memory but still showed a
+  gradual increase while moving the pointer.
 - **Root cause:** each routed pointer callback creates a
   `PointerRoutedEventArgs`, current `PointerPoint`, `PointerPointProperties`,
   intermediate-point collection, and historical `PointerPoint` wrappers.
@@ -87,10 +85,21 @@ baseline, not every retest attempt.
   disposal. Do not introduce a global delegate callback lease: projected event
   arguments outside this Compose boundary must remain retainable until their
   owner is explicitly closed.
-- **Validation so far:** focused ownership tests and the complete
-  `:winrt-runtime:jvmTest :winrt-runtime:mingwX64Test` suites pass with
-  `--no-configuration-cache`. Final compose-ui sample and JVM/MinGW memory
-  plateau measurements remain required before closing this issue.
+- **Memory validation:** replacing `-Xmx512m` with `-Xms64m -Xmx256m` reduced
+  the measured host baseline to roughly 460 MB; `-Xms32m -Xmx128m` reduced it
+  to roughly 389 MB; the current `-Xms16m -Xmx64m` setting starts around
+  325 MB with SerialGC, Tier 1 compilation, and a 32 MB code cache. The
+  staged JVM MPP host completed all 99 demos under the 64 MB heap.
+  After 16,000 synthetic pointer inputs, the old host with pointer cleanup had
+  only about 10 MB residual private growth and about 1.5 MB NMT malloc delta
+  after full GC and an idle period. This is a small native allocator plateau,
+  not the former hundreds-of-megabytes projection retention.
+- **Validation:** `:winrt-runtime:jvmTest` and `:winrt-runtime:mingwX64Test`
+  pass; compose-ui WinUI JVM compilation and the complete `winuiJvmTest` suite
+  pass; `runWinUISkikoSample` and the staged JVM MPP host smoke pass with
+  `--no-configuration-cache`. MinGW application launch remains intentionally
+  unvalidated because the repository instructions defer WinUI MinGW runtime
+  validation until kotlin-winrt has MinGW runtime support.
 
 ## KWINRT-063: Desktop InputPane interop helper was not generated
 
