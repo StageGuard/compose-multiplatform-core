@@ -837,6 +837,21 @@ class WinUIOwnerTest {
     }
 
     @Test
+    fun disposeDuringEndApplyChangesStopsRemainingListeners() {
+        val owner = createOwner()
+        var remainingListenerCalled = false
+
+        owner.registerOnEndApplyChangesListener(owner::dispose)
+        owner.registerOnEndApplyChangesListener {
+            remainingListenerCalled = true
+        }
+
+        owner.onEndApplyChanges()
+
+        assertFalse(remainingListenerCalled)
+    }
+
+    @Test
     fun disposeSuppressesPendingAndFutureOwnerCallbacks() {
         val events = OwnerEvents()
         var measureRequests = 0

@@ -547,6 +547,8 @@ internal class WinUIOwner(
                 val listener = onEndApplyChangesListeners[i]
                 onEndApplyChangesListeners[i] = null
                 listener?.invoke()
+                // A listener may dispose this owner and clear the remaining listeners.
+                if (isShuttingDown) return
             }
             onEndApplyChangesListeners.subList(0, size).clear()
         }
