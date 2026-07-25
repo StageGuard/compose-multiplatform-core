@@ -9,6 +9,13 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
+- **Open local runtime/Compose lifetime fix:** `KWINRT-064`. The pointer event
+  path creates owned WinRT projections whose lazy default interfaces and
+  transient wrappers were not deterministically released. The local
+  kotlin-winrt submodule commit `f5f90d75` makes interfaces returned by
+  `acquireInterfaceReference(parent, iid)` owned by `parent`; compose-winui
+  still needs narrowly scoped pointer-event and retained drag-point cleanup
+  before the issue can be closed with JVM and MinGW memory evidence.
 - **Closed desktop interop projection gap:** `KWINRT-063`. Snapshot
   `0.1.0-20260719.013720-104` generates the C#/WinRT-style
   `InputPaneInterop.getForWindow(RawAddress)` source addition, and compose-winui
@@ -44,6 +51,46 @@ baseline, not every retest attempt.
   `KWINRT-052`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-056`,
   `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, `KWINRT-062`, and
   `KWINRT-063`.
+
+## KWINRT-064: Pointer projections retain native references on every mouse move
+
+- **Status:** Runtime ownership fixed locally in kotlin-winrt submodule commit
+  `f5f90d75`; compose-winui pointer cleanup and end-to-end memory validation are
+  in progress.
+- **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSampleInteractive` on the
+  JVM and MinGW targets while continuously moving the mouse over Compose
+  content.
+- **Symptom:** on the JVM target, 3,907 effective pointer inputs increased
+  process private bytes from 845.9 MB after full GC to 868.6 MB after a second
+  full GC and 15 seconds idle. The managed heap returned to approximately
+  22 MB, leaving 22.7 MB of native/private growth. MinGW grows more slowly but
+  continues to rise with pointer input.
+- **Root cause:** each routed pointer callback creates a
+  `PointerRoutedEventArgs`, current `PointerPoint`, `PointerPointProperties`,
+  intermediate-point collection, and historical `PointerPoint` wrappers.
+  Generated wrappers own both `_inner` and a lazy `_defaultInterface`, but
+  `acquireInterfaceReference()` previously detached the queried interface from
+  its parent. Closing `nativeObject` therefore released `_inner` without
+  releasing that independently owned query-interface reference. The drag
+  adapter also replaced and cleared its retained current point without closing
+  it.
+- **Runtime resolution:** `ComObjectReference` now owns a lock-protected child
+  registry. `acquireInterfaceReference(parent, iid)` registers the returned
+  interface before it escapes; parent close closes all children and then the
+  parent pointer, attempts every close, preserves the first failure, and
+  suppresses later failures. Registration that loses a race with parent close
+  closes the incoming reference and reports the parent as disposed.
+- **Compose action:** deterministically close synchronous pointer callback
+  projections, point properties, intermediate collections, and fetched
+  historical points. Transfer only the current press/move point into a
+  one-value drag owner that closes on replacement, cancel, drag completion, or
+  disposal. Do not introduce a global delegate callback lease: projected event
+  arguments outside this Compose boundary must remain retainable until their
+  owner is explicitly closed.
+- **Validation so far:** focused ownership tests and the complete
+  `:winrt-runtime:jvmTest :winrt-runtime:mingwX64Test` suites pass with
+  `--no-configuration-cache`. Final compose-ui sample and JVM/MinGW memory
+  plateau measurements remain required before closing this issue.
 
 ## KWINRT-063: Desktop InputPane interop helper was not generated
 
