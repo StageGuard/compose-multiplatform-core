@@ -251,10 +251,7 @@ class WinUIDragAndDropAdapterTest {
         )
         runCurrent()
 
-        assertEquals(
-            listOf("drop", "handled=false", "deferral", "terminated"),
-            events,
-        )
+        assertEquals(listOf("drop", "handled=false", "deferral", "terminated"), events)
     }
 
     @Test
@@ -332,6 +329,63 @@ class WinUIDragAndDropAdapterTest {
 
         assertSame(operationFailure, failure)
         assertEquals(listOf("operation", "transfer", "pointer"), events)
+    }
+
+    @Test
+    fun ownedResourceSlotClosesReplacedAndClearedValues() {
+        val closed = mutableListOf<String>()
+        val slot = WinUIOwnedResourceSlot<String> { closed += it }
+
+        assertTrue(slot.replace("first").ownsIncoming)
+        assertTrue(slot.replace("second").ownsIncoming)
+        assertEquals(listOf("first"), closed)
+        assertEquals("second", slot.value)
+
+        slot.clear().failure?.let { throw it }
+        assertEquals(listOf("first", "second"), closed)
+        assertNull(slot.value)
+    }
+
+    @Test
+    fun ownedResourceSlotKeepsNewValueWhenOldCloseFails() {
+        val failure = IllegalStateException("close failed")
+        val slot = WinUIOwnedResourceSlot<String> { if (it == "first") throw failure }
+        slot.replace("first")
+
+        val result = slot.replace("second")
+
+        assertTrue(result.ownsIncoming)
+        assertSame(failure, result.failure)
+        assertEquals("second", slot.value)
+    }
+
+    @Test
+    fun ownedResourceSlotDoesNotCloseIdenticalValueOnReplacement() {
+        val value = Any()
+        val closed = mutableListOf<Any>()
+        val slot = WinUIOwnedResourceSlot<Any> { closed += it }
+        slot.replace(value)
+
+        val result = slot.replace(value)
+
+        assertTrue(result.ownsIncoming)
+        assertEquals(emptyList(), closed)
+        slot.clear().failure?.let { throw it }
+        assertEquals(listOf(value), closed)
+    }
+
+    @Test
+    fun disposedOwnedResourceSlotRejectsIncomingValue() {
+        val closed = mutableListOf<String>()
+        val slot = WinUIOwnedResourceSlot<String> { closed += it }
+        slot.dispose().failure?.let { throw it }
+
+        val result = slot.replace("late")
+
+        assertFalse(result.ownsIncoming)
+        assertNull(result.failure)
+        assertNull(slot.value)
+        assertEquals(emptyList(), closed)
     }
 
     @Test

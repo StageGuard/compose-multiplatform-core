@@ -72,7 +72,8 @@ internal class WinUIDragAndDropAdapter(
     private var eventScope: CoroutineScope? = null
     private var activeTransfer: WinUIActiveDragTransfer? = null
     private var pendingDrop: WinUIPendingDrop? = null
-    private var latestPointerPoint: PointerPoint? = null
+    private val sourcePointerPoint =
+        WinUIOwnedResourceSlot<PointerPoint> { point -> point.nativeObject.close() }
     private var pendingSourceTransfer: WinUIPendingSourceTransfer? = null
     private var activeDragOperation: WinRTAsyncOperationReference<DataPackageOperation>? = null
     private val dragSession =
@@ -98,24 +99,25 @@ internal class WinUIDragAndDropAdapter(
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
-        val cleanupActions = buildList<() -> Unit> {
-            add { dragAndDropManager.clearStarter(this@WinUIDragAndDropAdapter) }
-            add(::cancelPendingDrop)
-            add {
-                runWinUIDragSourceCleanup(
-                    closeActiveDragOperation = ::closeActiveDragOperation,
-                    clearPendingSourceTransfer = ::clearPendingSourceTransfer,
-                    clearPointerPoint = { latestPointerPoint = null },
-                )
+        val cleanupActions =
+            buildList<() -> Unit> {
+                add { dragAndDropManager.clearStarter(this@WinUIDragAndDropAdapter) }
+                add(::cancelPendingDrop)
+                add {
+                    runWinUIDragSourceCleanup(
+                        closeActiveDragOperation = ::closeActiveDragOperation,
+                        clearPendingSourceTransfer = ::clearPendingSourceTransfer,
+                        clearPointerPoint = ::disposeSourcePointerPoint,
+                    )
+                }
+                add { lifecycleJob.cancel() }
+                registrations.forEach { registration ->
+                    add { registration.event.remove(registration.token) }
+                }
+                addAll(sourceUnregisterActions)
+                add { dragSession.terminate(DragAndDropEvent()) }
+                add { root.allowDrop = false }
             }
-            add { lifecycleJob.cancel() }
-            registrations.forEach { registration ->
-                add { registration.event.remove(registration.token) }
-            }
-            addAll(sourceUnregisterActions)
-            add { dragSession.terminate(DragAndDropEvent()) }
-            add { root.allowDrop = false }
-        }
         runWinUIDragAndDropCleanup(*cleanupActions.toTypedArray())
     }
 
@@ -125,7 +127,7 @@ internal class WinUIDragAndDropAdapter(
         drawDragDecoration: DrawScope.() -> Unit,
     ): Boolean {
         if (isDisposed || pendingSourceTransfer != null || activeDragOperation != null) return false
-        val pointerPoint = latestPointerPoint ?: return false
+        val pointerPoint = sourcePointerPoint.value ?: return false
         pendingSourceTransfer =
             WinUIPendingSourceTransfer(
                 transferData = transferData,
@@ -220,9 +222,7 @@ internal class WinUIDragAndDropAdapter(
                 args = args,
                 dispatch = dispatch,
                 completeDeferral = deferral::complete,
-                onTerminated = {
-                    if (pendingDrop === pending) pendingDrop = null
-                },
+                onTerminated = { if (pendingDrop === pending) pendingDrop = null },
             )
         pending = WinUIPendingDrop(termination)
         pendingDrop = pending
@@ -295,7 +295,7 @@ internal class WinUIDragAndDropAdapter(
                 runWinUIDragSourceCleanup(
                     closeActiveDragOperation = { closeActiveDragOperation(cancel = false) },
                     clearPendingSourceTransfer = ::clearPendingSourceTransfer,
-                    clearPointerPoint = { latestPointerPoint = null },
+                    clearPointerPoint = ::clearSourcePointerPoint,
                 )
             }
         }
@@ -375,25 +375,24 @@ internal class WinUIDragAndDropAdapter(
         runCatching { target.requestedOperation = source.requestedOperation }
         var forwardedFormat = false
         formats.forEach { format ->
-            val handler =
-                DataProviderHandler { request ->
-                    val deferral = runCatching { request.getDeferral() }.getOrNull()
-                    val scope = eventCoroutineScope()
-                    if (scope == null) {
-                        runCatching { deferral?.complete() }
-                    } else {
-                        scope.launch {
-                            try {
-                                runCatching {
-                                    val value = sourceView.getDataAsync(format).await()
-                                    request.setData(value)
-                                }
-                            } finally {
-                                runCatching { deferral?.complete() }
+            val handler = DataProviderHandler { request ->
+                val deferral = runCatching { request.getDeferral() }.getOrNull()
+                val scope = eventCoroutineScope()
+                if (scope == null) {
+                    runCatching { deferral?.complete() }
+                } else {
+                    scope.launch {
+                        try {
+                            runCatching {
+                                val value = sourceView.getDataAsync(format).await()
+                                request.setData(value)
                             }
+                        } finally {
+                            runCatching { deferral?.complete() }
                         }
                     }
                 }
+            }
             if (runCatching { target.setDataProvider(format, handler) }.isSuccess) {
                 pending.dataProviders += handler
                 forwardedFormat = true
@@ -415,10 +414,19 @@ internal class WinUIDragAndDropAdapter(
         activeDragOperation = null
     }
 
-    internal fun updateSourcePointerPoint(pointerPoint: PointerPoint?) {
-        if (!isDisposed) {
-            latestPointerPoint = pointerPoint
+    internal fun updateSourcePointerPoint(pointerPoint: PointerPoint?): WinUIOwnedResourceUpdate =
+        if (isDisposed) {
+            WinUIOwnedResourceUpdate(ownsIncoming = false)
+        } else {
+            sourcePointerPoint.replace(pointerPoint)
         }
+
+    private fun clearSourcePointerPoint() {
+        sourcePointerPoint.clear().failure?.let { throw it }
+    }
+
+    private fun disposeSourcePointerPoint() {
+        sourcePointerPoint.dispose().failure?.let { throw it }
     }
 
     internal fun isSourceElementForTest(element: UIElement): Boolean = source === element
@@ -500,10 +508,7 @@ internal class WinUIDragAndDropAdapter(
     private fun dispatchDropAndTerminate(dispatch: WinUIComposeDragAndDropDispatch): Boolean {
         var handled = false
         runWinUIDragAndDropCleanup(
-            {
-                handled =
-                    dispatch.withPlatformData { dragAndDropManager.onDrop(dispatch.event) }
-            },
+            { handled = dispatch.withPlatformData { dragAndDropManager.onDrop(dispatch.event) } },
             { dispatch.withPlatformData { dragSession.terminate(dispatch.event) } },
         )
         return handled
@@ -606,11 +611,7 @@ private data class WinUIDragAndDropEventRegistration(
     val handler: DragEventHandler,
 )
 
-internal data class WinUIDragDecoration(
-    val width: Int,
-    val height: Int,
-    val bgraPixels: ByteArray,
-)
+internal data class WinUIDragDecoration(val width: Int, val height: Int, val bgraPixels: ByteArray)
 
 internal fun renderWinUIDragDecoration(
     decorationSize: Size,
@@ -620,13 +621,14 @@ internal fun renderWinUIDragDecoration(
     val width = ceil(decorationSize.width.toDouble()).toInt().coerceAtLeast(1)
     val height = ceil(decorationSize.height.toDouble()).toInt().coerceAtLeast(1)
     val imageBitmap = ImageBitmap(width, height)
-    CanvasDrawScope().draw(
-        density = density,
-        layoutDirection = LayoutDirection.Ltr,
-        canvas = Canvas(imageBitmap),
-        size = Size(width.toFloat(), height.toFloat()),
-        block = drawDragDecoration,
-    )
+    CanvasDrawScope()
+        .draw(
+            density = density,
+            layoutDirection = LayoutDirection.Ltr,
+            canvas = Canvas(imageBitmap),
+            size = Size(width.toFloat(), height.toFloat()),
+            block = drawDragDecoration,
+        )
     val argbPixels = IntArray(width * height)
     imageBitmap.readPixels(argbPixels)
     val bgraPixels = ByteArray(argbPixels.size * 4)
