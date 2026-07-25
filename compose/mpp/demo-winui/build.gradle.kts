@@ -367,11 +367,16 @@ fun RunWinRTApplicationHostTask.configureWinUIMppSampleApplicationHost(
             // Keep the sample's initial private footprint bounded. The host
             // can still be overridden through KOTLIN_WINRT_JVM_OPTIONS when
             // running a larger application workload.
-            "-Xms16m",
-            "-Xmx64m",
+            "-Xms8m",
+            "-Xmx32m",
+            "-Xss128k",
             "-XX:+UseSerialGC",
             "-XX:TieredStopAtLevel=1",
-            "-XX:ReservedCodeCacheSize=32m",
+            "-XX:CICompilerCount=1",
+            "-XX:ReservedCodeCacheSize=8m",
+            "-XX:MaxMetaspaceSize=44m",
+            "-XX:CompressedClassSpaceSize=128m",
+            "-XX:-UsePerfData",
             "-Dfile.encoding=UTF-8",
             "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
             "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",

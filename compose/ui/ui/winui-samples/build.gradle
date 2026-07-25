@@ -95,11 +95,16 @@ def registerWinUISampleTask = { String taskName, String descriptionText, String 
         description = descriptionText
         def sampleLog = layout.buildDirectory.file("validation/${taskName}.log")
         def jvmOptions = [
-                "-Xms16m",
-                "-Xmx64m",
+                "-Xms8m",
+                "-Xmx32m",
+                "-Xss128k",
                 "-XX:+UseSerialGC",
                 "-XX:TieredStopAtLevel=1",
-                "-XX:ReservedCodeCacheSize=32m",
+                "-XX:CICompilerCount=1",
+                "-XX:ReservedCodeCacheSize=8m",
+                "-XX:MaxMetaspaceSize=44m",
+                "-XX:CompressedClassSpaceSize=128m",
+                "-XX:-UsePerfData",
                 "-Dfile.encoding=UTF-8",
                 "-Dcompose.winui.sample.autoExit=true",
         ]

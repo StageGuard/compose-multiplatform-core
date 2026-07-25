@@ -56,7 +56,8 @@ baseline, not every retest attempt.
 - **Status:** Closed locally on 2026-07-25. Runtime ownership is fixed in
   kotlin-winrt submodule commit `f5f90d75`; compose pointer cleanup is in
   commits `595a3cf15d9` and `493b94d3891`; sample host heap defaults are
-  bounded to `-Xms16m -Xmx64m`.
+  bounded to `-Xms8m -Xmx32m` with a 128 KB thread stack, 44 MB metaspace,
+  and 8 MB code cache.
 - **Observed in:** `:compose:mpp:demo-winui:runWinUIMppSampleInteractive` on the
   JVM and MinGW targets while continuously moving the mouse over Compose
   content.
@@ -87,13 +88,19 @@ baseline, not every retest attempt.
   owner is explicitly closed.
 - **Memory validation:** replacing `-Xmx512m` with `-Xms64m -Xmx256m` reduced
   the measured host baseline to roughly 460 MB; `-Xms32m -Xmx128m` reduced it
-  to roughly 389 MB; the current `-Xms16m -Xmx64m` setting starts around
-  325 MB with SerialGC, Tier 1 compilation, and a 32 MB code cache. The
-  staged JVM MPP host completed all 99 demos under the 64 MB heap.
-  After 16,000 synthetic pointer inputs, the old host with pointer cleanup had
-  only about 10 MB residual private growth and about 1.5 MB NMT malloc delta
-  after full GC and an idle period. This is a small native allocator plateau,
-  not the former hundreds-of-megabytes projection retention.
+  to roughly 389 MB. The current `-Xms8m -Xmx32m -Xss128k` setting with one
+  compiler thread, an 8 MB code cache, and a 44 MB metaspace cap starts around
+  307 MB for the full MPP host and completes all 99 demos and normal shutdown.
+  A 32 MB NMT sample commits about 32 MB Java heap, 35 MB metaspace, and 9.5
+  MB code, while the loaded WinUI/Skiko/D3D modules account for most of the
+  remaining private bytes. A 40 MB metaspace cap reaches the end of the demo
+  traversal but fails during WinAppSDK activation-context teardown; 44 MB is
+  the smallest tested cap that completes cleanly. Profiles below a 32 MB heap
+  reach window startup but cannot complete the 99-demo traversal. After
+  16,000 synthetic pointer inputs, the prior host profile with pointer cleanup
+  had only about 10 MB residual private growth and about 1.5 MB NMT malloc
+  delta after full GC and an idle period. This is a small native allocator
+  plateau, not the former hundreds-of-megabytes projection retention.
 - **Validation:** `:winrt-runtime:jvmTest` and `:winrt-runtime:mingwX64Test`
   pass; compose-ui WinUI JVM compilation and the complete `winuiJvmTest` suite
   pass; `runWinUISkikoSample` and the staged JVM MPP host smoke pass with
