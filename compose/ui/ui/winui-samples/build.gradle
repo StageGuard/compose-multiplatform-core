@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import java.util.zip.ZipFile
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import io.github.composefluent.windows.toolkit.gradle.RunWinAppHostTask
 import io.github.composefluent.windows.toolkit.gradle.WindowsPackageType
@@ -75,45 +74,6 @@ configurations.configureEach { configuration ->
                 .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
                 .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
     }
-    // KWINRT-056: kotlin-winrt does not regenerate the WinRT types that its dependencies already
-    // project, so their projections have to be on the classpath of its projection compilation.
-    // The plugin only adds project dependencies that are already configured, which configuration
-    // on demand does not guarantee, and no external modules, so add both explicitly.
-    if (configuration.name == "kotlinWinRTProjectionCompileClasspath") {
-        configuration.dependencies.add(project.dependencies.project(path: ":compose:ui:ui"))
-        configuration.dependencies.add(
-                project.dependencies.create(
-                        "io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"
-                )
-        )
-    }
-}
-
-// KWINRT-057: JetBrains publishes its JVM redirect artifacts (e.g. org.jetbrains.androidx.
-// lifecycle:lifecycle-common-jvm) as jars without classes, named like the androidx jar they
-// depend on. The application host stages its runtime jars into one directory and rejects two
-// jars with the same file name, so leave the jars without content out.
-tasks.named("buildWinAppHostJvmMain").configure {
-    def wiredRuntimeClasspath = files(runtimeClasspath.from.toList())
-    runtimeClasspath.setFrom(wiredRuntimeClasspath.filter { file ->
-        !(file.isFile() && file.name.endsWith(".jar") && new ZipFile(file).withCloseable { zip ->
-            zip.entries().toList().every { it.isDirectory() || it.name.startsWith("META-INF/") }
-        })
-    })
-}
-
-// KWINRT-058: the application host loads jvm.dll of its bundled runtime by path, but the
-// libraries the JVM loads next (zip.dll) import java.dll by name. With another JDK on PATH that
-// JDK's java.dll is picked up and the VM fails to initialize, so put the bundled runtime first.
-tasks.withType(RunWinAppHostTask).configureEach { task ->
-    task.environmentVariables.put(
-            "PATH",
-            task.hostExecutable.map { executable ->
-                def runtimeBin = new File(executable.asFile.parentFile, "runtime/bin")
-                [runtimeBin.absolutePath, System.getenv("PATH")].findAll { it != null }
-                        .join(File.pathSeparator)
-            }
-    )
 }
 
 java {
@@ -124,37 +84,10 @@ java {
     targetCompatibility = JavaVersion.VERSION_25
 }
 
-// KWINRT-060: kotlin-winrt puts the authored .winmd of this module into the runtime assets
-// resources twice: from the compilation output and from the staged application package.
-tasks.named("processResources").configure {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
-
 tasks.withType(JavaCompile).configureEach {
     sourceCompatibility = JavaVersion.VERSION_25.toString()
     targetCompatibility = JavaVersion.VERSION_25.toString()
     options.release.set(25)
-}
-
-// KWINRT-055: the authoring scanner of the published kotlin-winrt snapshot reads CRLF sources at
-// the offsets of their LF-normalized text, which loses the package of every authored class in a
-// checkout with core.autocrlf=true. Scan an LF copy until the fix on kotlin-winrt's xaml-support
-// branch is published.
-def prepareWinUiAuthoringSources = tasks.register("prepareWinUiAuthoringSources", Sync) {
-    from(project.file("src/main/kotlin"))
-    into(layout.buildDirectory.dir("generated/compose-winui/authoring-sources"))
-    filter(
-            org.apache.tools.ant.filters.FixCrLfFilter,
-            eol: org.apache.tools.ant.filters.FixCrLfFilter.CrLf.newInstance("lf")
-    )
-}
-
-tasks.named("generateWinRTProjections").configure {
-    sourceRoots.setFrom(prepareWinUiAuthoringSources.map { it.destinationDir })
-}
-
-tasks.named("generateWinRTAuthoringCandidates").configure {
-    dependsOn(prepareWinUiAuthoringSources)
 }
 
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {

@@ -400,13 +400,18 @@ tasks.register("generateNotoFontFallbackData", GenerateNotoFontFallbackDataTask.
     )
 }
 
-// KWINRT-053: applied after the Android target is declared, because AGP only allows the
-// dependency resolution that the plugin does in its afterEvaluate hook once AGP's own
-// afterEvaluate hook has run.
+// Applied after androidXMultiplatform has applied the Kotlin plugin. The toolkit applies
+// KotlinBaseApiPlugin for its standalone compile tasks, and the AndroidX build logic takes that
+// for AGP's built-in Kotlin unless a Kotlin plugin is already there (see AndroidXImplPlugin).
 if (composeWinUiGradlePluginAvailable) {
     apply plugin: "io.github.compose-fluent.windows-toolkit"
 
     windows {
+        // Compose UI declares no types for XAML markup, so it needs no XAML schema and not the
+        // second compilation that exporting one takes.
+        xaml {
+            exportLibrarySchema = false
+        }
         packageReferences {
             restoreNuGetPackages = providers
                     .gradleProperty("composeWinUi.restoreNuGetPackages")
@@ -592,16 +597,6 @@ if (composeWinUiGradlePluginAvailable) {
                         .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
             }
         }
-        // KWINRT-056: kotlin-winrt does not regenerate the WinRT types that skiko-winui already
-        // projects, but it only puts project dependencies on the classpath of its projection
-        // compilation. skiko-winui is an external module, so add it explicitly.
-        if (configuration.name == "kotlinWinRTProjectionWinuiJvmCompileClasspath") {
-            configuration.dependencies.add(
-                    project.dependencies.create(
-                            "io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"
-                    )
-            )
-        }
     }
 
     tasks.withType(KotlinCompile).configureEach { task ->
@@ -618,35 +613,5 @@ if (composeWinUiGradlePluginAvailable) {
         if (task.name.contains("Winui")) {
             task.enabled = false
         }
-    }
-
-    // KWINRT-054: kotlin-winrt registers a projection compilation for every Kotlin/JVM
-    // compilation of the project, including the Android one, whose classpath cannot compile the
-    // JVM projections. Only the WinUI compilation uses them.
-    tasks.withType(KotlinCompile).configureEach { task ->
-        if (task.name.startsWith("compileKotlinWinRTProjection") && !task.name.endsWith("WinuiJvm")) {
-            task.enabled = false
-        }
-    }
-
-    // KWINRT-055: the authoring scanner of the published kotlin-winrt snapshot reads CRLF
-    // sources at the offsets of their LF-normalized text, which loses the package of every
-    // authored class in a checkout with core.autocrlf=true. Scan an LF copy until the fix on
-    // kotlin-winrt's xaml-support branch is published.
-    def prepareWinUiAuthoringSources = tasks.register("prepareWinUiAuthoringSources", Sync) {
-        from(project.file("src/winuiMain/kotlin"))
-        into(layout.buildDirectory.dir("generated/compose-winui/authoring-sources"))
-        filter(
-                org.apache.tools.ant.filters.FixCrLfFilter,
-                eol: org.apache.tools.ant.filters.FixCrLfFilter.CrLf.newInstance("lf")
-        )
-    }
-
-    tasks.named("generateWinRTProjections").configure {
-        sourceRoots.setFrom(prepareWinUiAuthoringSources.map { it.destinationDir })
-    }
-
-    tasks.named("generateWinRTAuthoringCandidates").configure {
-        dependsOn(prepareWinUiAuthoringSources)
     }
 }

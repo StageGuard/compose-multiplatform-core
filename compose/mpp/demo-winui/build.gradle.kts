@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import io.github.composefluent.windows.toolkit.gradle.BuildWinAppHostTask
 import io.github.composefluent.windows.toolkit.gradle.GenerateWinRTProjectionsTask
 import io.github.composefluent.windows.toolkit.gradle.RunWinAppHostTask
 import io.github.composefluent.windows.toolkit.gradle.WindowsPackageType
@@ -344,18 +343,6 @@ configurations.configureEach {
                 .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
         }
     }
-    // KWINRT-056: kotlin-winrt does not regenerate the WinRT types that its dependencies already
-    // project, so their projections have to be on the classpath of its projection compilation.
-    // The plugin only adds project dependencies that are already configured, which configuration
-    // on demand does not guarantee, and no external modules, so add both explicitly.
-    if (name == "kotlinWinRTProjectionWinuiJvmCompileClasspath") {
-        dependencies.add(project.dependencies.project(":compose:ui:ui"))
-        dependencies.add(
-            project.dependencies.create(
-                "io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"
-            )
-        )
-    }
 }
 
 tasks.named<GenerateWinRTProjectionsTask>("generateWinRTProjections") {
@@ -371,33 +358,6 @@ tasks.named("compileKotlinWinuiJvm") {
 
 tasks.named("processWinuiJvmMainResources") {
     dependsOn(stageWinUIMppSampleResources)
-}
-
-// KWINRT-057: JetBrains publishes its JVM redirect artifacts (e.g. org.jetbrains.androidx.
-// lifecycle:lifecycle-common-jvm) as jars without classes, named like the androidx jar they
-// depend on. The application host stages its runtime jars into one directory and rejects two
-// jars with the same file name, so leave the jars without content out.
-tasks.named<BuildWinAppHostTask>("buildWinAppHostWinuiJvmMain") {
-    val wiredRuntimeClasspath = files(runtimeClasspath.from.toList())
-    runtimeClasspath.setFrom(wiredRuntimeClasspath.filter { file -> !isJarWithoutContent(file) })
-}
-
-fun isJarWithoutContent(file: File): Boolean =
-    file.isFile && file.extension == "jar" && ZipFile(file).use { zip ->
-        zip.entries().asSequence().none { !it.isDirectory && !it.name.startsWith("META-INF/") }
-    }
-
-// KWINRT-058: the application host loads jvm.dll of its bundled runtime by path, but the
-// libraries the JVM loads next (zip.dll) import java.dll by name. With another JDK on PATH that
-// JDK's java.dll is picked up and the VM fails to initialize, so put the bundled runtime first.
-tasks.withType<RunWinAppHostTask>().configureEach {
-    environmentVariables.put(
-        "PATH",
-        hostExecutable.map { executable ->
-            val runtimeBin = executable.asFile.parentFile.resolve("runtime/bin")
-            listOfNotNull(runtimeBin.absolutePath, System.getenv("PATH")).joinToString(File.pathSeparator)
-        },
-    )
 }
 
 tasks.withType<KotlinCompile>().configureEach {
@@ -737,7 +697,8 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
             "compose-ui WinUI jar is missing the kotlin-winrt compiler support manifest."
         }
         val requiredUiJarEntries = listOf(
-            "io/github/composefluent/winrt/projections/support/WinRTAuthoringTypeDetailsRegistrar_ui.class",
+            // One registrar per source set that declares authored classes.
+            "io/github/composefluent/winrt/projections/support/WinRTAuthoringTypeDetailsRegistrar_ui_winuiMain.class",
             "kotlin-winrt/type-index.tsv",
             "kotlin-winrt-authoring/ui.host.json",
             "kotlin-winrt-authoring/ui.winmd",
