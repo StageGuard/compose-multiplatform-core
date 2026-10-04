@@ -1,5 +1,175 @@
 # compose-winui implementation plan
 
+## Desktop parity 2026-10-05
+
+The MPP demo looked and behaved differently on WinUI than on the AWT desktop
+target with the same common code. The WinUI platform code was compared with
+the desktop and Skiko implementations it stands in for (`desktopMain`,
+`skikoMain`) and changed to behave the same way. Apart from moving three Skiko
+files to `skikoRenderingMain` (below), only fork-only WinUI code and fork-only
+build files changed.
+
+Rendering:
+
+- [x] Owned layers are the Skiko `GraphicsLayerOwnerLayer`: alpha, elevation
+  shadows, outline clips and hit testing, render effects, color filters, blend
+  modes, compositing strategy, camera distance and outsets work, and the layer
+  matrix is applied in the order hit testing uses. `GraphicsLayerOwnerLayer`,
+  `OwnedLayerManager` and `Matrices` moved from `skikoMain` to
+  `skikoRenderingMain`, which the WinUI `ui` shares, instead of a WinUI copy;
+  the code is unchanged. `WinUIOwner` implements `OwnedLayerManager`, records
+  dirty layers before each frame and sets the shadow light from the window
+  size.
+- [x] The content gets the client area of the window (`AppWindow.ClientSize`)
+  instead of the outer window size, so nothing is cut off at the right and
+  bottom edges.
+- [x] A window without a system backdrop has the background of a desktop
+  window (`#EEEEEE`): the frame is cleared with it, because the swap chain
+  ignores alpha and a transparent frame showed black.
+- [x] Render requests always reach the Skia layer, which coalesces them. The
+  render host held them back until the next draw, so a request the layer did
+  not draw for (no surface size yet) stopped rendering until the next input
+  event, for example a dialog shown with the screen did not appear.
+- [x] `isSystemInDarkTheme()` follows the theme of the XAML root
+  (`FrameworkElement.ActualTheme`).
+- [x] The deprecated `LocalFontLoader` loads Skia typefaces, as on Skiko.
+
+Input:
+
+- [x] Pointer events use local positions for the previous position too, so a
+  drag no longer jumps by the window origin on the screen (sliders, drags,
+  scroll bars).
+- [x] Hover follows the content after layout, scrolling and navigation: the
+  frame loop sends the synthetic move after layout, as the Skiko scenes do.
+- [x] A wheel notch scrolls the lines of the system setting
+  (`SPI_GETWHEELSCROLLLINES`, page scroll included) instead of one line;
+  Shift turns the vertical wheel into a horizontal one.
+- [x] A wheel turn or leaving the surface with a pressed button no longer ends
+  the drag; touchpad input is mouse input.
+- [x] Layout runs before hit testing, and the work scheduled by an input event
+  handler runs right after the event.
+- [x] Key events reach Compose after a click into the content: the key
+  adapter accepts events from the swap chain panel, which has the XAML focus
+  then. Before, Esc, Tab and the arrow keys were dropped.
+- [x] Unconsumed Esc is a back event (dialogs, focusable popups, `BackHandler`,
+  navigation); punctuation keys and NumPad Enter are mapped;
+  `utf16CodePoint` is the character of the keyboard layout (`ToUnicodeEx`);
+  modifiers are reset when the window loses focus;
+  `LocalWindowInfo.keyboardModifiers` is updated; only focus navigation keys
+  switch to keyboard input mode.
+- [x] `ViewConfiguration` has the desktop values: double tap 300 ms, touch
+  slop 18 dp, minimum touch target 48 dp.
+- [x] Touch and pen contacts that are down are in every pointer event, so
+  multi-touch gestures (pinch to zoom, two-finger pan) work; WinUI reports one
+  contact per event. Pen events carry the pen pressure.
+- [x] Coordinates passed to XAML are DIPs: `positionOnScreen()`,
+  `localToScreen`, the IME bounds, and the size, position and clip of
+  `WinUIView` at scales other than 100 %. `RectManager` gets the window size
+  and screen offset, so `onVisibilityChanged` and `onLayoutRectChanged` work.
+
+Windows, popups and dialogs:
+
+- [x] `Popup` and `Dialog` are layers above the content of the window, as the
+  Skiko `ComposeSceneLayer`s on the same canvas: positioned and measured
+  against the window, dismissed by a press outside (popups) or a release
+  outside (dialogs) and by Esc when focusable, keeping pointer input from the
+  content below when focusable, with the dialog scrim, centring, platform
+  default width and appearance / disappearance animation.
+  `PopupProperties.layerType = OnWindow` keeps the native flyout.
+- [x] `Popup(..., onPreviewKeyEvent, onKeyEvent, content)` overloads, as on
+  the Skiko targets, so the Material and Material 3 `DropdownMenu` move focus
+  with the arrow keys. The WinUI copies of the Material menus, exposed
+  dropdown popup, modal bottom sheet, wide navigation rail and edge-to-edge
+  dialog are removed: the Skiko versions compile for WinUI now.
+  `PopupProperties` and `DialogProperties` have the constructors and
+  properties of the Skiko targets (`usePlatformInsets`,
+  `consumePointerInputOutside`, `useSoftwareKeyboardInset`, `scrimColor`,
+  `animateTransition`), so the Material sheets and drawers draw one scrim.
+- [x] `Window(state = rememberWindowState(...))`: `WindowState` with size,
+  position (`PlatformDefault`, `Aligned`, `Absolute`), placement (`Floating`,
+  `Maximized`, `Fullscreen`) and `isMinimized`, applied to the `AppWindow` and
+  updated when the user moves, resizes, maximizes or minimizes the window. As
+  on desktop, the size is the outer size of the window.
+- [x] Drag and drop from Compose: `Modifier.dragAndDropSource` starts a WinUI
+  drag (`UIElement.StartDragAsync`) with the drag decoration as its image.
+  `DragAndDropTransferData` has the desktop `supportedActions`,
+  `dragDecorationOffset` and `onTransferCompleted`; `nativeTransferData` is a
+  `String` (text) or a function that fills the `DataPackage`. Drops into
+  Compose are accepted only over a target that takes them, with the action of
+  the modifier keys (Ctrl copies, Shift moves, Ctrl+Shift links), which
+  `DragAndDropEvent.action` reports. Without keys a drag copies when the
+  source allows it; AWT prefers moving. Writing the drag image into the
+  `SoftwareBitmap` needs the kotlin-winrt fix of `KWINRT-063`.
+- [x] `Dispatchers.Main` is the UI thread of the WinUI application
+  (`WinUIMainDispatcherFactory`), so `collectAsStateWithLifecycle`,
+  `repeatOnLifecycle` and `viewModelScope` work.
+- [x] The lifecycle is `RESUMED` while the window has focus, `STARTED` without
+  it and `CREATED` while minimized.
+- [x] The application ends when its content has no window left.
+- [x] The clipboard no longer returns its own last text after another
+  application copied something (clipboard sequence number).
+- [x] The layout direction follows the default locale.
+- [x] `navigation-compose` and `navigation3-ui` compile their WinUI target
+  against the WinUI `ui`. Against the published desktop `ui`, dialog
+  destinations failed with `NoClassDefFoundError: Dialog_skikoKt`.
+- [x] The WinUI demo opens at the size of the desktop demo through
+  `rememberWindowState(width = 1024.dp, height = 850.dp)`, its drag and drop
+  screen is the desktop one (a source and a target), and its
+  `TestInteropView` fills the native view with the color, as the desktop one
+  does.
+
+New public API of the WinUI `ui` (WinUI target only):
+
+- `Popup(alignment, offset, onDismissRequest, properties, onPreviewKeyEvent,
+  onKeyEvent, content)` and `Popup(popupPositionProvider, onDismissRequest,
+  properties, onPreviewKeyEvent, onKeyEvent, content)`.
+- `PopupProperties` and `DialogProperties` constructors and properties of the
+  Skiko targets (experimental ones marked `@ExperimentalComposeUiApi`).
+- `Window(onCloseRequest, state, ...)`, `WindowState`, `rememberWindowState`,
+  `WindowPosition`, `WindowPlacement`.
+- `DragAndDropTransferData(nativeTransferData, supportedActions,
+  dragDecorationOffset, onTransferCompleted)`, `DragAndDropTransferAction`,
+  `DragAndDropEvent.action` (experimental).
+
+Validation on 2026-10-05 (Windows x64, 150 % scale, dark app mode):
+
+- [x] `winuiJvmTest` of `ui`: 202 tests pass (multi-touch contacts, pen
+  pressure, drag actions, the drag image bitmap and the shared owned layer
+  included).
+- [x] Default mode: `ui` compiles for desktop, wasmJs and js, and the 100
+  desktop layer tests (`*GraphicsLayer*`, `*OwnedLayer*`, `*Layer*Test*`)
+  pass after the move to `skikoRenderingMain`.
+- [x] The WinUI and desktop demo windows open with the same client
+  (1514 × 1219 px) and outer (1536 × 1275 px) size at 150 %.
+- [x] With focusable menus, the arrow keys move the focus through the
+  `DropdownMenu` items on WinUI as on desktop, and Esc closes the menu.
+- [x] The open `ModalBottomSheet` and `ModalNavigationDrawer` match desktop,
+  with one scrim.
+- [x] Drag and drop screen, dragged with real mouse input: the drag image
+  follows the pointer at the same offset as on desktop, WinUI shows "no drop"
+  outside the target and "Copy" over it, the target shows "Hello, DnD!" after
+  the drop, and the source gets `Copy` (desktop: `Move`). WinUI draws the drag
+  image opaque; the AWT one is translucent.
+- [x] `:compose:mpp:demo-winui:runWinUIMppSample` passes; the auto traverse
+  enters 105 of 105 screens.
+- [x] `compileKotlinWinuiJvm` of `navigation-compose`, `navigation3-ui`, the
+  two `*-winui` navigation modules, and the `winui-samples` classes.
+- [x] The 105 demo screens captured on desktop and on WinUI at the same client
+  size (1280 × 900 px) and compared pixel by pixel. Apart from a one pixel
+  horizontal offset of the AWT content, the screens match except where the
+  demo draws random colors or animates, and where the WinUI demo has its own
+  screen (drag and drop, pointer icons, font rasterization, configurable
+  popup, dialog, Lottie). Wheel scrolling scrolls the same distance, and the
+  open dropdown menu and dialog match desktop; on WinUI a slider drag follows
+  the pointer and outside clicks and Esc dismiss the menu and the dialog.
+
+Not changed:
+
+- [ ] The text context menu is the native `MenuFlyout` on WinUI and the
+  Compose context menu on desktop, on purpose.
+- [ ] `foundation` `winuiJvmTest` cannot resolve `:compose:ui:ui-test` in the
+  WinUI build (no desktop variant of `ui-skiko` there).
+
 ## Upstream sync 2026-10-04
 
 - [x] Merged JetBrains `jb-main` `56d0128a85c` (#3477; 387 commits) into
