@@ -19,13 +19,33 @@ package androidx.compose.mpp.demo
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.WinUIView
-import microsoft.ui.xaml.controls.ContentControl
+import microsoft.ui.xaml.controls.Grid
+import microsoft.ui.xaml.media.SolidColorBrush
+import windows.ui.Color as WinUIColor
 
 @Composable
 internal actual fun TestInteropView(modifier: Modifier, color: Color) {
+    // A native panel filled with the color, as the JPanel of the desktop demo.
     WinUIView(
-        factory = { ContentControl() },
+        factory = {
+            Grid().also { grid ->
+                grid.background = SolidColorBrush().also { brush ->
+                    brush.color = color.toWinUIColor()
+                }
+            }
+        },
         modifier = modifier,
+    )
+}
+
+private fun Color.toWinUIColor(): WinUIColor {
+    val argb = toArgb()
+    return WinUIColor(
+        a = (argb ushr 24).toUByte(),
+        r = (argb shr 16 and 0xFF).toUByte(),
+        g = (argb shr 8 and 0xFF).toUByte(),
+        b = (argb and 0xFF).toUByte(),
     )
 }
