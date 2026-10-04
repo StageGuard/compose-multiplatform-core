@@ -9,8 +9,13 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
+- **skiko-winui build in use:** `winui_dev` `6e5918d58`, built against
+  kotlin-winrt `xaml-support` `3d7855783` and published to Maven Local from the
+  local checkout (since 2026-10-04; before that a `skiko/build/repo` built
+  against the kotlin-winrt snapshot from `master`).
 - **Open upstream/publication coordinates:** `SKIKO-011`.
 - **Open upstream/publication/API:** `SKIKO-012`.
+- **Open upstream/build:** `SKIKO-013`.
 - **Open compose-side integration:** none.
 - **Open compose-side workarounds:** `SKIKO-011`, `SKIKO-012`.
 - **Closed/fixed or superseded:** `SKIKO-001`, `SKIKO-002`, `SKIKO-003`,
@@ -25,12 +30,45 @@ baseline, not every retest attempt.
   Maven Central snapshots is from 2026-07-26, before skiko-winui merged
   upstream `v0.154.0-alpha01+5` (Skia m154) and moved to the kotlin-winrt
   Windows toolkit plugin.
-- **compose-winui workaround:** `buildSrc-fork/repos.gradle` reads
-  `COMPOSE_WINUI_MAVEN_REPO`, a list of local Maven repositories that are
-  consulted before the published snapshots. Point it at
-  `<skiko>/skiko/build/repo` after `:skiko:publishSkikoWinuiToBuildRepo`.
-- **Remove when:** a snapshot of the current skiko-winui `winui_dev` is
-  published.
+- **compose-winui workaround:** skiko-winui is built from the local checkout
+  and published with `publishSkikoWinuiToMavenLocal`.
+  `buildSrc-fork/repos.gradle` reads `COMPOSE_WINUI_MAVEN_REPO`, a list of
+  local Maven repositories that are consulted first for the group
+  `io.github.compose-fluent`. Point it at the Maven Local repository
+  (`%USERPROFILE%\.m2\repository`), so that this build, and the kotlin-winrt
+  build next to it, win over the published snapshots of the same version.
+  Until 2026-10-04 it pointed at `<skiko>/skiko/build/repo`.
+- **Remove when:** snapshots of the skiko-winui and kotlin-winrt branches that
+  compose-winui tracks are published.
+
+## SKIKO-013: skiko-winui does not build against kotlin-winrt `xaml-support` as is
+
+- **Status:** Open. Worked around with uncommitted changes in the local
+  skiko checkout.
+- **Observed in:** `publishSkikoWinuiToMavenLocal` of skiko-winui `winui_dev`
+  `6e5918d58` on 2026-10-04, with kotlin-winrt `xaml-support` `fa4508d7c` and
+  then `4c1a850f4` in Maven Local.
+- **Why compose-winui needs it:** skiko-winui carries the projections that its
+  kotlin-winrt plugin generated and the WinRT identity that the plugin of a
+  consumer reads (`KWINRT-056`), so both have to come from the same
+  kotlin-winrt build.
+- **Failures:**
+  - `skiko/gradle/winui.gradle.kts` resolves the plugin and the runtime modules
+    from the Central snapshot repository first and has no Maven Local, so it
+    builds against the snapshot published from `master`.
+  - `generateWinRTXamlApplicationHeader` fails with `fa4508d7c`
+    (`KWINRT-062`). With `4c1a850f4` it passes, and the XAML schema that the
+    plugin exports for every library then fails `compileKotlinWinuiJvm` on
+    the deprecated `FontRastrSettings`.
+- **Local changes in `skiko/gradle/winui.gradle.kts`:** Maven Local first for
+  the kotlin-winrt group, in the `buildscript` block and in the project
+  repositories; `windows { xaml { exportLibrarySchema.set(false) } }`.
+- **Validation:** `publishSkikoWinuiToMavenLocal` with
+  `-Pskiko.winui.enabled=true -Pskiko.winui.jvmTarget=25
+  -Pskiko.winui.jvmToolchain=25 -Pskiko.winui.mingw.enabled=true` passes and
+  publishes `skiko-winui`, `skiko-winui-jvm`, `skiko-winui-windows`,
+  `skiko-winui-mingw` and `skiko-winui-mingw-runtime`. The skiko-winui tests
+  and samples were not run.
 
 ## SKIKO-012: skiko-winui has no Skottie artifact
 

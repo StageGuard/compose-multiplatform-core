@@ -20,11 +20,13 @@
 - [x] Moved to the kotlin-winrt Windows toolkit plugin
   (`io.github.compose-fluent.windows-toolkit`, `windows { packageReferences { }
   application { } }`), Windows App SDK 2.2.0, and `RunWinAppHostTask` run
-  tasks instead of nested Gradle builds. Workarounds for the published plugin
-  are `KWINRT-052` to `KWINRT-061`.
+  tasks instead of nested Gradle builds. Workarounds for the plugin published
+  from `master` were `KWINRT-052` to `KWINRT-061`; see the next section for
+  the ones that remain.
 - [x] `org.jetbrains.skiko:skiko` is substituted with `skiko-winui` in every
-  WinUI configuration; the current skiko-winui comes from a local repository
-  through `COMPOSE_WINUI_MAVEN_REPO` (`SKIKO-011`).
+  WinUI configuration. At the sync the current skiko-winui came from
+  `skiko/build/repo` through `COMPOSE_WINUI_MAVEN_REPO`; the variable points
+  at Maven Local now (`SKIKO-011`, next section).
 - [x] `ui-skiko` has a `winuiJvm` target with the Skia-backed actuals that
   used to be in `ui-graphics` / `ui-text`. `ui-text` keeps the Skia-free ones.
 - [x] `skikoRenderingMain` additionally shares `GlobalSnapshotManager`,
@@ -56,6 +58,63 @@ application tasks):
 - [x] Without the WinUI flag: `compileKotlinDesktop` of `ui`, `foundation`,
   `material`, `material3`, `navigation-compose` and `navigation3-ui` passes.
 - [ ] Not run: Android, iOS/macOS, web and desktop test tasks.
+
+## Local kotlin-winrt and skiko-winui builds 2026-10-04
+
+- [x] compose-winui builds against the local checkouts of both dependencies,
+  published to Maven Local: kotlin-winrt `xaml-support` `3d7855783`
+  (`0.1.0-SNAPSHOT`; `fa4508d7c` plus the fixes of kotlin-winrt PR #15 and
+  PR #16) and skiko-winui `winui_dev` `6e5918d58` (`0.0.0-SNAPSHOT`), the
+  latter built against that kotlin-winrt (`SKIKO-013`).
+- [x] `COMPOSE_WINUI_MAVEN_REPO` points at the Maven Local repository
+  (`%USERPROFILE%\.m2\repository`). `buildSrc-fork/repos.gradle` reads the
+  repositories of that variable first for the group
+  `io.github.compose-fluent`, so these builds win over the published snapshots
+  of the same version.
+- [x] Removed with `xaml-support`: the LF copy of the authoring sources
+  (`KWINRT-055`) and the explicit additions to the projection compilation
+  classpath (`KWINRT-056`). `winui-samples` no longer filters its host
+  classpath (`KWINRT-057` only affects `demo-winui`).
+- [x] New with `xaml-support`: `:compose:ui:ui` switches off the XAML schema
+  export that the plugin runs for every library, with
+  `windows { xaml { exportLibrarySchema = false } }`. The export failed on
+  `fa4508d7c` (`KWINRT-062`, fixed in kotlin-winrt PR #15). The
+  `demo-winui` graph validation expects the authoring registrar
+  `WinRTAuthoringTypeDetailsRegistrar_ui_winuiMain`, which the plugin now names
+  after the source set.
+- [x] Removed with kotlin-winrt PR #16: the workarounds for `KWINRT-054`
+  (disabled Android projection compilation), `KWINRT-057` (`demo-winui` host
+  class path filter), `KWINRT-058` (`runtime\bin` first on `PATH`) and
+  `KWINRT-060` (`duplicatesStrategy` in `winui-samples`). `KWINRT-053` is
+  fixed too: WinUI builds no longer need configuration on demand.
+- [x] Still there: the toolkit is applied after `androidXMultiplatform`, and
+  `buildSrc-fork` tells the toolkit's `KotlinBaseApiPlugin` apart from AGP
+  built-in Kotlin (see `KWINRT-054`). `KWINRT-052` (Kotlin 2.4.0),
+  `KWINRT-059` (`vswhere.exe` on `PATH`) and `KWINRT-061` (JDK 25) are
+  unchanged.
+
+Validation on 2026-10-04 (Windows x64, JDK 25, Kotlin 2.4.0 in WinUI mode, a
+CRLF checkout, both dependencies from Maven Local; the jars staged into the
+demo host have the SHA-1 of the Maven Local files):
+
+- [x] `compileKotlinWinuiJvm` of the same modules as above and of
+  `demo-winui`.
+- [x] `winuiJvmTest`: `ui` 183, `ui-graphics` 173 (4 of them skipped),
+  `ui-text` 5 tests, no failures.
+- [x] `:compose:mpp:demo-winui:runWinUIMppSample`: all validation and smoke
+  tasks pass; the auto traverse enters 105 of 105 screens.
+- [x] `:compose:ui:ui:winui-samples`: `runWinUIViewSample` and the ten focused
+  samples pass.
+- [x] `:compose:ui:ui:help --no-configure-on-demand` configures.
+- [x] `:compose:ui:ui:compileAndroidMain` passes with the WinUI flag. The
+  toolkit used to put its compiler plugin options on the Android compilation
+  as well (`KWINRT-054`).
+- [x] Without the WinUI flag, on JDK 21: `compileKotlinDesktop` of `ui`,
+  `ui-skiko`, `foundation`, `material`, `material3`, `navigation-compose`,
+  `navigation3-ui` and the MPP demo passes.
+- [ ] Not run: Android, iOS/macOS, web and desktop test tasks; the skiko-winui
+  test suite; the kotlin-winrt suites other than the tests added with the
+  fixes.
 
 ## Architecture
 - [x] Implement compose-winui as a standalone `compose-ui` platform target, comparable in responsibility to `androidMain`.
