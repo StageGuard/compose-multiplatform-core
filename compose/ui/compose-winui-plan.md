@@ -1,5 +1,62 @@
 # compose-winui implementation plan
 
+## Upstream sync 2026-10-04
+
+- [x] Merged JetBrains `jb-main` `56d0128a85c` (#3477; 387 commits) into
+  `winui_dev`: Kotlin 2.4.20, Skiko 0.153.0, Compose 1.13.0-alpha03, the
+  separate fork build (`build-fork.gradle`, `buildSrc-fork`,
+  `settings-fork.gradle`, `libs-fork.versions.toml`, `redirectversions.toml`),
+  the `ui-skiko` module, and published lifecycle / savedstate /
+  navigationevent artifacts instead of projects.
+- [x] The WinUI wiring lives in the fork build files now. The AOSP-side
+  `build.gradle`, `settings.gradle`, `gradle/libs.versions.toml` and
+  `buildSrc/` are identical to upstream.
+- [x] `-PcomposeWinUi.enableJvmTarget=true` selects the WinUI build: it adds
+  the kotlin-winrt plugin to the build classpath, pins Kotlin to 2.4.0
+  (`KWINRT-052`), includes `demo-winui`, `winui-samples` and the two
+  `*-winui` navigation modules, and replaces `desktop()` with `winuiJvm` in
+  the modules that have a WinUI target. Without the flag the build is
+  upstream's and runs on JDK 21.
+- [x] Moved to the kotlin-winrt Windows toolkit plugin
+  (`io.github.compose-fluent.windows-toolkit`, `windows { packageReferences { }
+  application { } }`), Windows App SDK 2.2.0, and `RunWinAppHostTask` run
+  tasks instead of nested Gradle builds. Workarounds for the published plugin
+  are `KWINRT-052` to `KWINRT-061`.
+- [x] `org.jetbrains.skiko:skiko` is substituted with `skiko-winui` in every
+  WinUI configuration; the current skiko-winui comes from a local repository
+  through `COMPOSE_WINUI_MAVEN_REPO` (`SKIKO-011`).
+- [x] `ui-skiko` has a `winuiJvm` target with the Skia-backed actuals that
+  used to be in `ui-graphics` / `ui-text`. `ui-text` keeps the Skia-free ones.
+- [x] `skikoRenderingMain` additionally shares `GlobalSnapshotManager`,
+  `getCurrentThreadId` and the `PlatformPrefetchScheduler` types with WinUI.
+  WinUI registers the Skiko implementation in `WinUIComposeView` and the
+  application runtime, passes a non-immediate dispatcher to `FrameRecomposer`,
+  and no longer has its own `GlobalSnapshotManager`, mesh gradient renderer or
+  `PlatformWindowInsetsProviderNode`.
+- [x] `material3-ripple` has a WinUI target; the WinUI `DropdownMenuPopup`
+  actual is gone because the function is common now.
+- [x] `demo-winui` excludes `LottieAnimation.kt` (`SKIKO-012`) and has no
+  platform pointer icons.
+
+Validation on 2026-10-04 (Windows x64, JDK 25, Kotlin 2.4.0 in WinUI mode,
+skiko-winui from `skiko/build/repo`, `--no-configuration-cache` for the
+application tasks):
+
+- [x] `compileKotlinWinuiJvm` of `ui-graphics`, `ui-text`, `ui-skiko`, `ui`,
+  `foundation-layout`, `foundation`, `animation-core`, `animation`,
+  `material-ripple`, `material`, `material3-ripple`, `material3`,
+  `material3-window-size-class`, the three `adaptive` modules,
+  `navigation-compose`, `navigation3-ui`, and the two `*-winui` navigation
+  modules.
+- [x] `winuiJvmTest`: `ui` 183, `ui-graphics` 173, `ui-text` 5 tests pass.
+- [x] `:compose:mpp:demo-winui:runWinUIMppSample`: all validation and smoke
+  tasks pass; the auto traverse enters 105 of 105 screens.
+- [x] `:compose:ui:ui:winui-samples`: `runWinUIViewSample` and the ten focused
+  samples pass.
+- [x] Without the WinUI flag: `compileKotlinDesktop` of `ui`, `foundation`,
+  `material`, `material3`, `navigation-compose` and `navigation3-ui` passes.
+- [ ] Not run: Android, iOS/macOS, web and desktop test tasks.
+
 ## Architecture
 - [x] Implement compose-winui as a standalone `compose-ui` platform target, comparable in responsibility to `androidMain`.
 - [x] Keep compose-winui independent from `desktopMain`, AWT, Swing, and Skiko AWT/desktop runtime behavior.

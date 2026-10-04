@@ -9,13 +9,37 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/publication coordinates:** none.
-- **Open upstream/publication/API:** none.
+- **Open upstream/publication coordinates:** `SKIKO-011`.
+- **Open upstream/publication/API:** `SKIKO-012`.
 - **Open compose-side integration:** none.
-- **Open compose-side workarounds:** none.
+- **Open compose-side workarounds:** `SKIKO-011`, `SKIKO-012`.
 - **Closed/fixed or superseded:** `SKIKO-001`, `SKIKO-002`, `SKIKO-003`,
   `SKIKO-004`, `SKIKO-005`, `SKIKO-006`, `SKIKO-007`, `SKIKO-008`,
   `SKIKO-009`, and `SKIKO-010`.
+
+## SKIKO-011: Published skiko-winui snapshot predates the m154 sync
+
+- **Status:** Open.
+- **Observed in:** the 2026-10-04 upstream sync. Compose now needs Skiko
+  0.153.0 or newer; `io.github.compose-fluent:skiko-winui:0.0.0-SNAPSHOT` on
+  Maven Central snapshots is from 2026-07-26, before skiko-winui merged
+  upstream `v0.154.0-alpha01+5` (Skia m154) and moved to the kotlin-winrt
+  Windows toolkit plugin.
+- **compose-winui workaround:** `buildSrc-fork/repos.gradle` reads
+  `COMPOSE_WINUI_MAVEN_REPO`, a list of local Maven repositories that are
+  consulted before the published snapshots. Point it at
+  `<skiko>/skiko/build/repo` after `:skiko:publishSkikoWinuiToBuildRepo`.
+- **Remove when:** a snapshot of the current skiko-winui `winui_dev` is
+  published.
+
+## SKIKO-012: skiko-winui has no Skottie artifact
+
+- **Status:** Open.
+- **Observed in:** `compose/mpp/demo`, whose `LottieAnimation.kt` uses
+  `org.jetbrains.skia.skottie`. Upstream moved Skottie out of the core Skiko
+  artifact into `skiko-skottie`, which has no WinUI targets.
+- **compose-winui workaround:** `demo-winui` excludes `LottieAnimation.kt` and
+  compiles `WinUILottieAnimation.kt`, a placeholder with the same signature.
 
 ## SKIKO-010: WinUI popup window surface resize can native-crash
 

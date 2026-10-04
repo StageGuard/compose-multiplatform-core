@@ -9,8 +9,12 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **Open upstream/plugin/runtime:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`.
-- **Open compose-side workarounds:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`.
+- **Open upstream/plugin/runtime:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
+  and `KWINRT-052` to `KWINRT-061` (found while moving to the Windows toolkit
+  plugin during the 2026-10-04 upstream sync; `KWINRT-055` and half of
+  `KWINRT-056` are fixed on kotlin-winrt `xaml-support` but not published).
+- **Open compose-side workarounds:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
+  `KWINRT-052` to `KWINRT-058`, `KWINRT-060`, `KWINRT-061`.
 - **Compose/application policy, not kotlin-winrt helpers:** `KWINRT-012`
   clipboard synchronization and `KWINRT-019` focus timing.
 - **Closed/fixed or superseded:** `KWINRT-001`, `KWINRT-002`, `KWINRT-003`,
@@ -23,6 +27,134 @@ baseline, not every retest attempt.
   `KWINRT-030`, `KWINRT-031`, `KWINRT-032`, `KWINRT-038`, `KWINRT-043`,
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, and `KWINRT-050`.
+
+## KWINRT-052: Compiler plugin only runs on the Kotlin compiler it was built with
+
+- **Status:** Open.
+- **Observed in:** `:compose:ui:ui:compileKotlinWinRTProjectionWinuiJvm` after
+  the 2026-10-04 upstream sync moved the fork to Kotlin 2.4.20, with the
+  published `0.1.0-SNAPSHOT` (kotlin-winrt `master` 2976464e6, built with
+  Kotlin 2.4.0). `xaml-support` is on Kotlin 2.4.0 as well.
+- **Symptom:** `NoSuchMethodError: IrFileImpl.<init>(IrFileEntry, IrFileSymbol,
+  FqName)` from `WinRTAbiSupportFiles.file` in the call-site lowering.
+- **Expected behavior:** a kotlin-winrt build for the Kotlin version of the
+  consumer, as for any compiler plugin.
+- **compose-winui workaround:** `buildSrc-fork/settingsScripts/winui-setup.groovy`
+  pins `kotlin`, `kotlin24` and `composeCompilerPlugin` to 2.4.0 in the version
+  catalog of the main build and of buildSrc when
+  `-PcomposeWinUi.enableJvmTarget=true` is set. Builds without the WinUI target
+  keep upstream's Kotlin version.
+- **Remove when:** kotlin-winrt publishes a build for Kotlin 2.4.20.
+
+## KWINRT-053: Toolkit plugin resolves its identity configuration during configuration
+
+- **Status:** Open.
+- **Observed in:** `:compose:ui:ui`, which also has the Android KMP target.
+  `gradle.properties` sets
+  `android.dependencyResolutionAtConfigurationTime.disallow=true`.
+- **Symptom:** `Configuration 'kotlinWinRTLibraryDependencyIdentity' was
+  resolved during configuration time` from the plugin's `afterEvaluate` hook
+  (`KotlinWindowsToolkitPlugin.kt:2516`). AGP allows resolution after its own
+  `afterEvaluate` hook with configuration on demand, and only after all
+  projects are evaluated without it.
+- **compose-winui workaround:** `compose/ui/ui/build-fork.gradle` applies the
+  plugin after the `androidXMultiplatform` block, so its hook runs after AGP's.
+  WinUI builds must keep configuration on demand enabled; the old
+  `--no-configure-on-demand` flag of the validation tasks is gone.
+
+## KWINRT-054: Toolkit plugin treats every Kotlin/JVM compilation as a WinRT consumer
+
+- **Status:** Open.
+- **Observed in:** `:compose:ui:ui`, which has an Android compilation next to
+  `winuiJvm`.
+- **Symptom:** the plugin registers `compileKotlinWinRTProjectioncompileAndroidMain`,
+  which cannot compile the JVM projections (2824 errors) and is a dependency of
+  the WinUI jar. It also applies `KotlinBaseApiPlugin` for these standalone
+  compile tasks, which the AndroidX build logic took for AGP built-in Kotlin
+  and configured the project a second time (duplicate Compose compiler plugin
+  options, duplicate `lintAnalyzeDebug`, a `KotlinAndroidProjectExtension`
+  cast).
+- **compose-winui workaround:** `compose/ui/ui/build-fork.gradle` disables the
+  projection compilations that do not belong to `winuiJvm`.
+  `AndroidXImplPlugin` and `AndroidXComposeImplPlugin` in `buildSrc-fork` skip
+  `KotlinBaseApiPlugin` when a Kotlin plugin wrapper is applied, and the
+  Compose compiler plugin is not added to `*WinRTProjection*` compile tasks.
+
+## KWINRT-055: Authoring scanner misreads CRLF sources
+
+- **Status:** Fixed on kotlin-winrt `xaml-support`; open in the published
+  snapshot.
+- **Observed in:** a checkout with `core.autocrlf=true`.
+- **Symptom:** `kotlin-winrt authored candidate row 1 in
+  .../authored-candidates.tsv is malformed`: every authored class is recorded
+  without its package when a comment precedes the `package` directive.
+- **compose-winui workaround:** `prepareWinUiAuthoringSources` in
+  `compose/ui/ui/build-fork.gradle` and
+  `compose/ui/ui/winui-samples/build.gradle` gives the scanner an LF copy of
+  the sources.
+
+## KWINRT-056: Projection compilation classpath misses dependency projections
+
+- **Status:** Open; the external-module half is fixed on `xaml-support`.
+- **Symptom:** generation skips WinRT types that a dependency already
+  projects, but the classpath of `compileKotlinWinRTProjection*` only gets
+  project dependencies that are already configured when it is resolved, which
+  configuration on demand does not guarantee, and no external modules.
+  The support sources then fail on unresolved projection types.
+- **compose-winui workaround:** `compose/ui/ui/build-fork.gradle` adds
+  `skiko-winui`, and `demo-winui` / `winui-samples` add `:compose:ui:ui` and
+  `skiko-winui`, to `kotlinWinRTProjection*CompileClasspath`.
+
+## KWINRT-057: Application host rejects runtime jars with the same file name
+
+- **Status:** Open.
+- **Symptom:** `JVM application host cannot stage two runtime JARs with the
+  same file name 'lifecycle-common-jvm-2.11.0.jar'`. JetBrains publishes its
+  JVM redirect artifacts as jars without classes that are named like the
+  androidx jar they depend on.
+- **compose-winui workaround:** `demo-winui` and `winui-samples` leave jars
+  without content out of the host's `runtimeClasspath`.
+
+## KWINRT-058: Application host does not find the libraries of its bundled runtime
+
+- **Status:** Open.
+- **Symptom:** `Unable to load zip library: ...\jvm-host\runtime\bin\zip.dll`.
+  The host loads `jvm.dll` by path; `zip.dll` imports `java.dll` by name, and
+  with another JDK's `bin` on `PATH` that JDK's `java.dll` is loaded.
+- **compose-winui workaround:** the `RunWinAppHostTask`s of `demo-winui` and
+  `winui-samples` put `<host>\runtime\bin` first on `PATH`. Starting the
+  staged `.exe` directly on such a machine still fails.
+
+## KWINRT-059: Toolchain discovery fails when vswhere.exe is not on PATH
+
+- **Status:** Open; no compose-side workaround in the build.
+- **Symptom:** `No usable Windows C/C++ toolchain for win-x64` although Build
+  Tools and the SDK are installed. `VsDevCmd.bat` prints an ANSI
+  `'vswhere.exe' is not recognized` message into output that the plugin reads
+  as UTF-16, so the environment marker is not found.
+- **Workaround:** run Gradle with
+  `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer` on `PATH`.
+
+## KWINRT-060: Authored .winmd is staged twice into JVM application resources
+
+- **Status:** Open.
+- **Observed in:** `:compose:ui:ui:winui-samples` (a Kotlin/JVM application).
+- **Symptom:** `processResources` fails on the duplicate
+  `windows-package-runtime-assets/winui-samples.winmd`, once from the
+  compilation output and once from the staged package.
+- **compose-winui workaround:** `duplicatesStrategy = EXCLUDE` on
+  `processResources` in `compose/ui/ui/winui-samples/build.gradle`.
+
+## KWINRT-061: Plugin artifacts need JDK 25 even when the plugin is not applied
+
+- **Status:** Open (by design of the JDK 25 toolchain).
+- **Symptom:** `plugins { id(...) apply false }` in `:compose:ui:ui` fails on
+  the JDK 21 of the upstream build with `Dependency requires at least JVM
+  runtime version 25`.
+- **compose-winui workaround:** the root `build-fork.gradle` puts the plugin
+  on the buildscript classpath only for `-PcomposeWinUi.enableJvmTarget=true`;
+  projects apply it by id. The WinUI-only projects are only included in that
+  mode.
 
 ## KWINRT-049: WinRT async cancellation upcall can crash clipboard text retrieval
 
