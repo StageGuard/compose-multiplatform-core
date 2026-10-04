@@ -38,6 +38,7 @@ import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.focus.WinUIEmbeddedViewPlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.isFinite
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.GraphicsContext
 import androidx.compose.ui.graphics.Matrix
@@ -65,6 +66,7 @@ import androidx.compose.ui.input.pointer.PointerInputEventData
 import androidx.compose.ui.input.pointer.PointerInputEventProcessor
 import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.PositionCalculator
 import androidx.compose.ui.input.pointer.WinUIPointerIconService
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.modifier.ModifierLocalManager
@@ -88,7 +90,7 @@ import androidx.compose.ui.platform.WinUIPlatformTextInputSession
 import androidx.compose.ui.platform.WinUIPlatformTextInputService
 import androidx.compose.ui.platform.WinUISoftwareKeyboardController
 import androidx.compose.ui.platform.WinUITextToolbar
-import androidx.compose.ui.platform.WinUIViewConfiguration
+import androidx.compose.ui.platform.DefaultWinUIViewConfiguration
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.platform.WindowInfoImpl
 import androidx.compose.ui.platform.createWinUIUriHandler
@@ -97,14 +99,17 @@ import androidx.compose.ui.semantics.SemanticsOwner
 import androidx.compose.ui.spatial.RectManager
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.WinUIFontResourceLoader
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.input.TextInputService
+import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.text.intl.isRtl
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.viewinterop.InteropView
 import androidx.compose.ui.viewinterop.WinUIInteropAction
@@ -212,9 +217,13 @@ internal class WinUIOwner(
     private val pointerInputEventProcessor = PointerInputEventProcessor(root)
     private val pointerEventSender = WinUIPointerEventSender(::processPointerInputEvent)
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-    override val fontLoader: Font.ResourceLoader = WinUIFontResourceLoader
+    // The same loader as on the Skiko targets: it loads Skia typefaces.
+    override val fontLoader: Font.ResourceLoader = androidx.compose.ui.text.platform.FontLoader()
     override val fontFamilyResolver: FontFamily.Resolver = createFontFamilyResolver()
-    override val layoutDirection: LayoutDirection = LayoutDirection.Ltr
+    // As on desktop, where a window takes the orientation of the default locale.
+    @OptIn(InternalComposeUiApi::class)
+    override val layoutDirection: LayoutDirection =
+        if (Locale.current.isRtl()) LayoutDirection.Rtl else LayoutDirection.Ltr
     override val localeList: LocaleList = LocaleList.current
     override val snapshotObserver = snapshotInvalidationTracker.snapshotObserver()
     override val modifierLocalManager: ModifierLocalManager = ModifierLocalManager(this)
@@ -235,7 +244,7 @@ internal class WinUIOwner(
         get() = measureAndLayoutDelegate.measureIteration
     internal val isMeasureLayoutInProgress: Boolean
         get() = measureAndLayoutDelegate.duringMeasureLayout
-    override val viewConfiguration: ViewConfiguration = WinUIViewConfiguration
+    override val viewConfiguration: ViewConfiguration = DefaultWinUIViewConfiguration { density }
 
     @InternalComposeUiApi
     override var showLayoutBounds: Boolean = false
@@ -318,6 +327,14 @@ internal class WinUIOwner(
         mutableWindowInfo.containerDpSize = with(density) {
             DpSize(size.width.toDp(), size.height.toDp())
         }
+        if (size.width > 0 && size.height > 0) {
+            WinUIGraphicsContext.setLightingInfo(density, size)
+        }
+    }
+
+    internal fun setKeyboardModifiers(modifiers: PointerKeyboardModifiers) {
+        if (isShuttingDown) return
+        mutableWindowInfo.keyboardModifiers = modifiers
     }
 
     override fun onRequestMeasure(
@@ -403,10 +420,67 @@ internal class WinUIOwner(
             measureAndLayoutDelegate.dispatchOnPositionedCallbacks()
             rectManager.dispatchCallbacks()
             if (sendPointerUpdate) {
+                // The layout under a resting mouse pointer may have changed. The host sends the
+                // synthetic move once layout is over, see [updatePointerPosition].
                 pointerEventSender.needUpdatePointerPosition = true
-                pointerEventSender.updatePointerPosition()
             }
+            updatePositionCacheAndDispatch()
         }
+    }
+
+    internal val needUpdatePointerPosition: Boolean
+        get() = pointerEventSender.needUpdatePointerPosition
+
+    /**
+     * Sends a synthetic move for a mouse pointer that rests over content whose layout changed, so
+     * that hover state follows the content, as the Skiko targets do after each layout.
+     */
+    internal fun updatePointerPosition() {
+        if (isShuttingDown || measureAndLayoutDelegate.duringMeasureLayout) return
+        pointerEventSender.updatePointerPosition()
+    }
+
+    private var positionOnScreen: IntOffset? = null
+
+    /**
+     * Keeps [rectManager] informed of the window size and of where the root is on the screen, and
+     * dispatches the positioned callbacks again when the window has moved.
+     */
+    private fun updatePositionCacheAndDispatch() {
+        if (isShuttingDown) return
+        val containerSize = mutableWindowInfo.containerSize
+        if (containerSize.width <= 0 || containerSize.height <= 0) return
+        val screenOffset = coordinateMapper.localToScreen(Offset.Zero)
+        if (!screenOffset.isFinite) return
+        val newPositionOnScreen = screenOffset.round()
+        val hasPositionOnScreenChanged = newPositionOnScreen != positionOnScreen
+        positionOnScreen = newPositionOnScreen
+        if (hasPositionOnScreenChanged) {
+            root.layoutDelegate.measurePassDelegate
+                .requestLayoutIfCoordinatesAreUsedAndNotifyChildren()
+        }
+        rectManager.updateOffsets(
+            screenOffset = newPositionOnScreen,
+            // The root is the window content, see [calculatePositionInWindow].
+            windowOffset = IntOffset.Zero,
+            viewToWindowMatrix = identityMatrix,
+            windowWidth = containerSize.width,
+            windowHeight = containerSize.height,
+        )
+        measureAndLayoutDelegate.dispatchOnPositionedCallbacks(
+            forceDispatch = hasPositionOnScreenChanged
+        )
+        rectManager.dispatchCallbacks()
+    }
+
+    private val identityMatrix = Matrix()
+
+    /**
+     * Called by the host when the window has moved on the screen.
+     */
+    internal fun invalidatePositionOnScreen() {
+        if (measureAndLayoutDelegate.duringMeasureLayout) return
+        updatePositionCacheAndDispatch()
     }
 
     override fun measureAndLayout(layoutNode: LayoutNode, constraints: Constraints) {
@@ -414,7 +488,6 @@ internal class WinUIOwner(
         hasPendingLayoutCompletedListener = false
         measureAndLayoutDelegate.measureAndLayout(layoutNode, constraints)
         pointerEventSender.needUpdatePointerPosition = true
-        pointerEventSender.updatePointerPosition()
         if (!measureAndLayoutDelegate.hasPendingMeasureOrLayout) {
             measureAndLayoutDelegate.dispatchOnPositionedCallbacks()
         }
@@ -429,7 +502,99 @@ internal class WinUIOwner(
         drawBlock: (canvas: Canvas, parentLayer: GraphicsLayer?) -> Unit,
         invalidateParentLayer: () -> Unit,
         explicitLayer: GraphicsLayer?,
-    ): OwnedLayer = WinUIOwnerLayer(drawBlock, invalidateParentLayer, ::voteFrameRate)
+    ): OwnedLayer = GraphicsLayerOwnerLayer(
+        graphicsLayer = explicitLayer ?: graphicsContext.createGraphicsLayer(),
+        context = if (explicitLayer != null) null else graphicsContext,
+        layerManager = ownedLayerManager,
+        drawBlock = drawBlock,
+        invalidateParentLayer = invalidateParentLayer,
+    )
+
+    /**
+     * Draws the root node. Layers that became dirty since the last frame are recorded first, so
+     * that the frame shows the changes of the phases before it.
+     */
+    internal fun draw(canvas: Canvas) {
+        if (isShuttingDown) return
+        ownedLayerManager.draw(canvas)
+        if (needClearObservations) {
+            snapshotObserver.clearInvalidObservations()
+            needClearObservations = false
+        }
+        rectManager.dispatchCallbacks()
+    }
+
+    private var needClearObservations = false
+
+    // The layer manager of the Skiko RootNodeOwner.
+    private inner class OwnedLayerManagerImpl : OwnedLayerManager {
+        // OwnedLayers that are dirty and should be redrawn.
+        private val dirtyLayers = mutableListOf<OwnedLayer>()
+
+        // OwnedLayers that invalidated themselves during their last draw. They are redrawn in
+        // the next frame.
+        private var postponedDirtyLayers: MutableList<OwnedLayer>? = null
+
+        private var isDrawingContent = false
+
+        override fun notifyLayerIsDirty(layer: OwnedLayer, isDirty: Boolean) {
+            if (!isDirty) {
+                if (!isDrawingContent) {
+                    dirtyLayers.remove(layer)
+                    postponedDirtyLayers?.remove(layer)
+                }
+            } else if (!isDrawingContent) {
+                dirtyLayers += layer
+            } else {
+                val postponed =
+                    postponedDirtyLayers
+                        ?: mutableListOf<OwnedLayer>().also { postponedDirtyLayers = it }
+                postponed += layer
+            }
+        }
+
+        override fun invalidate() {
+            invalidateRootLayer()
+        }
+
+        override fun voteFrameRate(frameRate: Float) {
+            if (frameRate != 0f) {
+                this@WinUIOwner.voteFrameRate(frameRate)
+            }
+        }
+
+        override fun recycle(layer: OwnedLayer): Boolean {
+            needClearObservations = true
+            dirtyLayers -= layer
+            postponedDirtyLayers?.remove(layer)
+            return false
+        }
+
+        fun draw(canvas: Canvas) {
+            isDrawingContent = true
+            try {
+                if (dirtyLayers.isNotEmpty()) {
+                    // A layer can be destroyed while another one is recorded.
+                    dirtyLayers.toList().forEach { layer -> layer.updateDisplayList() }
+                    dirtyLayers.clear()
+                }
+
+                root.draw(
+                    canvas = canvas,
+                    graphicsLayer = null, // the root node will provide the root graphics layer
+                )
+
+                postponedDirtyLayers?.let { postponed ->
+                    dirtyLayers.addAll(postponed)
+                    postponed.clear()
+                }
+            } finally {
+                isDrawingContent = false
+            }
+        }
+    }
+
+    private val ownedLayerManager = OwnedLayerManagerImpl()
 
     override fun onSemanticsChange() {
         if (isShuttingDown) return
@@ -646,6 +811,7 @@ internal class WinUIOwner(
         button: PointerButton?,
         scrollDelta: Offset = Offset.Zero,
         isInBounds: Boolean = eventType != PointerEventType.Exit,
+        pressure: Float = 1f,
     ): Boolean {
         return sendPointerEvent(
             eventType = eventType,
@@ -660,6 +826,7 @@ internal class WinUIOwner(
             scrollDelta = scrollDelta,
             isInBounds = isInBounds,
             nativeEvent = null,
+            pressure = pressure,
         )
     }
 
@@ -677,11 +844,13 @@ internal class WinUIOwner(
         isInBounds: Boolean = eventType != PointerEventType.Exit,
         nativeEvent: Any?,
         updateLastPointerEvent: Boolean = true,
+        pressure: Float = 1f,
     ): Boolean {
         if (isShuttingDown) return false
         if (button != null) {
             inputModeManager.requestInputMode(InputMode.Touch)
         }
+        mutableWindowInfo.keyboardModifiers = keyboardModifiers
         if (updateLastPointerEvent) {
             updateLastMousePointerEvent(
                 WinUIPointerEvent(
@@ -703,25 +872,24 @@ internal class WinUIOwner(
         if (eventType != PointerEventType.Exit && isInInteropViewBounds(position)) {
             return false
         }
+        val pointer = PointerInputEventData(
+            id = PointerId(pointerId),
+            uptime = uptimeMillis,
+            positionOnScreen = position,
+            position = position,
+            down = down,
+            pressure = pressure,
+            type = type,
+            activeHover = type == PointerType.Mouse,
+            scrollDelta = scrollDelta,
+            scaleGestureFactor = 1f,
+            panGestureOffset = Offset.Zero,
+            originalEventPosition = position,
+        )
         val event = PointerInputEvent(
             eventType = eventType,
             uptime = uptimeMillis,
-            pointers = listOf(
-                PointerInputEventData(
-                    id = PointerId(pointerId),
-                    uptime = uptimeMillis,
-                    positionOnScreen = position,
-                    position = position,
-                    down = down,
-                    pressure = 1f,
-                    type = type,
-                    activeHover = type == PointerType.Mouse,
-                    scrollDelta = scrollDelta,
-                    scaleGestureFactor = 1f,
-                    panGestureOffset = Offset.Zero,
-                    originalEventPosition = position,
-                )
-            ),
+            pointers = if (type == PointerType.Mouse) listOf(pointer) else withOtherContacts(pointer),
             buttons = buttons,
             keyboardModifiers = keyboardModifiers,
             button = button,
@@ -734,7 +902,9 @@ internal class WinUIOwner(
     private fun processPointerInputEvent(event: PointerInputEvent): Boolean {
         val result = pointerInputEventProcessor.process(
             pointerEvent = event,
-            positionCalculator = this,
+            // Pointer positions are sent as local pixels in both `position` and
+            // `positionOnScreen`, so the previous position must not be mapped back from the screen.
+            positionCalculator = IdentityPositionCalculator,
             isInBounds = event.eventType != PointerEventType.Exit,
         )
         return result.dispatchedToAPointerInputModifier || result.anyChangeConsumed
@@ -762,7 +932,31 @@ internal class WinUIOwner(
                 position.y < bounds.bottom
         }
 
+    // The touch and pen contacts that are down. WinUI reports one pointer per event, but
+    // Compose needs all of them in every event: a pointer missing from an event counts as
+    // released, which breaks multi-touch gestures such as pinch to zoom.
+    private val activeContacts = linkedMapOf<PointerId, PointerInputEventData>()
+
+    private fun withOtherContacts(pointer: PointerInputEventData): List<PointerInputEventData> {
+        val others = activeContacts.values
+            .filter { it.id != pointer.id }
+            .map { contact ->
+                contact.copy(
+                    uptime = pointer.uptime,
+                    historical = emptyList(),
+                    scrollDelta = Offset.Zero,
+                )
+            }
+        if (pointer.down) {
+            activeContacts[pointer.id] = pointer
+        } else {
+            activeContacts.remove(pointer.id)
+        }
+        return others + pointer
+    }
+
     internal fun cancelPointerInput() {
+        activeContacts.clear()
         lastMousePointerEvent = null
         pointerEventSender.reset()
         pointerInputEventProcessor.processCancel()
@@ -770,7 +964,6 @@ internal class WinUIOwner(
 
     internal fun sendKeyEvent(keyEvent: KeyEvent): Boolean {
         if (isShuttingDown) return false
-        inputModeManager.requestInputMode(InputMode.Keyboard)
         return focusOwner.dispatchKeyEvent(keyEvent) || handleFocusKeys(keyEvent)
     }
 
@@ -785,6 +978,11 @@ internal class WinUIOwner(
         inputModeManager.requestInputMode(InputMode.Keyboard)
         return focusOwner.moveFocus(focusDirection)
     }
+}
+
+private object IdentityPositionCalculator : PositionCalculator {
+    override fun screenToLocal(positionOnScreen: Offset): Offset = positionOnScreen
+    override fun localToScreen(localPosition: Offset): Offset = localPosition
 }
 
 internal data class WinUIOwnerStateForTest(

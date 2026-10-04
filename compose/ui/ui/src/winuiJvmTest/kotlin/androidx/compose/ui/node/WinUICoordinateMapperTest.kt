@@ -48,4 +48,21 @@ class WinUICoordinateMapperTest {
         assertEquals(0, localToScreenCalls)
         assertEquals(0, screenToLocalCalls)
     }
+
+    @Test
+    fun pixelPositionsAreConvertedToDipsForXaml() {
+        // XAML works in DIPs for local and window positions and in physical pixels on the screen.
+        val mapper = WinUICoordinateMapper(
+            calculatePositionInWindow = { it + Offset(10f, 20f) },
+            calculateLocalPosition = { it - Offset(10f, 20f) },
+            localToScreen = { (it + Offset(10f, 20f)) * 2f + Offset(650f, 695f) },
+            screenToLocal = { (it - Offset(650f, 695f)) / 2f - Offset(10f, 20f) },
+            density = { 2f },
+        )
+
+        assertEquals(Offset(52f, 84f), mapper.calculatePositionInWindow(Offset(32f, 44f)))
+        assertEquals(Offset(32f, 44f), mapper.calculateLocalPosition(Offset(52f, 84f)))
+        assertEquals(Offset(702f, 779f), mapper.localToScreen(Offset(32f, 44f)))
+        assertEquals(Offset(32f, 44f), mapper.screenToLocal(Offset(702f, 779f)))
+    }
 }

@@ -38,6 +38,9 @@ private val KeyEvent.internal: WinUiInternalKeyEvent
     get() = nativeKeyEvent as? WinUiInternalKeyEvent
         ?: WinUiInternalKeyEvent(Key.Unknown, KeyEventType.Unknown, 0, PointerKeyboardModifiers())
 
+internal val KeyEvent.keyboardModifiers: PointerKeyboardModifiers
+    get() = internal.modifiers
+
 actual val KeyEvent.key: Key
     get() = internal.key
 

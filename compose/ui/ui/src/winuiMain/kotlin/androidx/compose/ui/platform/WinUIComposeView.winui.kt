@@ -16,6 +16,7 @@
 
 package androidx.compose.ui.platform
 
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Composition
 import androidx.compose.runtime.CompositionLocalProvider
@@ -28,17 +29,23 @@ import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.retain.LocalRetainedValuesStoreProvider
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.LocalSystemTheme
+import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.focus.WinUIPlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asComposeCanvas
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.keyboardModifiers
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.areAnyPressed
 import androidx.compose.ui.input.pointer.WinUIPointerIconService
 import androidx.compose.ui.layout.RootMeasurePolicy
+import androidx.compose.ui.navigationevent.WinUIBackNavigationEventInput
 import androidx.compose.ui.node.LayoutNode
 import androidx.compose.ui.node.UiApplier
 import androidx.compose.ui.node.WinUICoordinateMapper
@@ -51,10 +58,13 @@ import androidx.compose.ui.viewinterop.WinUIInteropTransaction
 import androidx.compose.ui.viewinterop.WinUIRootContentHost
 import androidx.compose.ui.viewinterop.WinUIRootContentControl
 import androidx.compose.ui.viewinterop.collectWinUIInteropRoots
+import androidx.compose.ui.window.LocalWinUIComposeLayerHost
+import androidx.compose.ui.window.WinUIComposeLayerHost
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.enableSavedStateHandles
 import androidx.savedstate.compose.LocalSavedStateRegistryOwner
 import windows.foundation.EventRegistrationToken
+import microsoft.ui.xaml.ElementTheme
 import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.UIElement
 import microsoft.ui.xaml.Window
@@ -262,6 +272,7 @@ class WinUIComposeView internal constructor(
         coordinateMapper = WinUICoordinateMapper.forRoot(
             root,
             screenCoordinatesReady = { isScreenCoordinateConversionReady },
+            density = { rootNode.density.density },
         ),
         textToolbar = WinUITextToolbar(
             hostProvider = { rootContentControl },
@@ -301,13 +312,35 @@ class WinUIComposeView internal constructor(
     private var xamlRootChangedHandler: TypedEventHandler<XamlRoot, XamlRootChangedEventArgs>? =
         null
     private var xamlRootChangedToken: EventRegistrationToken? = null
+    private val backNavigationEventInput = WinUIBackNavigationEventInput().also {
+        architectureComponentsOwner.navigationEventDispatcherOwner
+            .navigationEventDispatcher.addInput(it)
+    }
     private val keyInputAdapter = WinUIKeyInputAdapter(
         root = root,
         owner = owner,
         composeEventSources = { listOf(root) },
-        composeEventSubtreeSources = { listOf(renderHost.component) },
+        composeEventSubtreeSources = { renderHost.keyEventSources },
+        sendKeyEvent = ::sendKeyEvent,
     )
-    private val pointerInputAdapter = WinUIPointerInputAdapter(renderHost.component, owner)
+    private val layerHost = WinUIComposeLayerHost(
+        root = rootNode,
+        focusOwner = { owner.focusOwner },
+    )
+    private val pointerInputAdapter = WinUIPointerInputAdapter(
+        root = renderHost.component,
+        owner = owner,
+        beforeEvent = ::prepareForPointerEvent,
+        afterEvent = ::performInputEventWork,
+    )
+    private var systemTheme: SystemTheme by mutableStateOf(SystemTheme.Unknown)
+    private val actualThemeChangedHandler: TypedEventHandler<FrameworkElement, Any?> =
+        { _, _ -> updateSystemTheme() }
+    private val actualThemeChangedToken: EventRegistrationToken? = runCatching {
+        rootContentControl.actualThemeChanged.add(actualThemeChangedHandler)
+    }.getOrNull()
+    private var isWindowFocused = true
+    private var isWindowMinimized = false
     private val dragAndDropAdapter = WinUIDragAndDropAdapter(root, owner)
 
     fun setContent(content: @Composable () -> Unit) {
@@ -335,6 +368,8 @@ class WinUIComposeView internal constructor(
                 LocalPlatformPrefetchScheduler provides NoOpPlatformPrefetchScheduler,
                 LocalWinUIRoot provides rootContentControl,
                 LocalWinUIWindow provides window,
+                LocalSystemTheme provides systemTheme,
+                LocalWinUIComposeLayerHost provides layerHost,
             ) {
                 LocalRetainedValuesStoreProvider(retainedValuesStore) {
                     ProvideCommonCompositionLocals(
@@ -344,12 +379,27 @@ class WinUIComposeView internal constructor(
                 }
             }
         }
+        updateSystemTheme()
         startRenderSchedulerWhenLoaded()
         syncRootContent()
         requestRender()
     }
 
+    /**
+     * Follows the theme of the XAML root, which follows the system app theme unless the
+     * application requests one, as `isSystemInDarkTheme()` follows the system theme on desktop.
+     */
+    private fun updateSystemTheme() {
+        if (isDisposed) return
+        systemTheme = when (runCatching { rootContentControl.actualTheme }.getOrNull()) {
+            ElementTheme.Dark -> SystemTheme.Dark
+            ElementTheme.Light -> SystemTheme.Light
+            else -> SystemTheme.Unknown
+        }
+    }
+
     fun disposeComposition() {
+        layerHost.dispose()
         val currentComposition = composition
         if (currentComposition != null) {
             saveableState = saveableStateRegistry?.performSave()
@@ -378,6 +428,11 @@ class WinUIComposeView internal constructor(
         dragAndDropAdapter.dispose()
         pointerCursorAdapter.dispose()
         retainedValuesStore.dispose()
+        architectureComponentsOwner.navigationEventDispatcherOwner
+            .navigationEventDispatcher.removeInput(backNavigationEventInput)
+        actualThemeChangedToken?.let { token ->
+            runCatching { rootContentControl.actualThemeChanged.remove(token) }
+        }
         architectureComponentsOwner.setLifecycleState(Lifecycle.State.DESTROYED)
         clearXamlRootDensityObserver()
         WinUIPlatformTextInputService.unregisterRootToScreenMapper(this)
@@ -389,6 +444,37 @@ class WinUIComposeView internal constructor(
     internal fun setWindowFocused(isWindowFocused: Boolean) {
         owner.setWindowFocused(isWindowFocused)
         WinUIPlatformTextInputService.onWindowFocusChanged(isWindowFocused)
+        if (!isWindowFocused) {
+            keyInputAdapter.resetModifiers()
+        }
+        this.isWindowFocused = isWindowFocused
+        updateLifecycleState()
+    }
+
+    internal fun setWindowMinimized(isWindowMinimized: Boolean) {
+        this.isWindowMinimized = isWindowMinimized
+        updateLifecycleState()
+    }
+
+    /**
+     * Called when the window has moved on the screen.
+     */
+    internal fun invalidatePositionOnScreen() {
+        if (isDisposed) return
+        owner.invalidatePositionOnScreen()
+    }
+
+    // The same states as on desktop: resumed while the window has focus, started while it is
+    // visible without focus, created while it is minimized.
+    private fun updateLifecycleState() {
+        if (isDisposed) return
+        architectureComponentsOwner.setLifecycleState(
+            when {
+                isWindowMinimized -> Lifecycle.State.CREATED
+                isWindowFocused -> Lifecycle.State.RESUMED
+                else -> Lifecycle.State.STARTED
+            }
+        )
     }
 
     internal fun setWindowContainerSize(size: IntSize) {
@@ -401,6 +487,28 @@ class WinUIComposeView internal constructor(
     internal fun setTransparentRootBackground() {
         rootContentControl.setTransparentBackground()
     }
+
+    /**
+     * Gives the window the opaque background of a desktop window, which content without a
+     * background of its own shows; without one, the XAML window shows its theme background,
+     * which is black in dark mode. A system backdrop needs the root to be transparent.
+     */
+    internal fun setWindowBackground(isOpaque: Boolean) {
+        if (isOpaque) {
+            // The Swing panel background, which a desktop ComposeWindow clears with.
+            rootContentControl.setOpaqueBackground(0xEEu, 0xEEu, 0xEEu)
+            // The swap chain ignores alpha, so the frame itself has to start with the background.
+            frameBackgroundColor = DesktopWindowBackground
+        } else {
+            rootContentControl.clearBackground()
+            frameBackgroundColor = null
+        }
+        if (content != null) {
+            requestRender()
+        }
+    }
+
+    private var frameBackgroundColor: Int? = null
 
     internal fun setWindowTitleBarInsets(
         height: Int,
@@ -455,11 +563,52 @@ class WinUIComposeView internal constructor(
         applyOwnerChanges {
             owner.sendAndPerformSnapshotChanges()
             updateRootContent(rootNode.collectWinUIInteropRoots())
-            owner.measureAndLayout(sendPointerUpdate = false)
+            measureAndLayout()
             owner.sendAndPerformSnapshotChanges()
             updateRootContent(rootNode.collectWinUIInteropRoots())
             requestRender()
         }
+    }
+
+    /**
+     * Lays out the content and, when the layout under a resting mouse pointer may have changed,
+     * sends it a synthetic move once the layout is over, as the Skiko scenes do. Without it, hover
+     * state stays on the old element after scrolling or navigation until the mouse moves.
+     */
+    private fun measureAndLayout() {
+        owner.measureAndLayout(sendPointerUpdate = true)
+        if (owner.needUpdatePointerPosition) {
+            frameRecomposer?.dispatch(owner::updatePointerPosition)
+        }
+    }
+
+    private fun prepareForPointerEvent(event: WinUIPointerEvent) {
+        if (isDisposed) return
+        dragAndDropAdapter.onPointerEvent(event)
+        if (owner.isMeasureLayoutInProgress) return
+        // Hit testing must see the layout of the latest changes.
+        owner.measureAndLayout(sendPointerUpdate = false)
+        layerHost.onPointerEvent(
+            eventType = event.eventType,
+            position = event.position,
+            button = event.button,
+            isAnyButtonPressed = event.buttons.areAnyPressed,
+        )
+    }
+
+    // Runs the work that the event handlers scheduled (coroutines they resumed, effects they
+    // launched) right after the event, as the Skiko scenes do, instead of a frame later.
+    private fun performInputEventWork() {
+        if (isDisposed) return
+        frameRecomposer?.performTrampolineDispatch()
+    }
+
+    private fun sendKeyEvent(keyEvent: KeyEvent): Boolean {
+        owner.setKeyboardModifiers(keyEvent.keyboardModifiers)
+        val handled = owner.sendKeyEvent(keyEvent) ||
+            backNavigationEventInput.onKeyEvent(keyEvent)
+        performInputEventWork()
+        return handled
     }
 
     private fun render(canvas: Canvas, nanoTime: Long) {
@@ -473,10 +622,11 @@ class WinUIComposeView internal constructor(
                 applyOwnerChanges {
                     frameRecomposer?.performFrame(nanoTime)
                     owner.sendAndPerformSnapshotChanges()
-                    owner.measureAndLayout(sendPointerUpdate = false)
+                    measureAndLayout()
                     owner.sendAndPerformSnapshotChanges()
                     updateRootContent(rootNode.collectWinUIInteropRoots())
-                    rootNode.draw(canvas.asComposeCanvas(), graphicsLayer = null)
+                    frameBackgroundColor?.let(canvas::clear)
+                    owner.draw(canvas.asComposeCanvas())
                 }
             } finally {
                 isDrawingFrame = false
@@ -501,6 +651,7 @@ class WinUIComposeView internal constructor(
                 clearLoadedRenderSchedulerRequest()
                 if (!isDisposed) {
                     updateDensityFromXamlRoot()
+                    updateSystemTheme()
                     startRenderScheduler()
                     requestRender()
                 }
@@ -648,14 +799,7 @@ class WinUIComposeView internal constructor(
         "WinUI root DispatcherQueue is not available."
     }
 
-    private fun rootPixelOffsetToScreen(offset: Offset): Offset {
-        val scale = owner.density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
-        return rootPixelOffsetToCoreTextScreenPixels(
-            offset = offset,
-            densityScale = scale,
-            localDipToScreenPixel = owner::localToScreen,
-        )
-    }
+    private fun rootPixelOffsetToScreen(offset: Offset): Offset = owner.localToScreen(offset)
 
     private fun rootPixelOffsetToViewport(offset: Offset): Offset {
         val scale = owner.density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
@@ -720,6 +864,8 @@ class WinUIComposeView internal constructor(
     )
 }
 
+private const val DesktopWindowBackground = 0xFFEEEEEE.toInt()
+
 @Suppress("UNUSED_PARAMETER")
 internal fun rootPixelOffsetToCoreTextViewportVisualPixels(
     offset: Offset,
@@ -729,16 +875,6 @@ internal fun rootPixelOffsetToCoreTextViewportVisualPixels(
     // Despite the property name, CoreText LayoutBoundsVisualPixels are
     // viewport-relative device-independent pixels.
     return Offset(offset.x / scale, offset.y / scale)
-}
-
-internal fun rootPixelOffsetToCoreTextScreenPixels(
-    offset: Offset,
-    densityScale: Float,
-    localDipToScreenPixel: (Offset) -> Offset,
-): Offset {
-    val scale = densityScale.takeIf { it.isFinite() && it > 0f } ?: 1f
-    val localDip = Offset(offset.x / scale, offset.y / scale)
-    return localDipToScreenPixel(localDip)
 }
 
 fun Window.setContent(content: @Composable () -> Unit): WinUIComposeView {

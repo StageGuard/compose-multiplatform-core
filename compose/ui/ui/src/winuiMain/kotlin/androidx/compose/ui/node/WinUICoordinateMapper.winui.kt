@@ -23,28 +23,47 @@ import microsoft.ui.xaml.UIElement
 import windows.foundation.Point
 import windows.graphics.PointInt32
 
+/**
+ * Maps Compose root coordinates to the window and the screen.
+ *
+ * Compose positions are pixels, while XAML positions are device independent pixels (DIPs). The
+ * conversion functions passed in work in DIPs for local and window positions and in physical pixels
+ * for screen positions, as the XAML APIs do; [density] converts between the two.
+ */
 internal class WinUICoordinateMapper(
     private val calculatePositionInWindow: (Offset) -> Offset = { it },
     private val calculateLocalPosition: (Offset) -> Offset = { it },
     private val screenCoordinatesReady: () -> Boolean = { true },
     private val localToScreen: (Offset) -> Offset = { it },
     private val screenToLocal: (Offset) -> Offset = { it },
+    private val density: () -> Float = { 1f },
 ) {
-    fun calculatePositionInWindow(localPosition: Offset): Offset =
-        calculatePositionInWindow.invoke(localPosition)
+    private val scale: Float
+        get() = density().takeIf { it.isFinite() && it > 0f } ?: 1f
 
-    fun calculateLocalPosition(positionInWindow: Offset): Offset =
-        calculateLocalPosition.invoke(positionInWindow)
+    fun calculatePositionInWindow(localPosition: Offset): Offset {
+        val scale = scale
+        return calculatePositionInWindow.invoke(localPosition / scale) * scale
+    }
+
+    fun calculateLocalPosition(positionInWindow: Offset): Offset {
+        val scale = scale
+        return calculateLocalPosition.invoke(positionInWindow / scale) * scale
+    }
 
     fun localToScreen(localPosition: Offset): Offset =
         if (screenCoordinatesReady()) {
-            localToScreen.invoke(localPosition)
+            localToScreen.invoke(localPosition / scale)
         } else {
-            calculatePositionInWindow.invoke(localPosition)
+            calculatePositionInWindow(localPosition)
         }
 
     fun screenToLocal(positionOnScreen: Offset): Offset =
-        if (screenCoordinatesReady()) screenToLocal.invoke(positionOnScreen) else positionOnScreen
+        if (screenCoordinatesReady()) {
+            screenToLocal.invoke(positionOnScreen) * scale
+        } else {
+            positionOnScreen
+        }
 
     fun localToScreen(localTransform: Matrix) {
         val screenOrigin = localToScreen(Offset.Zero)
@@ -55,6 +74,7 @@ internal class WinUICoordinateMapper(
         fun forRoot(
             root: UIElement,
             screenCoordinatesReady: () -> Boolean = { true },
+            density: () -> Float = { 1f },
         ): WinUICoordinateMapper =
             WinUICoordinateMapper(
                 calculatePositionInWindow = { root.calculatePositionInWindow(it) },
@@ -62,6 +82,7 @@ internal class WinUICoordinateMapper(
                 screenCoordinatesReady = screenCoordinatesReady,
                 localToScreen = { root.localToScreen(it) },
                 screenToLocal = { root.screenToLocal(it) },
+                density = density,
             )
 
         private fun UIElement.calculatePositionInWindow(localPosition: Offset): Offset {

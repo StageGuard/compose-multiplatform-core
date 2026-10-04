@@ -16,144 +16,137 @@
 
 package androidx.compose.ui.node
 
-import androidx.compose.ui.FrameRateCategory
+import androidx.compose.ui.WinUISkikoTestBase
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.toRect
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.ReusableGraphicsLayerScope
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.WinUIGraphicsContext
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class WinUIOwnerLayerTest {
-    @Test
-    fun updateDisplayListClearsDirtyStateUntilInvalidated() {
-        var parentInvalidations = 0
-        val layer = WinUIOwnerLayer(
-            drawBlock = { _, _ -> },
-            invalidateParentLayer = { parentInvalidations++ },
-        )
+/**
+ * The owned layers of WinUI are the GraphicsLayer-backed layers of the Skiko targets.
+ */
+class WinUIOwnerLayerTest : WinUISkikoTestBase() {
+    private val manager = TestLayerManager()
+    private var records = 0
 
-        assertTrue(layer.stateForTest().isDirty)
-        assertEquals(0, layer.stateForTest().displayListUpdateCount)
-
-        layer.updateDisplayList()
-
-        assertFalse(layer.stateForTest().isDirty)
-        assertEquals(1, layer.stateForTest().displayListUpdateCount)
-        assertEquals(0, parentInvalidations)
-
-        layer.updateDisplayList()
-
-        assertEquals(1, layer.stateForTest().displayListUpdateCount)
-
-        layer.invalidate()
-
-        assertTrue(layer.stateForTest().isDirty)
-        assertEquals(1, parentInvalidations)
-
-        layer.updateDisplayList()
-
-        assertFalse(layer.stateForTest().isDirty)
-        assertEquals(2, layer.stateForTest().displayListUpdateCount)
-    }
-
-    @Test
-    fun resizeAndPropertyUpdatesDirtyDisplayListButMoveOnlyInvalidatesParent() {
-        var parentInvalidations = 0
-        val frameRateVotes = mutableListOf<Float>()
-        val layer = WinUIOwnerLayer(
-            drawBlock = { _, _ -> },
-            invalidateParentLayer = { parentInvalidations++ },
-            voteFrameRate = { frameRateVotes += it },
-        )
-        layer.updateDisplayList()
-
-        layer.resize(IntSize(20, 30))
-
-        assertTrue(layer.stateForTest().isDirty)
-        assertEquals(IntSize(20, 30), layer.stateForTest().size)
-        assertEquals(1, parentInvalidations)
-        assertEquals(listOf(FrameRateCategory.High.value), frameRateVotes)
-
-        layer.updateDisplayList()
-        layer.move(IntOffset(4, 5))
-
-        assertFalse(layer.stateForTest().isDirty)
-        assertEquals(IntOffset(4, 5), layer.stateForTest().position)
-        assertEquals(2, parentInvalidations)
-        assertEquals(
-            listOf(FrameRateCategory.High.value, FrameRateCategory.High.value),
-            frameRateVotes,
-        )
-
-        val scope = ReusableGraphicsLayerScope()
-        scope.translationX = 12f
-        layer.updateLayerProperties(scope)
-
-        assertTrue(layer.stateForTest().isDirty)
-        assertEquals(3, parentInvalidations)
-        assertEquals(
-            listOf(FrameRateCategory.High.value, FrameRateCategory.High.value, 0f),
-            frameRateVotes,
-        )
-    }
-
-    @Test
-    fun updateDisplayListVotesNonZeroFrameRate() {
-        val frameRateVotes = mutableListOf<Float>()
-        val layer = WinUIOwnerLayer(
-            drawBlock = { _, _ -> },
+    private fun createLayer(): GraphicsLayerOwnerLayer =
+        GraphicsLayerOwnerLayer(
+            graphicsLayer = WinUIGraphicsContext.createGraphicsLayer(),
+            context = WinUIGraphicsContext,
+            layerManager = manager,
+            drawBlock = { _, _ -> records++ },
             invalidateParentLayer = {},
-            voteFrameRate = { frameRateVotes += it },
         )
 
-        layer.frameRate = 24f
+    @Test
+    fun updateDisplayListRecordsOnceUntilInvalidated() {
+        val layer = createLayer()
+        layer.resize(IntSize(20, 30))
+
         layer.updateDisplayList()
         layer.updateDisplayList()
 
-        assertEquals(listOf(24f, 24f), frameRateVotes)
+        assertEquals(1, records)
 
-        layer.frameRate = 0f
+        // A drawn layer that is invalidated is recorded again before the next frame.
         layer.invalidate()
+
+        assertEquals(listOf<OwnedLayer>(layer), manager.dirtyLayers)
+
         layer.updateDisplayList()
 
-        assertEquals(listOf(24f, 24f), frameRateVotes)
+        assertEquals(2, records)
+        assertEquals(emptyList<OwnedLayer>(), manager.dirtyLayers)
     }
 
     @Test
-    fun destroySuppressesInvalidationAndReuseResetsLayerState() {
-        var oldParentInvalidations = 0
-        var newParentInvalidations = 0
-        val layer = WinUIOwnerLayer(
-            drawBlock = { _, _ -> },
-            invalidateParentLayer = { oldParentInvalidations++ },
+    fun layerPropertiesReachTheGraphicsLayer() {
+        val layer = createLayer()
+        layer.resize(IntSize(100, 100))
+
+        layer.updateLayerProperties(
+            ReusableGraphicsLayerScope().apply {
+                alpha = 0.5f
+                shadowElevation = 8f
+                shape = CircleShape
+                clip = true
+                size = Size(100f, 100f)
+                updateOutline()
+            }
         )
+
+        assertEquals(0.5f, layer.graphicsLayer.alpha)
+        assertEquals(8f, layer.graphicsLayer.shadowElevation)
+        assertTrue(layer.graphicsLayer.clip)
+        // Hit testing follows the clip shape, not only its bounds.
+        assertTrue(layer.isInLayer(Offset(50f, 50f)))
+        assertFalse(layer.isInLayer(Offset(2f, 2f)))
+    }
+
+    @Test
+    fun transformIsAppliedAroundTheLayerCentre() {
+        val layer = createLayer()
+        layer.resize(IntSize(100, 40))
+        layer.move(IntOffset(300, 200))
+
+        layer.updateLayerProperties(
+            ReusableGraphicsLayerScope().apply { rotationZ = 180f }
+        )
+
+        // The position in the parent is not part of the layer matrix.
+        val mapped = layer.mapOffset(Offset(0f, 0f), inverse = false)
+        assertEquals(100f, mapped.x, 0.001f)
+        assertEquals(40f, mapped.y, 0.001f)
+        val inverse = layer.mapOffset(mapped, inverse = true)
+        assertEquals(0f, inverse.x, 0.001f)
+        assertEquals(0f, inverse.y, 0.001f)
+    }
+
+    @Test
+    fun destroyReleasesTheGraphicsLayer() {
+        val layer = createLayer()
+        val graphicsLayer = layer.graphicsLayer
         layer.resize(IntSize(20, 30))
-        layer.move(IntOffset(4, 5))
         layer.updateDisplayList()
 
         layer.destroy()
 
-        assertTrue(layer.stateForTest().isDestroyed)
-        assertFalse(layer.stateForTest().isDirty)
+        assertTrue(graphicsLayer.isReleased)
+        assertEquals(listOf<OwnedLayer>(layer), manager.recycledLayers)
+    }
 
-        layer.invalidate()
+    private object CircleShape : Shape {
+        override fun createOutline(
+            size: Size,
+            layoutDirection: LayoutDirection,
+            density: Density,
+        ): Outline = Outline.Rounded(RoundRect(size.toRect(), CornerRadius(size.minDimension / 2)))
+    }
 
-        assertFalse(layer.stateForTest().isDirty)
-        assertEquals(2, oldParentInvalidations)
+    private class TestLayerManager : OwnedLayerManager {
+        val dirtyLayers = mutableListOf<OwnedLayer>()
+        val recycledLayers = mutableListOf<OwnedLayer>()
 
-        layer.reuseLayer(
-            drawBlock = { _, _ -> },
-            invalidateParentLayer = { newParentInvalidations++ },
-        )
+        override fun notifyLayerIsDirty(layer: OwnedLayer, isDirty: Boolean) {
+            if (isDirty) dirtyLayers += layer else dirtyLayers -= layer
+        }
 
-        val state = layer.stateForTest()
-        assertFalse(state.isDestroyed)
-        assertTrue(state.isDirty)
-        assertEquals(0, state.displayListUpdateCount)
-        assertEquals(IntSize.Zero, state.size)
-        assertEquals(IntOffset.Zero, state.position)
-        assertEquals(1, newParentInvalidations)
+        override fun recycle(layer: OwnedLayer): Boolean {
+            recycledLayers += layer
+            return false
+        }
     }
 }

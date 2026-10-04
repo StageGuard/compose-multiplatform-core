@@ -266,6 +266,106 @@ class WinUIKeyEventProcessorTest {
         assertEquals(false, failure.isInvalidVirtualKeyProjectionFailure())
     }
 
+    @Test
+    fun mapsPunctuationKeysLikeTheDesktopTarget() {
+        val processor = WinUIKeyEventProcessor()
+        val keys = listOf(0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE)
+            .map { abiValue ->
+                var key: Key? = null
+                processor.process(
+                    eventType = KeyEventType.KeyDown,
+                    key = VirtualKey.fromAbi(abiValue),
+                    isHandled = false,
+                    nativeEvent = null,
+                ) {
+                    key = it.key
+                    false
+                }
+                key
+            }
+
+        assertEquals(
+            listOf(
+                Key.Semicolon,
+                Key.Equals,
+                Key.Comma,
+                Key.Minus,
+                Key.Period,
+                Key.Slash,
+                Key.Grave,
+                Key.LeftBracket,
+                Key.Backslash,
+                Key.RightBracket,
+                Key.Apostrophe,
+            ),
+            keys,
+        )
+    }
+
+    @Test
+    fun extendedEnterIsTheNumPadEnter() {
+        val processor = WinUIKeyEventProcessor()
+        val keys = listOf(false, true).map { isExtendedKey ->
+            var key: Key? = null
+            processor.process(
+                eventType = KeyEventType.KeyDown,
+                key = VirtualKey.Enter,
+                isHandled = false,
+                nativeEvent = null,
+                isExtendedKey = isExtendedKey,
+            ) {
+                key = it.key
+                false
+            }
+            key
+        }
+
+        assertEquals(listOf(Key.Enter, Key.NumPadEnter), keys)
+    }
+
+    @Test
+    fun resetModifiersForgetsPressedModifiers() {
+        val processor = WinUIKeyEventProcessor()
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.Control,
+            isHandled = false,
+            nativeEvent = null,
+        ) { false }
+
+        // The key up of a modifier released in another window never arrives.
+        processor.resetModifiers()
+        var event: KeyEvent? = null
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.A,
+            isHandled = false,
+            nativeEvent = null,
+        ) {
+            event = it
+            false
+        }
+
+        assertEquals(false, event?.isCtrlPressed)
+    }
+    @Test
+    fun keyEventsCarryTheCharacterOfTheKeyboardLayout() {
+        val processor = WinUIKeyEventProcessor()
+        var event: KeyEvent? = null
+
+        processor.process(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.Number1,
+            isHandled = false,
+            nativeEvent = null,
+            codePoint = '!'.code,
+        ) {
+            event = it
+            false
+        }
+
+        assertEquals('!'.code, event?.utf16CodePoint)
+    }
 }
 
 private class FakeKeyEventSource(

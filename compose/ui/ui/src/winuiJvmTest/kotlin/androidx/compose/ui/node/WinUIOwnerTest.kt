@@ -36,6 +36,7 @@ import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
 import androidx.compose.ui.input.pointer.PointerType
@@ -1163,6 +1164,10 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
             )
             owner.measureAndLayout(sendPointerUpdate = true)
 
+            // The synthetic move is sent once layout is over, by the host.
+            assertEquals(emptyList(), events)
+            owner.updatePointerPosition()
+
             assertEquals(listOf(PointerEventType.Enter), events)
 
             pointerNodeX = 50
@@ -1173,6 +1178,7 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
                 scheduleMeasureAndLayout = false,
             )
             owner.measureAndLayout(sendPointerUpdate = false)
+            owner.updatePointerPosition()
 
             assertEquals(listOf(PointerEventType.Enter), events)
 
@@ -1204,7 +1210,11 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
             assertTrue(owner.inputModeManager.requestInputMode(InputMode.Touch))
             assertEquals(InputMode.Touch, owner.inputModeManager.inputMode)
 
+            // As on desktop, typing does not switch to keyboard mode; moving focus with keys does.
             owner.sendKeyEvent(KeyEvent(key = Key.A, type = KeyEventType.KeyDown))
+            assertEquals(InputMode.Touch, owner.inputModeManager.inputMode)
+
+            owner.sendKeyEvent(KeyEvent(key = Key.Tab, type = KeyEventType.KeyDown))
             assertEquals(InputMode.Keyboard, owner.inputModeManager.inputMode)
 
             owner.sendPointerEventForTest(
@@ -1328,6 +1338,251 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
             coordinateMapper = coordinateMapper,
         )
     }
+    @Test
+    fun pointerMovesOfAPressedPointerReportLocalDeltas() {
+        // Pointer positions are local pixels. The origin of the window on the screen must not
+        // leak into the previous position of a pressed pointer, or drags jump by that offset.
+        val owner = createOwner(
+            coordinateMapper = WinUICoordinateMapper(
+                localToScreen = { it + Offset(500f, 300f) },
+                screenToLocal = { it - Offset(500f, 300f) },
+            )
+        )
+        val deltas = mutableListOf<Offset>()
+        try {
+            val pointerNode = LayoutNode().also {
+                it.modifier = PointerDeltaRecorderElement(deltas)
+                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
+            }
+            owner.root.insertAt(0, pointerNode)
+            owner.setWindowContainerSize(IntSize(100, 100))
+            owner.measureAndLayout()
+
+            owner.sendPointerEventForTest(
+                eventType = PointerEventType.Move,
+                position = Offset(10f, 10f),
+                uptimeMillis = 1L,
+                pointerId = 1L,
+                down = false,
+                type = PointerType.Mouse,
+                buttons = PointerButtons(),
+                keyboardModifiers = PointerKeyboardModifiers(),
+                button = null,
+            )
+            owner.sendPointerEventForTest(
+                eventType = PointerEventType.Press,
+                position = Offset(10f, 10f),
+                uptimeMillis = 1L,
+                pointerId = 1L,
+                down = true,
+                type = PointerType.Mouse,
+                buttons = PointerButtons(isPrimaryPressed = true),
+                keyboardModifiers = PointerKeyboardModifiers(),
+                button = PointerButton.Primary,
+            )
+            owner.sendPointerEventForTest(
+                eventType = PointerEventType.Move,
+                position = Offset(15f, 18f),
+                uptimeMillis = 2L,
+                pointerId = 1L,
+                down = true,
+                type = PointerType.Mouse,
+                buttons = PointerButtons(isPrimaryPressed = true),
+                keyboardModifiers = PointerKeyboardModifiers(),
+                button = null,
+            )
+
+            assertEquals(listOf(Offset(5f, 8f)), deltas)
+        } finally {
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun pointerEventsUpdateTheKeyboardModifiersOfTheWindow() {
+        val owner = createOwner()
+        try {
+            owner.sendPointerEventForTest(
+                eventType = PointerEventType.Move,
+                position = Offset(10f, 10f),
+                uptimeMillis = 1L,
+                pointerId = 1L,
+                down = false,
+                type = PointerType.Mouse,
+                buttons = PointerButtons(),
+                keyboardModifiers = PointerKeyboardModifiers(isShiftPressed = true),
+                button = null,
+            )
+
+            assertTrue(owner.windowInfo.keyboardModifiers.isShiftPressed)
+        } finally {
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun touchEventsCarryEveryContactThatIsDown() {
+        // WinUI reports one contact per event; Compose needs all of them in each event, or a
+        // missing contact counts as released and pinch gestures break.
+        val owner = createOwner()
+        val events = mutableListOf<List<RecordedChange>>()
+        try {
+            val pointerNode = LayoutNode().also {
+                it.modifier = PointerChangeRecorderElement(events)
+                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
+            }
+            owner.root.insertAt(0, pointerNode)
+            owner.setWindowContainerSize(IntSize(100, 100))
+            owner.measureAndLayout()
+
+            owner.sendTouchForTest(PointerEventType.Press, Offset(10f, 10f), 1L, 1L, down = true)
+            owner.sendTouchForTest(PointerEventType.Press, Offset(50f, 50f), 2L, 2L, down = true)
+            owner.sendTouchForTest(PointerEventType.Move, Offset(60f, 60f), 3L, 2L, down = true)
+            owner.sendTouchForTest(PointerEventType.Release, Offset(10f, 10f), 4L, 1L, down = false)
+            owner.sendTouchForTest(PointerEventType.Move, Offset(70f, 70f), 5L, 2L, down = true)
+
+            assertEquals(
+                listOf(
+                    listOf(RecordedChange(1L, true, Offset(10f, 10f))),
+                    listOf(
+                        RecordedChange(1L, true, Offset(10f, 10f)),
+                        RecordedChange(2L, true, Offset(50f, 50f)),
+                    ),
+                    listOf(
+                        RecordedChange(1L, true, Offset(10f, 10f)),
+                        RecordedChange(2L, true, Offset(60f, 60f)),
+                    ),
+                    listOf(
+                        RecordedChange(1L, false, Offset(10f, 10f)),
+                        RecordedChange(2L, true, Offset(60f, 60f)),
+                    ),
+                    listOf(RecordedChange(2L, true, Offset(70f, 70f))),
+                ),
+                events,
+            )
+        } finally {
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun cancelledPointerInputForgetsTheContactsThatWereDown() {
+        val owner = createOwner()
+        val events = mutableListOf<List<RecordedChange>>()
+        try {
+            val pointerNode = LayoutNode().also {
+                it.modifier = PointerChangeRecorderElement(events)
+                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
+            }
+            owner.root.insertAt(0, pointerNode)
+            owner.setWindowContainerSize(IntSize(100, 100))
+            owner.measureAndLayout()
+
+            owner.sendTouchForTest(PointerEventType.Press, Offset(10f, 10f), 1L, 1L, down = true)
+            owner.cancelPointerInput()
+            events.clear()
+            owner.sendTouchForTest(PointerEventType.Press, Offset(50f, 50f), 2L, 2L, down = true)
+
+            assertEquals(listOf(listOf(RecordedChange(2L, true, Offset(50f, 50f)))), events)
+        } finally {
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun penPressureReachesCompose() {
+        val owner = createOwner()
+        val pressures = mutableListOf<Float>()
+        try {
+            val pointerNode = LayoutNode().also {
+                it.modifier = PointerChangeRecorderElement(mutableListOf(), pressures)
+                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
+            }
+            owner.root.insertAt(0, pointerNode)
+            owner.setWindowContainerSize(IntSize(100, 100))
+            owner.measureAndLayout()
+
+            owner.sendPointerEventForTest(
+                eventType = PointerEventType.Press,
+                position = Offset(10f, 10f),
+                uptimeMillis = 1L,
+                pointerId = 1L,
+                down = true,
+                type = PointerType.Stylus,
+                buttons = PointerButtons(isPrimaryPressed = true),
+                keyboardModifiers = PointerKeyboardModifiers(),
+                button = PointerButton.Primary,
+                pressure = 0.25f,
+            )
+
+            assertEquals(listOf(0.25f), pressures)
+        } finally {
+            owner.dispose()
+        }
+    }
+
+    private fun WinUIOwner.sendTouchForTest(
+        eventType: PointerEventType,
+        position: Offset,
+        uptimeMillis: Long,
+        pointerId: Long,
+        down: Boolean,
+    ) {
+        sendPointerEventForTest(
+            eventType = eventType,
+            position = position,
+            uptimeMillis = uptimeMillis,
+            pointerId = pointerId,
+            down = down,
+            type = PointerType.Touch,
+            buttons = PointerButtons(isPrimaryPressed = down),
+            keyboardModifiers = PointerKeyboardModifiers(),
+            button = PointerButton.Primary,
+        )
+    }
+}
+
+private data class RecordedChange(val id: Long, val pressed: Boolean, val position: Offset)
+
+private class PointerChangeRecorderElement(
+    private val events: MutableList<List<RecordedChange>>,
+    private val pressures: MutableList<Float> = mutableListOf(),
+) : ModifierNodeElement<PointerChangeRecorderNode>() {
+    override fun create(): PointerChangeRecorderNode = PointerChangeRecorderNode(events, pressures)
+
+    override fun update(node: PointerChangeRecorderNode) {
+        node.events = events
+        node.pressures = pressures
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is PointerChangeRecorderElement && other.events === events
+
+    override fun hashCode(): Int = System.identityHashCode(events)
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "pointerChangeRecorder"
+    }
+}
+
+private class PointerChangeRecorderNode(
+    var events: MutableList<List<RecordedChange>>,
+    var pressures: MutableList<Float>,
+) : Modifier.Node(), PointerInputModifierNode {
+    override fun onPointerEvent(
+        pointerEvent: PointerEvent,
+        pass: PointerEventPass,
+        bounds: IntSize,
+    ) {
+        if (pass == PointerEventPass.Main) {
+            events += pointerEvent.changes.map {
+                RecordedChange(it.id.value, it.pressed, it.position)
+            }
+            pressures += pointerEvent.changes.map { it.pressure }
+        }
+    }
+
+    override fun onCancelPointerInput() = Unit
 }
 
 private class OwnerEvents {
@@ -1421,4 +1676,40 @@ private object TestPlatformFocusOwner : PlatformFocusOwner {
     override fun moveFocusInChildren(focusDirection: FocusDirection): Boolean = false
 
     override fun getEmbeddedViewFocusRect(): Rect? = null
+}
+
+private class PointerDeltaRecorderElement(
+    private val deltas: MutableList<Offset>,
+) : ModifierNodeElement<PointerDeltaRecorderNode>() {
+    override fun create(): PointerDeltaRecorderNode = PointerDeltaRecorderNode(deltas)
+
+    override fun update(node: PointerDeltaRecorderNode) {
+        node.deltas = deltas
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is PointerDeltaRecorderElement && other.deltas === deltas
+
+    override fun hashCode(): Int = System.identityHashCode(deltas)
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "pointerDeltaRecorder"
+    }
+}
+
+private class PointerDeltaRecorderNode(
+    var deltas: MutableList<Offset>,
+) : Modifier.Node(), PointerInputModifierNode {
+    override fun onPointerEvent(
+        pointerEvent: PointerEvent,
+        pass: PointerEventPass,
+        bounds: IntSize,
+    ) {
+        if (pass == PointerEventPass.Main && pointerEvent.type == PointerEventType.Move) {
+            val change = pointerEvent.changes.first()
+            deltas += change.position - change.previousPosition
+        }
+    }
+
+    override fun onCancelPointerInput() = Unit
 }

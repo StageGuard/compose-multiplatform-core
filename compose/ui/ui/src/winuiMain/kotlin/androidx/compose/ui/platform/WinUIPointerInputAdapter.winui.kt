@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerKeyboardModifiers
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.areAnyPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.node.WinUIOwner
 import io.github.composefluent.winrt.runtime.WinRTEvent
 import microsoft.ui.input.PointerDeviceType
@@ -38,6 +39,10 @@ import windows.foundation.EventRegistrationToken
 internal class WinUIPointerInputAdapter(
     private val root: UIElement,
     private val owner: WinUIOwner,
+    // Called around each event, so that the host can lay out before hit testing and run the work
+    // that the event handlers scheduled, as the Skiko scenes do.
+    private val beforeEvent: (WinUIPointerEvent) -> Unit = {},
+    private val afterEvent: () -> Unit = {},
 ) {
     private var isDisposed = false
     private val pointerEventProcessor = WinUIPointerEventProcessor()
@@ -75,6 +80,7 @@ internal class WinUIPointerInputAdapter(
                     "native event=$eventType sender=${sender?.debugClassName()} " +
                         "handledBefore=${args.handled} ${pointerEvent.debugString()}"
                 }
+                beforeEvent(pointerEvent)
                 val handled = pointerEventProcessor.process(
                     event = pointerEvent,
                     sendPointerEvent = { eventType, position, uptimeMillis, pointerId, down, type,
@@ -93,6 +99,7 @@ internal class WinUIPointerInputAdapter(
                             scrollDelta = scrollDelta,
                             isInBounds = isInBounds,
                             nativeEvent = nativeEvent,
+                            pressure = pointerEvent.pressure,
                         )
                     },
                 ).also { handled ->
@@ -104,6 +111,7 @@ internal class WinUIPointerInputAdapter(
                             "inBounds=${pointerEvent.isInBounds} handled=$handled"
                     }
                 }
+                afterEvent()
                 args.handled = handled
                 debugPointerInput {
                     "native handledAfter event=$eventType handled=${args.handled}"
@@ -161,12 +169,21 @@ internal class WinUIPointerInputAdapter(
             keyboardModifiers = args.toComposeKeyboardModifiers(),
             button = properties.pointerUpdateKind.toComposeButton(),
             scrollDelta = if (eventType == PointerEventType.Scroll) {
-                properties.toComposeScrollDelta()
+                properties.toComposeScrollDelta(
+                    isShiftPressed = args.toComposeKeyboardModifiers().isShiftPressed
+                )
             } else {
                 Offset.Zero
             },
             isInBounds = eventType != PointerEventType.Exit,
             nativeEvent = args,
+            // Pens report their pressure; WinUI gives mouse and touch input a fixed 0.5.
+            pressure = if (point.pointerDeviceType == PointerDeviceType.Pen) {
+                properties.pressure
+            } else {
+                1f
+            },
+            pointerPoint = point,
         )
     }
 
@@ -279,6 +296,9 @@ internal data class WinUIPointerEvent(
     val scrollDelta: Offset,
     val isInBounds: Boolean,
     val nativeEvent: Any?,
+    val pressure: Float = 1f,
+    // The WinUI point of the event, which a drag from Compose starts from.
+    val pointerPoint: PointerPoint? = null,
 )
 
 internal fun winUIPositionToComposeOffset(
@@ -300,10 +320,11 @@ private const val MicrosecondsPerMillisecond = 1_000L
 
 private fun PointerPoint.toComposePointerType(): PointerType =
     when (pointerDeviceType) {
-        PointerDeviceType.Mouse -> PointerType.Mouse
+        PointerDeviceType.Mouse,
+        // The desktop target reports touchpad input as mouse input too, which keeps hover working.
+        PointerDeviceType.Touchpad -> PointerType.Mouse
         PointerDeviceType.Pen -> PointerType.Stylus
-        PointerDeviceType.Touch,
-        PointerDeviceType.Touchpad -> PointerType.Touch
+        PointerDeviceType.Touch -> PointerType.Touch
         else -> PointerType.Mouse
     }
 
@@ -313,9 +334,9 @@ private fun PointerPoint.isComposePointerDown(
 ): Boolean =
     when (eventType) {
         PointerEventType.Press -> true
-        PointerEventType.Release,
-        PointerEventType.Exit,
-        PointerEventType.Scroll -> false
+        PointerEventType.Release -> false
+        // A wheel turn or leaving the surface does not release a pressed button. Reporting the
+        // pointer as up there would end a drag in progress and start it again on the next move.
         else -> isInContact || buttons.areAnyPressed
     }
 
@@ -345,12 +366,15 @@ private fun PointerUpdateKind.toComposeButton(): PointerButton? =
         else -> null
     }
 
-private fun microsoft.ui.input.PointerPointProperties.toComposeScrollDelta(): Offset {
+private fun microsoft.ui.input.PointerPointProperties.toComposeScrollDelta(
+    isShiftPressed: Boolean,
+): Offset {
     val wheelTicks = mouseWheelDelta.toFloat() / MouseWheelDeltaPerTick
-    return if (isHorizontalMouseWheel) {
-        Offset(wheelTicks, 0f)
-    } else {
-        Offset(0f, -wheelTicks)
+    return when {
+        isHorizontalMouseWheel -> Offset(wheelTicks, 0f)
+        // As on the desktop target, Shift turns the vertical wheel into a horizontal one.
+        isShiftPressed -> Offset(-wheelTicks, 0f)
+        else -> Offset(0f, -wheelTicks)
     }
 }
 

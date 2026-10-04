@@ -14,9 +14,17 @@
  * limitations under the License.
  */
 
-package androidx.compose.ui.text.font
+package androidx.compose.ui.platform
 
-@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-internal object WinUIFontResourceLoader : Font.ResourceLoader {
-    override fun load(font: Font): Any = Any()
-}
+import androidx.compose.ui.window.user32Lookup
+import java.lang.foreign.FunctionDescriptor
+import java.lang.foreign.Linker
+import java.lang.foreign.ValueLayout
+
+private val getClipboardSequenceNumber = Linker.nativeLinker().downcallHandle(
+    user32Lookup.find("GetClipboardSequenceNumber").orElseThrow(),
+    FunctionDescriptor.of(ValueLayout.JAVA_INT),
+)
+
+internal actual fun clipboardSequenceNumber(): Long =
+    (getClipboardSequenceNumber.invokeWithArguments() as Int).toLong() and 0xFFFFFFFFL
