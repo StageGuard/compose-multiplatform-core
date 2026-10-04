@@ -24,6 +24,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.Interaction
+import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
@@ -400,41 +401,40 @@ internal fun CoreTextField(
 
     val drawModifier = Modifier.textFieldDraw(state, value, offsetMapping)
 
-    val onPositionedModifier =
-        Modifier.onGloballyPositioned {
-            state.layoutCoordinates = it
-            state.layoutResult?.innerTextFieldCoordinates = it
-            if (enabled) {
-                if (state.handleState == HandleState.Selection) {
-                    if (state.showFloatingToolbar && windowInfo.isWindowFocused) {
-                        manager.showSelectionToolbar()
-                    } else {
-                        manager.hideSelectionToolbar()
-                    }
-                    state.showSelectionHandleStart =
-                        manager.isSelectionHandleInVisibleBound(isStartHandle = true)
-                    state.showSelectionHandleEnd =
-                        manager.isSelectionHandleInVisibleBound(isStartHandle = false)
-                    state.showCursorHandle = value.selection.collapsed
-                } else if (state.handleState == HandleState.Cursor) {
-                    state.showCursorHandle =
-                        manager.isSelectionHandleInVisibleBound(isStartHandle = true)
+    val onPositionedModifier = Modifier.onGloballyPositioned {
+        state.layoutCoordinates = it
+        state.layoutResult?.innerTextFieldCoordinates = it
+        if (enabled) {
+            if (state.handleState == HandleState.Selection) {
+                if (state.showFloatingToolbar && windowInfo.isWindowFocused) {
+                    manager.showSelectionToolbar()
+                } else {
+                    manager.hideSelectionToolbar()
                 }
-                notifyFocusedRect(state, value, offsetMapping)
-                state.layoutResult?.let { layoutResult ->
-                    state.inputSession?.let { inputSession ->
-                        if (state.hasFocus) {
-                            TextFieldDelegate.updateTextLayoutResult(
-                                inputSession,
-                                value,
-                                offsetMapping,
-                                layoutResult,
-                            )
-                        }
+                state.showSelectionHandleStart =
+                    manager.isSelectionHandleInVisibleBound(isStartHandle = true)
+                state.showSelectionHandleEnd =
+                    manager.isSelectionHandleInVisibleBound(isStartHandle = false)
+                state.showCursorHandle = value.selection.collapsed
+            } else if (state.handleState == HandleState.Cursor) {
+                state.showCursorHandle =
+                    manager.isSelectionHandleInVisibleBound(isStartHandle = true)
+            }
+            notifyFocusedRect(state, value, offsetMapping)
+            state.layoutResult?.let { layoutResult ->
+                state.inputSession?.let { inputSession ->
+                    if (state.hasFocus) {
+                        TextFieldDelegate.updateTextLayoutResult(
+                            inputSession,
+                            value,
+                            offsetMapping,
+                            layoutResult,
+                        )
                     }
                 }
             }
         }
+    }
 
     val isPassword = visualTransformation is PasswordVisualTransformation
     val semanticsModifier =
@@ -512,15 +512,14 @@ internal fun CoreTextField(
             color = LocalAutofillHighlightColor.current,
             defaultColor = autofillHighlightColor(),
         )
-    val drawDecorationModifier =
-        Modifier.drawWithContent {
-            drawContent()
-            // Autofill highlight is drawn on top of the content — this way the coloring appears
-            // over any Material background applied.
-            if (state.autofillHighlightOn || state.justAutofilled) {
-                drawRect(brush = autofillHighlightBrush)
-            }
+    val drawDecorationModifier = Modifier.drawWithContent {
+        drawContent()
+        // Autofill highlight is drawn on top of the content — this way the coloring appears
+        // over any Material background applied.
+        if (state.autofillHighlightOn || state.justAutofilled) {
+            drawRect(brush = autofillHighlightBrush)
         }
+    }
 
     val overscrollEffect = rememberTextFieldOverscrollEffect()
 
@@ -540,6 +539,7 @@ internal fun CoreTextField(
             .then(semanticsModifier)
             .onGloballyPositioned @DontMemoize { state.layoutResult?.decorationBoxCoordinates = it }
             .addContextMenuComponents(manager, coroutineScope)
+            .textFieldOverlay(state, imeOptions, interactionSource)
 
     val showHandleAndMagnifier =
         enabled && state.hasFocus && state.isInTouchMode && windowInfo.isWindowFocused
@@ -562,7 +562,10 @@ internal fun CoreTextField(
                         singleLineHeightProvider = state,
                         minLines = minLines,
                         maxLines = maxLines,
-                        softWrap = !singleLine,
+                        // in legacy code heightForSingleLineField was calculated for
+                        // `maxLines == 1` instead of a more narrow `isSingleLine` check.
+                        useSingleLineHeightProvider = maxLines == 1,
+                        unboundedWidth = singleLine,
                     )
                 } else {
                     Modifier
@@ -613,8 +616,9 @@ internal fun CoreTextField(
                                 measurables: List<Measurable>,
                                 constraints: Constraints,
                             ): MeasureResult {
-                                val prevProxy =
-                                    Snapshot.withoutReadObservation { state.layoutResult }
+                                val prevProxy = Snapshot.withoutReadObservation {
+                                    state.layoutResult
+                                }
                                 val prevResult = prevProxy?.value
                                 val (width, height, result) =
                                     TextFieldDelegate.layout(
@@ -623,6 +627,11 @@ internal fun CoreTextField(
                                         layoutDirection,
                                         prevResult,
                                     )
+
+                                // ensure measure restarts
+                                // when hasStaleResolvedFonts by reading in measure
+                                result.multiParagraph.intrinsics.hasStaleResolvedFonts
+
                                 if (prevResult != result) {
                                     state.layoutResult =
                                         TextLayoutResultProxy(
@@ -1244,3 +1253,15 @@ private fun Modifier.addContextMenuComponents(
     if (ComposeFoundationFlags.isNewContextMenuEnabled)
         addBasicTextFieldTextContextMenuComponents(textFieldSelectionManager, coroutineScope)
     else this
+
+/**
+ * A modifier that can be used to determine the location and state of the text field. It is used on
+ * multiplatform, where knowledge of the text field's state and location is required in order to
+ * support platform-dependent features such as VoiceOver or Autofill (password autofill, one-time
+ * codes, etc.).
+ */
+internal expect fun Modifier.textFieldOverlay(
+    state: LegacyTextFieldState,
+    imeOptions: ImeOptions,
+    interactionSource: InteractionSource?,
+): Modifier

@@ -21,11 +21,7 @@ import kotlin.jvm.JvmField
 internal object SkikoComposeUiFlags {
     @Suppress("MutableBareField")
     @JvmField
-    var useLegacyRenderNodeLayers: Boolean = false
-
-    @Suppress("MutableBareField")
-    @JvmField
-    var isClearFocusOnMouseDownEnabled: Boolean = true
+    var isClearFocusOnMouseDownEnabled: Boolean = false
 
     @Suppress("MutableBareField")
     @JvmField
@@ -33,17 +29,8 @@ internal object SkikoComposeUiFlags {
 
     @Suppress("MutableBareField")
     @JvmField
-    var areWindowInsetsRulersEnabled: Boolean = true
+    var useSnapshotCache: Boolean = true
 }
-
-/**
- * Use legacy (pre 1.8) render node layers for cases without
- * [androidx.compose.ui.graphics.layer.GraphicsLayer]. `false` by default.
- *
- * Note that it's a temporary flag for compatibility purposes, it will be removed in the future.
- */
-@ExperimentalComposeUiApi
-var ComposeUiFlags.useLegacyRenderNodeLayers by SkikoComposeUiFlags::useLegacyRenderNodeLayers
 
 /**
  * This flag enables clearing focus on mouse down by default.
@@ -62,18 +49,13 @@ var ComposeUiFlags.isClearFocusOnMouseDownEnabled by SkikoComposeUiFlags::isClea
 var ComposeUiFlags.isDialogAnimationEnabled by SkikoComposeUiFlags::isDialogAnimationEnabled
 
 /**
- * Enable WindowInsets rulers:
- * * `SystemBarsRulers`
- * * `ImeRulers`
- * * `StatusBarsRulers`
- * * `NavigationBarsRulers`
- * * `CaptionBarRulers`
- * * `MandatorySystemGesturesRulers`
- * * `TappableElementRulers`
- * * `WaterfallRulers`
- * * `SafeDrawingRulers`
- * * `SafeGesturesRulers`
- * * `SafeContentRulers`
+ * Whether [androidx.compose.ui.graphics.layer.GraphicsLayer] record their content into an
+ * immutable `SkPicture` in addition to an existing storing mechanism.
+ * It trades memory for recording time but pays off in performance for subtrees where the content
+ * does not change every frame. Enabled by default.
+ *
+ * Note that it's a temporary flag, it will be removed in the future.
+ * Please report cases that require it.
  */
 @ExperimentalComposeUiApi
-var ComposeUiFlags.areWindowInsetsRulersEnabled by SkikoComposeUiFlags::areWindowInsetsRulersEnabled
+var ComposeUiFlags.useSnapshotCache by SkikoComposeUiFlags::useSnapshotCache

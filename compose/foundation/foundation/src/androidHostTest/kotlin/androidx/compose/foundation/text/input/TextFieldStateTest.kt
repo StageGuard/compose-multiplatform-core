@@ -750,12 +750,11 @@ class TextFieldStateTest {
         var oldValueCalled: TextFieldCharSequence? = null
         var newValueCalled: TextFieldCharSequence? = null
         var restartImeCalled: Boolean? = null
-        val listener =
-            TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
-                oldValueCalled = oldValue
-                newValueCalled = newValue
-                restartImeCalled = restartIme
-            }
+        val listener = TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
+            oldValueCalled = oldValue
+            newValueCalled = newValue
+            restartImeCalled = restartIme
+        }
         state.addNotifyImeListener(listener)
 
         state.edit { append(" World") }
@@ -773,12 +772,11 @@ class TextFieldStateTest {
         var oldValueCalled: TextFieldCharSequence? = null
         var newValueCalled: TextFieldCharSequence? = null
         var restartImeCalled: Boolean? = null
-        val listener =
-            TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
-                oldValueCalled = oldValue
-                newValueCalled = newValue
-                restartImeCalled = restartIme
-            }
+        val listener = TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
+            oldValueCalled = oldValue
+            newValueCalled = newValue
+            restartImeCalled = restartIme
+        }
         state.addNotifyImeListener(listener)
 
         state.edit { append(" World") }
@@ -796,12 +794,11 @@ class TextFieldStateTest {
         var oldValueCalled: TextFieldCharSequence? = null
         var newValueCalled: TextFieldCharSequence? = null
         var restartImeCalled: Boolean? = null
-        val listener =
-            TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
-                oldValueCalled = oldValue
-                newValueCalled = newValue
-                restartImeCalled = restartIme
-            }
+        val listener = TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
+            oldValueCalled = oldValue
+            newValueCalled = newValue
+            restartImeCalled = restartIme
+        }
         state.addNotifyImeListener(listener)
 
         state.edit {
@@ -824,12 +821,11 @@ class TextFieldStateTest {
         var oldValueCalled: TextFieldCharSequence? = null
         var newValueCalled: TextFieldCharSequence? = null
         var restartImeCalled: Boolean? = null
-        val listener =
-            TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
-                oldValueCalled = oldValue
-                newValueCalled = newValue
-                restartImeCalled = restartIme
-            }
+        val listener = TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
+            oldValueCalled = oldValue
+            newValueCalled = newValue
+            restartImeCalled = restartIme
+        }
         state.addNotifyImeListener(listener)
 
         DefaultImeEditCommandScope(TransformedTextFieldState(state)).setComposingText("World", 1)
@@ -847,12 +843,11 @@ class TextFieldStateTest {
         var oldValueCalled: TextFieldCharSequence? = null
         var newValueCalled: TextFieldCharSequence? = null
         var restartImeCalled: Boolean? = null
-        val listener =
-            TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
-                oldValueCalled = oldValue
-                newValueCalled = newValue
-                restartImeCalled = restartIme
-            }
+        val listener = TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
+            oldValueCalled = oldValue
+            newValueCalled = newValue
+            restartImeCalled = restartIme
+        }
         state.addNotifyImeListener(listener)
 
         state.undoState.undo() // should remove " World"
@@ -868,12 +863,11 @@ class TextFieldStateTest {
         var oldValueCalled: TextFieldCharSequence? = null
         var newValueCalled: TextFieldCharSequence? = null
         var restartImeCalled: Boolean? = null
-        val listener =
-            TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
-                oldValueCalled = oldValue
-                newValueCalled = newValue
-                restartImeCalled = restartIme
-            }
+        val listener = TextFieldState.NotifyImeListener { oldValue, newValue, restartIme ->
+            oldValueCalled = oldValue
+            newValueCalled = newValue
+            restartImeCalled = restartIme
+        }
         state.addNotifyImeListener(listener)
 
         state.editAsUser(null, restartImeIfContentChanges = true) { selection = TextRange.Zero }
@@ -888,7 +882,7 @@ class TextFieldStateTest {
         val state = TextFieldState("hello")
         state.edit { addStyle(SpanStyle(color = Color.Red), 0, 5) }
 
-        val spanStyles = state.textStyles.getSpanStyles(0, 5)
+        val spanStyles = state.textStyles.getSpanStyles(TextRange(0, 5))
         assertThat(spanStyles).hasSize(1)
         assertThat(spanStyles[0].item).isEqualTo(SpanStyle(color = Color.Red))
         assertThat(spanStyles[0].start).isEqualTo(0)
@@ -900,7 +894,7 @@ class TextFieldStateTest {
         val state = TextFieldState("hello")
         state.edit { addStyle(ParagraphStyle(textAlign = TextAlign.Center), 0, 5) }
 
-        val paragraphStyles = state.textStyles.getParagraphStyles(0, 5)
+        val paragraphStyles = state.textStyles.getParagraphStyles(TextRange(0, 5))
         assertThat(paragraphStyles).hasSize(1)
         assertThat(paragraphStyles[0].item).isEqualTo(ParagraphStyle(textAlign = TextAlign.Center))
         assertThat(paragraphStyles[0].start).isEqualTo(0)
@@ -917,21 +911,55 @@ class TextFieldStateTest {
         }
 
         assertThat(recordedStyles).isNotNull()
-        assertThat(recordedStyles?.getSpanStyles(0, 5)).isEmpty()
+        assertThat(recordedStyles?.getSpanStyles(TextRange(0, 5))).isEmpty()
 
         state.edit { addStyle(SpanStyle(color = Color.Blue), 0, 5) }
 
-        assertThat(recordedStyles?.getSpanStyles(0, 5)).hasSize(1)
-        assertThat(recordedStyles?.getSpanStyles(0, 5)?.get(0)?.item)
+        assertThat(recordedStyles?.getSpanStyles(TextRange(0, 5))).hasSize(1)
+        assertThat(recordedStyles?.getSpanStyles(TextRange(0, 5))?.get(0)?.item)
             .isEqualTo(SpanStyle(color = Color.Blue))
     }
 
+    fun userCommitTextWithTextAttribute_textSuggestionSelected() {
+        val state = TextFieldState("hello")
+
+        DefaultImeEditCommandScope(TransformedTextFieldState(state))
+            .commitText("Hello", 1, isTextSuggestionSelected = true)
+
+        assertThat(state.userCommit).isTrue()
+        assertThat(state.suggestionSelected).isTrue()
+
+        DefaultImeEditCommandScope(TransformedTextFieldState(state))
+            .commitText("world", 6, isTextSuggestionSelected = false)
+
+        assertThat(state.userCommit).isTrue()
+        assertThat(state.suggestionSelected).isFalse()
+    }
+
+    @Test
+    fun userSetComposingTextWithTextAttribute_textSuggestionSelected() {
+        assertThat(state.composition).isNull()
+
+        DefaultImeEditCommandScope(TransformedTextFieldState(state))
+            .setComposingText("Hello", 1, null, isTextSuggestionSelected = true)
+
+        assertThat(state.composition).isEqualTo(TextRange(0, 5))
+        assertThat(state.suggestionSelected).isTrue()
+        assertThat(state.userCommit).isTrue()
+
+        DefaultImeEditCommandScope(TransformedTextFieldState(state))
+            .setComposingText("world", 1, null, isTextSuggestionSelected = false)
+
+        assertThat(state.composition).isEqualTo(TextRange(0, 5))
+        assertThat(state.userCommit).isTrue()
+        assertThat(state.suggestionSelected).isFalse()
+    }
+
     private fun runTestWithSnapshotsThenCancelChildren(testBody: suspend TestScope.() -> Unit) {
-        val globalWriteObserverHandle =
-            Snapshot.registerGlobalWriteObserver {
-                // This is normally done by the compose runtime.
-                Snapshot.sendApplyNotifications()
-            }
+        val globalWriteObserverHandle = Snapshot.registerGlobalWriteObserver {
+            // This is normally done by the compose runtime.
+            Snapshot.sendApplyNotifications()
+        }
         try {
             runTest {
                 testBody()

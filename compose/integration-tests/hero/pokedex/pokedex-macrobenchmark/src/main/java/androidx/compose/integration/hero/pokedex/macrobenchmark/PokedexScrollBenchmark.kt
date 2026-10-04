@@ -34,6 +34,7 @@ import androidx.test.uiautomator.Until
 import androidx.testutils.CpuFrequencyChangeMetric
 import androidx.testutils.createCompilationParams
 import androidx.testutils.defaultComposeScrollingMetrics
+import androidx.testutils.defaultMemoryMetrics
 import androidx.tracing.Trace
 import kotlin.math.roundToInt
 import org.junit.Test
@@ -88,15 +89,18 @@ class PokedexScrollBenchmark(
     @OptIn(ExperimentalMetricApi::class)
     private fun benchmarkScroll(
         action: String,
+        enableScrollbar: Boolean = true,
         setupBlock: MacrobenchmarkScope.() -> Unit,
         measureBlock: MacrobenchmarkScope.() -> Unit,
-    ) =
+    ) {
+
         benchmarkRule.measureRepeated(
             packageName = POKEDEX_TARGET_PACKAGE_NAME,
             metrics =
                 defaultComposeScrollingMetrics() +
                     FrameTimingGfxInfoMetric() +
-                    CpuFrequencyChangeMetric(),
+                    CpuFrequencyChangeMetric() +
+                    defaultMemoryMetrics(),
             compilationMode = compilationMode,
             iterations = HeroMacrobenchmarkDefaults.ITERATIONS,
             setupBlock = {
@@ -105,18 +109,21 @@ class PokedexScrollBenchmark(
                 // process is already active.
                 killProcess()
                 databaseCleanupRule.deleteDatabaseFiles()
+                cacheCleanupRule.deleteCacheFiles()
 
                 val intent = Intent()
                 intent.configure(
                     action = action,
                     enableSharedTransitionScope = enableSharedTransitionScope,
                     enableSharedElementTransitions = enableSharedElementTransitions,
+                    enableScrollbar = enableScrollbar,
                 )
                 startActivityAndWait(intent)
                 setupBlock()
             },
             measureBlock = measureBlock,
         )
+    }
 
     private fun MacrobenchmarkScope.scrollActions(content: UiObject2) {
         // Important: We perform up flings with the default fling speed, and down flings with a

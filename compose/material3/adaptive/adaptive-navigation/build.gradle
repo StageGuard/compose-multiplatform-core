@@ -28,35 +28,23 @@ import androidx.build.PlatformIdentifier
 plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
-    id("JetBrainsAndroidXPlugin")
 }
 
-def composeWinUiJvmTargetEnabled = providers
-        .gradleProperty("composeWinUi.enableJvmTarget")
-        .map { it.toBoolean() }
-        .orElse(false)
-        .get()
-def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 androidXMultiplatform {
     androidLibrary {
-        compileSdk = 35
+        compileSdk { version = release(37) }
         namespace = "androidx.compose.material3.adaptive.navigation"
     }
-    if (!composeWinUiJvmTargetEnabled) {
-        desktop()
-    }
-    mac()
-    ios()
-    js()
-    wasmJs()
+    jvmStubs()
+    linuxX64Stubs()
 
     defaultPlatform(PlatformIdentifier.ANDROID)
 
     sourceSets {
         commonMain.dependencies {
             api(project(":compose:material3:adaptive:adaptive-layout"))
-            implementation(project(":compose:foundation:foundation"))
-            implementation(project(":compose:ui:ui-util"))
+            implementation("androidx.compose.foundation:foundation:1.9.0")
+            implementation("androidx.compose.ui:ui-util:1.9.0")
         }
 
         androidMain.dependencies {
@@ -82,53 +70,10 @@ androidXMultiplatform {
     }
 }
 
-
-
-
-kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
-
-        sourceSets {
-            winuiJvmMain {
-                dependsOn(commonMain)
-            }
-
-            winuiJvmTest {
-                dependsOn(commonTest)
-            }
-        }
-    }
-}
-
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
-            freeCompilerArgs.add("-Xjdk-release=25")
-        }
-    }
-}
-
 androidx {
     name = "Material Adaptive"
     type = SoftwareType.PUBLISHED_LIBRARY_ONLY_USED_BY_KOTLIN_CONSUMERS
     inceptionYear = "2023"
     description = "Compose Material Design Adaptive Library"
     legacyDisableKotlinStrictApiMode = true
-}
-
-configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
-    }
-}
-
-tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.enabled = false
-    }
 }

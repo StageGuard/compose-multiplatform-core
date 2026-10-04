@@ -27,7 +27,7 @@ import androidx.compose.foundation.contextmenu.ContextMenuScope
 import androidx.compose.foundation.contextmenu.ContextMenuState
 import androidx.compose.foundation.gestures.awaitAllPointersUpWithSlopDetection
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitPrimaryFirstDown
 import androidx.compose.foundation.internal.checkPreconditionNotNull
 import androidx.compose.foundation.internal.requirePrecondition
 import androidx.compose.foundation.internal.requirePreconditionNotNull
@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.contextmenu.modifier.textContextMenuTool
 import androidx.compose.foundation.text.contextmenu.modifier.translateRootToDestination
 import androidx.compose.foundation.text.input.internal.coerceIn
 import androidx.compose.foundation.text.isPositionInsideSelection
+import androidx.compose.foundation.text.modifiers.DefaultMouseSelectionObserver
 import androidx.compose.foundation.text.selection.Selection.AnchorInfo
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.RememberObserver
@@ -195,6 +196,16 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
                         false
                     }
                 }
+                .then(
+                    @OptIn(ExperimentalFoundationApi::class)
+                    if (ComposeFoundationFlags.isMouseSelectionBetweenTextEnabled) {
+                        Modifier.pointerInput(Unit) {
+                            awaitSelectionGestures(mouseSelectionObserver, null)
+                        }
+                    } else {
+                        Modifier
+                    }
+                )
                 .then(if (shouldShowMagnifier) Modifier.selectionMagnifier(this) else Modifier)
                 .addContextMenuComponents()
 
@@ -327,6 +338,14 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
 
     /** Maps selectable ids to the corresponding [PinnedHandle], if that selectable is pinned. */
     private val pinnedHandleBySelectableId = mutableLongObjectMapOf<PinnedHandle>()
+
+    private val mouseSelectionObserver by
+        lazy(LazyThreadSafetyMode.NONE) {
+            selectionRegistrar.DefaultMouseSelectionObserver(
+                selectableIdProvider = null,
+                layoutCoordinatesProvider = { containerLayoutCoordinates },
+            )
+        }
 
     init {
         selectionRegistrar.onPositionChangeCallback = { selectableId ->
@@ -582,34 +601,28 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
         }
 
         val visibleBounds = containerCoordinates.visibleBounds()
-        this.startHandlePosition =
-            startLayoutCoordinates?.let { handleCoordinates ->
-                // Set the new handle position only if the handle is in visible bounds or
-                // the handle is still dragging. If handle goes out of visible bounds during drag,
-                // handle popup is also removed from composition, halting the drag gesture. This
-                // affects multiple text selection when selected text is configured with maxLines=1
-                // and overflow=clip.
-                val handlePosition =
-                    startSelectable.getHandlePosition(selection, isStartHandle = true)
-                if (handlePosition.isUnspecified) return@let null
-                val position =
-                    containerCoordinates.localPositionOf(handleCoordinates, handlePosition)
-                position.takeIf {
-                    draggingHandle == Handle.SelectionStart || visibleBounds.containsInclusive(it)
-                }
+        this.startHandlePosition = startLayoutCoordinates?.let { handleCoordinates ->
+            // Set the new handle position only if the handle is in visible bounds or
+            // the handle is still dragging. If handle goes out of visible bounds during drag,
+            // handle popup is also removed from composition, halting the drag gesture. This
+            // affects multiple text selection when selected text is configured with maxLines=1
+            // and overflow=clip.
+            val handlePosition = startSelectable.getHandlePosition(selection, isStartHandle = true)
+            if (handlePosition.isUnspecified) return@let null
+            val position = containerCoordinates.localPositionOf(handleCoordinates, handlePosition)
+            position.takeIf {
+                draggingHandle == Handle.SelectionStart || visibleBounds.containsInclusive(it)
             }
+        }
 
-        this.endHandlePosition =
-            endLayoutCoordinates?.let { handleCoordinates ->
-                val handlePosition =
-                    endSelectable.getHandlePosition(selection, isStartHandle = false)
-                if (handlePosition.isUnspecified) return@let null
-                val position =
-                    containerCoordinates.localPositionOf(handleCoordinates, handlePosition)
-                position.takeIf {
-                    draggingHandle == Handle.SelectionEnd || visibleBounds.containsInclusive(it)
-                }
+        this.endHandlePosition = endLayoutCoordinates?.let { handleCoordinates ->
+            val handlePosition = endSelectable.getHandlePosition(selection, isStartHandle = false)
+            if (handlePosition.isUnspecified) return@let null
+            val position = containerCoordinates.localPositionOf(handleCoordinates, handlePosition)
+            position.takeIf {
+                draggingHandle == Handle.SelectionEnd || visibleBounds.containsInclusive(it)
             }
+        }
     }
 
     /** Returns non-nullable [containerLayoutCoordinates]. */
@@ -689,7 +702,7 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
                         }
                     }
                 },
-                createBoundarySelection = { selectable, isStart, offset, isCrossed ->
+                createBoundarySelection = { selectable, isStart, _, isCrossed ->
                     selectable.getSelectAllSelection()?.let { selectAll ->
                         if (isStart) {
                             if (isCrossed) {
@@ -936,10 +949,9 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
             if (currentSelection.start.selectableId == currentSelectableId) {
                 currentSelection.start.offset > currentOffset
             } else {
-                val startIndex =
-                    selectables.indexOfFirst {
-                        it.selectableId == currentSelection.start.selectableId
-                    }
+                val startIndex = selectables.indexOfFirst {
+                    it.selectableId == currentSelection.start.selectableId
+                }
                 startIndex > currentIndex
             }
 
@@ -1104,11 +1116,10 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
             ) -> Boolean
     ) {
         val sortedSelectables = selectionRegistrar.sort(requireContainerCoordinates())
-        val lastSelectableIndex =
-            sortedSelectables.indexOfLast {
-                val subSelection = selectionRegistrar.subselections[it.selectableId]
-                subSelection != null && subSelection.start.offset != subSelection.end.offset
-            }
+        val lastSelectableIndex = sortedSelectables.indexOfLast {
+            val subSelection = selectionRegistrar.subselections[it.selectableId]
+            subSelection != null && subSelection.start.offset != subSelection.end.offset
+        }
         // No selectable is selected.
         if (lastSelectableIndex == -1) return
 
@@ -1345,7 +1356,7 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
             awaitEachGesture {
                 // Wait for primary pointer to be down. It's required to explicitly filter
                 // secondary mouse button to make context menu work correctly.
-                val primaryFirstDown = awaitFirstDown(requireUnconsumed = false)
+                val primaryFirstDown = awaitPrimaryFirstDown(requireUnconsumed = false)
 
                 // Wait for all pointers to be up, and if we're not dragging, clear the selection.
                 // Do it in the initial phase so that when this happens while dragging, we check
@@ -1516,9 +1527,17 @@ internal class SelectionManager(private val selectionRegistrar: SelectionRegistr
                 previousSelection = previousSelection,
                 previousLayout = previousLayout,
                 selectableIdOrderingComparator = selectableIdOrderingComparator,
+                allowSelectionBetweenSelectables =
+                    @OptIn(ExperimentalFoundationApi::class)
+                    ComposeFoundationFlags.isMouseSelectionBetweenTextEnabled && !isInTouchMode,
             )
 
-        sortedSelectables.fastForEach { it.appendSelectableInfoToBuilder(builder) }
+        sortedSelectables.fastForEachIndexed { i, selectable ->
+            selectable.appendSelectableInfoToBuilder(
+                builder = builder,
+                isLast = i == sortedSelectables.lastIndex,
+            )
+        }
 
         return builder.build()
     }

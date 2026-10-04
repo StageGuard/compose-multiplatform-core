@@ -233,7 +233,6 @@ private fun Parameter.Builder.setFunctionType(value: Any?, stringTable: StringTa
             .apply {
                 packageName = stringTable.put(location.packageName)
                 functionName = function?.let { stringTable.put(it) } ?: 0
-                lambdaName = stringTable.put(location.lambdaName)
                 fileName = stringTable.put(location.fileName)
                 startLineNumber = location.startLine
                 endLineNumber = location.endLine
@@ -324,10 +323,9 @@ internal fun ObservedReadResult.convert(
 ): StateReadGroup {
     val builder = StateReadGroup.newBuilder()
     builder.recompositionNumber = recomposition
-    val parameters =
-        parameterChanges.mapNotNull {
-            layoutInspectorTree.convertStateValue(it.name, it.value)?.convert(stringTable)
-        }
+    val parameters = parameterChanges.mapNotNull {
+        layoutInspectorTree.convertStateValue(it.name, it.value)?.convert(stringTable)
+    }
     builder.addAllParameterChanges(parameters)
 
     // Collapse state reads that are identical:

@@ -20,14 +20,19 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.InternalComposeApi
 import androidx.compose.ui.OnCanvasTests
 import androidx.compose.ui.text.font.FontFamily
-import kotlin.coroutines.Continuation
+import androidx.compose.ui.text.platform.WebUnresolvedSymbolsRegistry
 import kotlin.coroutines.resume
+import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.js
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -35,7 +40,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalCoroutinesApi::class, InternalComposeApi::class)
 class WebFallbackFontDownloaderTest : OnCanvasTests {
@@ -123,27 +128,122 @@ class WebFallbackFontDownloaderTest : OnCanvasTests {
     }
 
     @Test
-    fun exceptionInDownloader_doesNotCrashWorker() = runTest {
+    fun failedDownload_isRetriedWithSameCodepoints() = runTest {
+        val font = FontFamily.Default
+        val calls = mutableListOf<Set<Int>>()
+        val flaky = object : FallbackFontDownloader {
+            override suspend fun downloadFallbackFont(codepoints: Set<Int>): List<FontFamily> {
+                calls += codepoints.toSet()
+                if (calls.size == 1) throw RuntimeException("transient network error")
+                return listOf(font)
+            }
+        }
+        val loaded = mutableListOf<List<FontFamily>>()
+        val downloader = WebFallbackFontDownloader(
+            downloader = flaky,
+            scope = backgroundScope,
+            onFontsLoaded = { loaded += it }
+        )
+
+        downloader.submit(setOf(0x4E2D, 0x6C34))
+        advanceTimeBy(1000)
+
+        assertEquals(2, calls.size, "Failed batch must be retried instead of being dropped")
+        assertEquals(
+            setOf(0x4E2D, 0x6C34),
+            calls[1],
+            "Retry must carry the same codepoints as the failed batch"
+        )
+        assertEquals(
+            listOf(font),
+            loaded.single(),
+            "A successful retry must deliver the downloaded fonts"
+        )
+    }
+
+    @Test
+    fun consecutiveFailures_useGrowingBackoff() = runTest {
         var callCount = 0
-        val throwingOnFirst = object : FallbackFontDownloader {
+        val alwaysFails = object : FallbackFontDownloader {
             override suspend fun downloadFallbackFont(codepoints: Set<Int>): List<FontFamily> {
                 callCount++
-                if (callCount == 1) throw RuntimeException("download failed")
+                throw RuntimeException("permanent failure")
+            }
+        }
+        val downloader = WebFallbackFontDownloader(
+            downloader = alwaysFails,
+            scope = backgroundScope,
+            onFontsLoaded = {}
+        )
+
+        downloader.submit(setOf(1))
+
+        // First failure backs off by 0s, so the first retry happens (and fails) almost immediately.
+        advanceTimeBy(500)
+        assertEquals(2, callCount, "First failure must retry immediately (0s backoff)")
+
+        // Second failure backs off by 5s — no further attempt before that elapses.
+        advanceTimeBy(4000)
+        assertEquals(2, callCount, "Third attempt must wait for the 5s backoff")
+
+        // Cross the 5s boundary — the third attempt fires.
+        advanceTimeBy(2000)
+        assertEquals(3, callCount, "Third attempt must run once the 5s backoff elapsed")
+    }
+
+    @Test
+    fun successResetsBackoff() = runTest {
+        var callCount = 0
+        // Fails on odd calls, succeeds on even ones, so every submit is "fail then retry-succeeds".
+        val flaky = object : FallbackFontDownloader {
+            override suspend fun downloadFallbackFont(codepoints: Set<Int>): List<FontFamily> {
+                callCount++
+                if (callCount % 2 == 1) throw RuntimeException("transient")
                 return emptyList()
             }
         }
         val downloader = WebFallbackFontDownloader(
-            downloader = throwingOnFirst,
+            downloader = flaky,
             scope = backgroundScope,
             onFontsLoaded = {}
         )
+
         downloader.submit(setOf(1))
-        advanceTimeBy(200)
-        assertEquals(1, callCount)
+        advanceTimeBy(1000)
+        assertEquals(2, callCount, "First batch fails then succeeds on the immediate retry")
+
+        // The previous success must reset the backoff to 0, so this failure also retries immediately.
+        // If the backoff were not reset, the retry would be delayed by 5s and callCount would stay 3.
+        downloader.submit(setOf(2))
+        advanceTimeBy(1000)
+        assertEquals(4, callCount, "After a success, the next failure must retry immediately again")
+    }
+
+    @Test
+    fun workerSurvivesFailures_andKeepsProcessingNewBatches() = runTest {
+        val calls = mutableListOf<Set<Int>>()
+        val downloader = WebFallbackFontDownloader(
+            downloader = object : FallbackFontDownloader {
+                override suspend fun downloadFallbackFont(codepoints: Set<Int>): List<FontFamily> {
+                    calls += codepoints.toSet()
+                    if (codepoints == setOf(1)) throw RuntimeException("always fails for 1")
+                    return emptyList()
+                }
+            },
+            scope = backgroundScope,
+            onFontsLoaded = {}
+        )
+
+        downloader.submit(setOf(1))
+        advanceTimeBy(300)
 
         downloader.submit(setOf(2))
-        advanceTimeBy(200)
-        assertEquals(2, callCount, "Worker must survive exception and process next submit")
+        advanceTimeBy(300)
+
+        assertTrue(
+            calls.any { it == setOf(2) },
+            "A continuously failing batch must not block the worker from processing new batches"
+        )
     }
 
     @Test
@@ -191,4 +291,88 @@ class WebFallbackFontDownloaderTest : OnCanvasTests {
             "FakeDownloader should have received codepoint 0x${codepoint.toString(16)}. Actual calls: ${fake.calls}"
         )
     }
+
+    @Test
+    fun customFontFallbackUrlIsUsedForNotoFontDownloads() = runTest {
+        val customBaseUrl = "https://fallback.example/fonts/"
+        mockWindowFetch()
+
+        try {
+            createComposeWindow(configure = { fontFallbackUrl = customBaseUrl }) {
+                BasicText("🤔")
+            }
+
+            val requestedUrl = withContext(Dispatchers.Default) {
+                withTimeout(2.seconds) {
+                    while (true) {
+                        getMockedFontFetchUrl()?.let { return@withTimeout it }
+                        delay(10.milliseconds)
+                    }
+                    error("Unreachable")
+                }
+            }
+            assertTrue(
+                requestedUrl.startsWith(customBaseUrl),
+                "Expected a fallback font request to start with $customBaseUrl, got $requestedUrl"
+            )
+        } finally {
+            getComposeWindowOrNull()?.dispose()
+            WebUnresolvedSymbolsRegistry.onNewFontInstalled()
+            restoreWindowFetch()
+        }
+    }
+
+    @Test
+    fun nullFontFallbackUrlDsablesFallbackFontDownloader() = runTest {
+        val fake = FakeDownloader()
+        val previousDownloader = defaultFallbackFontDownloader
+        defaultFallbackFontDownloader = fake
+
+        try {
+            createComposeWindow(
+                configure = { fontFallbackUrl = null }
+            ) {
+                BasicText("გამარჯობა -> gamarjoba")
+            }
+
+            val downloaderWasCalled = withContext(Dispatchers.Default) {
+                withTimeoutOrNull(200.milliseconds) {
+                    fake.awaitNextDownloadCall()
+                    true
+                } == true
+            }
+            assertFalse(downloaderWasCalled, "Fallback downloader should not be called")
+            assertTrue(fake.calls.isEmpty(), "Fallback downloader should not receive codepoints")
+        } finally {
+            defaultFallbackFontDownloader = previousDownloader
+        }
+    }
+}
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun mockWindowFetch() {
+    // language=js
+    js("""{
+        window.__composeFallbackOriginalFetch = window.fetch;
+        window.__composeFallbackFetchUrl = null;
+        window.fetch = (url) => {
+            window.__composeFallbackFetchUrl = String(url);
+            return new Promise(() => {});
+        };
+    }""")
+}
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun getMockedFontFetchUrl(): String? =
+    // language=js
+    js("window.__composeFallbackFetchUrl")
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun restoreWindowFetch() {
+    // language=js
+    js("""{
+        window.fetch = window.__composeFallbackOriginalFetch;
+        delete window.__composeFallbackOriginalFetch;
+        delete window.__composeFallbackFetchUrl;
+    }""")
 }

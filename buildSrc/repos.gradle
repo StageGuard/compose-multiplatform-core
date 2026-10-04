@@ -85,11 +85,7 @@ def addMavenRepositories(RepositoryHandler handler) {
             }
         }
         handler.maven {
-            name = "mavenCentralSnapshots"
-            url = "https://central.sonatype.com/repository/maven-snapshots/"
-            mavenContent {
-                snapshotsOnly()
-            }
+            url = "https://central.sonatype.com/repository/maven-snapshots"
         }
         handler.mavenLocal()
     }

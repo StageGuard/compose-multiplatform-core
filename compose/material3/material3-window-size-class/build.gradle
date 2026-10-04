@@ -23,41 +23,28 @@
 
 import androidx.build.SoftwareType
 import androidx.build.PlatformIdentifier
-import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 
 plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
-    id("JetBrainsAndroidXPlugin")
 }
 
-def composeWinUiJvmTargetEnabled = providers
-        .gradleProperty("composeWinUi.enableJvmTarget")
-        .map { it.toBoolean() }
-        .orElse(false)
-        .get()
-def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.compose.material3.windowsizeclass"
-        compileSdk = 35
+        compileSdk { version = release(35) }
     }
-    if (!composeWinUiJvmTargetEnabled) {
-        desktop()
-    }
-    mac()
-    ios()
-    js()
-    wasmJs()
+    jvmStubs()
+    linuxX64Stubs()
 
     defaultPlatform(PlatformIdentifier.ANDROID)
 
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":compose:ui:ui-util"))
-            api(project(":compose:runtime:runtime"))
-            api(project(":compose:ui:ui"))
-            api(project(":compose:ui:ui-unit"))
+            implementation("androidx.compose.ui:ui-util:1.8.1")
+            api("androidx.compose.runtime:runtime:1.8.1")
+            api("androidx.compose.ui:ui:1.8.2")
+            api("androidx.compose.ui:ui-unit:1.8.1")
         }
 
         commonTest.dependencies {
@@ -84,67 +71,6 @@ androidXMultiplatform {
             implementation(libs.kotlinTest)
             implementation(libs.truth)
         }
-
-        // TODO: Align naming: nonAndroidMain
-        skikoMain {
-            dependsOn(commonMain)
-        }
-
-        skikoTest {
-            dependsOn(commonTest)
-        }
-
-        desktopMain {
-            dependsOn(skikoMain)
-        }
-
-        desktopTest {
-            dependsOn(skikoTest)
-        }
-
-        nonJvmMain {
-            dependsOn(skikoMain)
-        }
-
-        nonJvmTest {
-            dependsOn(skikoTest)
-        }
-
-        nativeMain {
-            dependsOn(nonJvmMain)
-        }
-
-        nativeTest {
-            dependsOn(nonJvmTest)
-        }
-    }
-}
-
-
-
-
-kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
-
-        sourceSets {
-            winuiJvmMain {
-                dependsOn(skikoMain)
-            }
-
-            winuiJvmTest {
-                dependsOn(skikoTest)
-            }
-        }
-    }
-}
-
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
-            freeCompilerArgs.add("-Xjdk-release=25")
-        }
     }
 }
 
@@ -153,20 +79,5 @@ androidx {
     type = SoftwareType.PUBLISHED_LIBRARY_ONLY_USED_BY_KOTLIN_CONSUMERS
     inceptionYear = "2022"
     description = "Provides window size classes for building responsive UIs"
-    legacyDisableKotlinStrictApiMode = true
     samples(project(":compose:material3:material3-window-size-class:material3-window-size-class-samples"))
-}
-configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
-    }
-}
-
-tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.enabled = false
-    }
 }

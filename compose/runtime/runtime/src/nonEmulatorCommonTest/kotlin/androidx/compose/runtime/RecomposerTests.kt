@@ -35,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -277,9 +278,9 @@ class RecomposerTests {
     }
 
     @Test // regression test for b/243862703
-    fun cancelWithPendingInvalidations() {
+    fun cancelWithPendingInvalidations(): TestResult {
         val dispatcher = StandardTestDispatcher()
-        runTest(dispatcher) {
+        return runTest(dispatcher) {
             val testClock = TestMonotonicFrameClock(this)
             withContext(testClock) {
                 val recomposer = Recomposer(coroutineContext)
@@ -358,8 +359,9 @@ class RecomposerTests {
 
         // Register the apply observer after changing state to invalidate composition, but
         // before actually allowing the recomposition to happen.
-        val observerHandle =
-            Snapshot.registerApplyObserver { applied, _ -> applications += applied }
+        val observerHandle = Snapshot.registerApplyObserver { applied, _ ->
+            applications += applied
+        }
 
         try {
             assertTrue(applications.isEmpty())
@@ -409,9 +411,9 @@ class RecomposerTests {
     }
 
     @Test
-    fun pausingTheFrameClockStopShouldBlockWithFrameNanos() {
+    fun pausingTheFrameClockStopShouldBlockWithFrameNanos(): TestResult {
         val dispatcher = StandardTestDispatcher()
-        runTest(dispatcher) {
+        return runTest(dispatcher) {
             val testClock = TestMonotonicFrameClock(this)
             withContext(testClock) {
                 val recomposer = Recomposer(coroutineContext)

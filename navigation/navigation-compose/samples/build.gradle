@@ -29,7 +29,6 @@ plugins {
     id("AndroidXPlugin")
     id("com.android.library")
     id("AndroidXComposePlugin")
-    id("org.jetbrains.kotlin.android")
     id ("kotlin-parcelize")
     alias(libs.plugins.kotlinSerialization)
 }
@@ -63,10 +62,10 @@ androidx {
     type = SoftwareType.SAMPLES
     inceptionYear = "2020"
     description = "Samples for Compose integration with Navigation"
-    kotlinTarget = KotlinTarget.KOTLIN_2_3
+    kotlinTarget = KotlinTarget.KOTLIN_2_4
 }
 
 android {
-    compileSdk = 35
+    compileSdk { version = release(37) }
     namespace = "androidx.navigation.compose.samples"
 }

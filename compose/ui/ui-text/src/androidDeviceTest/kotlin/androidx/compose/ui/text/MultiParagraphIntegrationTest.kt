@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.toFontFamily
 import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.matchers.assertThat
 import androidx.compose.ui.text.matchers.isZero
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -653,7 +654,8 @@ class MultiParagraphIntegrationTest {
         val paragraph =
             simpleMultiParagraph(
                 text = text,
-                style = TextStyle(textDirection = TextDirection.Content, localeList = ltrLocaleList),
+                style =
+                    TextStyle(textDirection = TextDirection.Content, localeList = ltrLocaleList),
             )
         assertThat(paragraph.getParagraphDirection(0)).isEqualTo(ResolvedTextDirection.Ltr)
         assertThat(paragraph.getParagraphDirection(1)).isEqualTo(ResolvedTextDirection.Rtl)
@@ -667,7 +669,8 @@ class MultiParagraphIntegrationTest {
         val paragraph =
             simpleMultiParagraph(
                 text = text,
-                style = TextStyle(textDirection = TextDirection.Content, localeList = rtlLocaleList),
+                style =
+                    TextStyle(textDirection = TextDirection.Content, localeList = rtlLocaleList),
             )
         assertThat(paragraph.getParagraphDirection(0)).isEqualTo(ResolvedTextDirection.Ltr)
         assertThat(paragraph.getParagraphDirection(1)).isEqualTo(ResolvedTextDirection.Rtl)
@@ -968,6 +971,31 @@ class MultiParagraphIntegrationTest {
         assertThat(paragraph.getLineEnd(0)).isEqualTo(0)
         assertThat(paragraph.getLineEnd(0, true)).isEqualTo(0)
         assertThat(paragraph.isLineEllipsized(0)).isFalse()
+    }
+
+    @Test
+    fun isLineEllipsized_lineIndexAdjustedToLocalParagraph_doesNotCrash() {
+        val text = buildAnnotatedString {
+            append("first line\nsecond line")
+            pushStyle(ParagraphStyle())
+            // force StaticLayout
+            withStyle(SpanStyle(baselineShift = BaselineShift.Subscript)) { append("last line") }
+            pop()
+        }
+        val paragraph =
+            MultiParagraph(
+                annotatedString = text,
+                style = TextStyle(fontFamily = fontFamilyMeasureFont),
+                maxLines = 3,
+                constraints = Constraints(maxWidth = Float.MAX_VALUE.ceilToInt()),
+                density = defaultDensity,
+                fontFamilyResolver = UncachedFontFamilyResolver(context),
+                overflow = TextOverflow.Ellipsis,
+            )
+
+        assertThat(paragraph.lineCount).isEqualTo(3)
+        // Querying the line in the second paragraph
+        assertThat(paragraph.isLineEllipsized(2)).isFalse()
     }
 
     @Test

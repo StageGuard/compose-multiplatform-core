@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.Button
 import androidx.compose.material.Checkbox
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.interop.runUIKitInstrumentedTestWithInterop
 import androidx.compose.ui.platform.accessibility.CMPAccessibilityTraitTextView
+import androidx.compose.ui.platform.accessibility.CMPAccessibilityTraitToggle
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -59,27 +61,40 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.test.UIKitInstrumentedTest
 import androidx.compose.ui.test.assertAccessibilityTree
 import androidx.compose.ui.test.findNodeWithTag
 import androidx.compose.ui.test.runUIKitInstrumentedTest
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.LinkInteractionListener
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.VerbatimTtsAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.withAnnotation
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitInteropProperties
 import androidx.compose.ui.viewinterop.UIKitView
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.cinterop.BetaInteropApi
+import kotlinx.cinterop.ExperimentalForeignApi
 import org.jetbrains.skiko.OS
 import org.jetbrains.skiko.OSVersion
 import org.jetbrains.skiko.available
+import platform.Foundation.NSAttributedString
+import platform.Foundation.NSNumber
 import platform.UIKit.UIAccessibilityContainerTypeNone
 import platform.UIKit.UIAccessibilityContainerTypeSemanticGroup
+import platform.UIKit.UIAccessibilitySpeechAttributeLanguage
+import platform.UIKit.UIAccessibilitySpeechAttributeSpellOut
 import platform.UIKit.UIAccessibilityTraitAdjustable
 import platform.UIKit.UIAccessibilityTraitButton
 import platform.UIKit.UIAccessibilityTraitHeader
@@ -88,6 +103,9 @@ import platform.UIKit.UIAccessibilityTraitNotEnabled
 import platform.UIKit.UIAccessibilityTraitSelected
 import platform.UIKit.UIAccessibilityTraitStaticText
 import platform.UIKit.UIAccessibilityTraitToggleButton
+import platform.UIKit.UITraitEnvironmentLayoutDirection
+import platform.UIKit.UITraitEnvironmentLayoutDirectionLeftToRight
+import platform.UIKit.UITraitEnvironmentLayoutDirectionRightToLeft
 import platform.UIKit.UIView
 import platform.UIKit.accessibilityActivate
 import platform.UIKit.accessibilityDecrement
@@ -96,11 +114,20 @@ import platform.UIKit.setAccessibilityLabel
 import platform.UIKit.setIsAccessibilityElement
 
 class ComponentsAccessibilitySemanticTest {
+    private val layoutDirections = listOf(
+        UITraitEnvironmentLayoutDirectionLeftToRight,
+        UITraitEnvironmentLayoutDirectionRightToLeft
+    )
+
+    private fun runUIKitInstrumentedTestInBothLayoutDirections(
+        testBlock: UIKitInstrumentedTest.(UITraitEnvironmentLayoutDirection) -> Unit
+    ) = runUIKitInstrumentedTest(params = layoutDirections, testBlock = testBlock)
+
     @OptIn(ExperimentalMaterialApi::class)
     @Test
-    fun testProgressNodesSemantic() = runUIKitInstrumentedTest {
+    fun testProgressNodesSemantic() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
         var sliderValue = 0.4f
-        setContent {
+        setContent(layoutDirection = layoutDirection) {
             Column {
                 Slider(
                     value = sliderValue,
@@ -181,17 +208,167 @@ class ComponentsAccessibilitySemanticTest {
             // Switch
             node {
                 isAccessibilityElement = true
-                traits(UIAccessibilityTraitButton)
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
                 if (available(OS.Ios to OSVersion(major = 17))) {
                     traits(UIAccessibilityTraitToggleButton)
                 }
+                value = "0"
             }
             // Checkbox
             node {
                 isAccessibilityElement = true
-                traits(UIAccessibilityTraitButton)
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                value = "0"
             }
-            // ToggleableState
+            // ToggleableState.On
+            node {
+                isAccessibilityElement = true
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                value = "1"
+            }
+            // ToggleableState.Off
+            node {
+                isAccessibilityElement = true
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                value = "0"
+            }
+            // ToggleableState.Indeterminate
+            node {
+                isAccessibilityElement = true
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+            }
+        }
+    }
+
+    @Test
+    fun testToggleableRowSemantic() = runUIKitInstrumentedTest {
+        setContent {
+            Column {
+                Row(
+                    modifier = Modifier.toggleable(
+                        value = true,
+                        role = Role.Switch,
+                        onValueChange = {}
+                    )
+                ) {
+                    Text("Setting A")
+                    Switch(checked = true, onCheckedChange = null)
+                }
+                Row(
+                    modifier = Modifier.toggleable(
+                        value = false,
+                        role = Role.Switch,
+                        onValueChange = {}
+                    )
+                ) {
+                    Text("Setting B")
+                    Switch(checked = false, onCheckedChange = null)
+                }
+            }
+        }
+
+        assertAccessibilityTree {
+            node {
+                isAccessibilityElement = true
+                label = "Setting A"
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                if (available(OS.Ios to OSVersion(major = 17))) {
+                    traits(UIAccessibilityTraitToggleButton)
+                }
+                value = "1"
+            }
+            node {
+                isAccessibilityElement = true
+                label = "Setting B"
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                if (available(OS.Ios to OSVersion(major = 17))) {
+                    traits(UIAccessibilityTraitToggleButton)
+                }
+                value = "0"
+            }
+        }
+    }
+
+    @Test
+    fun testToggleableStateDescriptionTakesPrecedenceOverValue() = runUIKitInstrumentedTest {
+        setContent {
+            Column {
+                Switch(
+                    checked = true,
+                    onCheckedChange = {},
+                    modifier = Modifier.semantics { stateDescription = "Enabled" }
+                )
+                Switch(checked = false, onCheckedChange = {})
+            }
+        }
+
+        assertAccessibilityTree {
+            node {
+                isAccessibilityElement = true
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                if (available(OS.Ios to OSVersion(major = 17))) {
+                    traits(UIAccessibilityTraitToggleButton)
+                }
+                value = "Enabled"
+            }
+            node {
+                isAccessibilityElement = true
+                traits(
+                    UIAccessibilityTraitButton,
+                    CMPAccessibilityTraitToggle
+                )
+                if (available(OS.Ios to OSVersion(major = 17))) {
+                    traits(UIAccessibilityTraitToggleButton)
+                }
+                value = "0"
+            }
+        }
+    }
+
+    @Test
+    fun testSelectedIsNotReportedAsToggle() = runUIKitInstrumentedTest {
+        setContent {
+            Column {
+                RadioButton(
+                    selected = true,
+                    onClick = {},
+                    modifier = Modifier.testTag("SelectedRadio")
+                )
+                RadioButton(
+                    selected = false,
+                    onClick = {},
+                    modifier = Modifier.testTag("UnselectedRadio")
+                )
+            }
+        }
+
+        // `Selected` is a distinct semantics property from `ToggleableState`: it must keep mapping
+        // to the selected trait and must not produce a toggle trait or a toggle value.
+        assertAccessibilityTree {
             node {
                 isAccessibilityElement = true
                 traits(
@@ -203,11 +380,9 @@ class ComponentsAccessibilitySemanticTest {
                 isAccessibilityElement = true
                 traits(UIAccessibilityTraitButton)
             }
-            node {
-                isAccessibilityElement = true
-                traits(UIAccessibilityTraitButton)
-            }
         }
+        assertNull(findNodeWithTag("SelectedRadio").value)
+        assertNull(findNodeWithTag("UnselectedRadio").value)
     }
 
     @Test
@@ -427,34 +602,44 @@ class ComponentsAccessibilitySemanticTest {
                     UIAccessibilityTraitNotEnabled
                 )
             }
+            // Switch
             node {
                 isAccessibilityElement = true
                 if (available(OS.Ios to OSVersion(major = 17))) {
                     traits(
                         UIAccessibilityTraitButton,
                         UIAccessibilityTraitToggleButton,
-                        UIAccessibilityTraitNotEnabled
+                        UIAccessibilityTraitNotEnabled,
+                        CMPAccessibilityTraitToggle
                     )
                 } else {
                     traits(
                         UIAccessibilityTraitButton,
-                        UIAccessibilityTraitNotEnabled
+                        UIAccessibilityTraitNotEnabled,
+                        CMPAccessibilityTraitToggle
                     )
                 }
+                value = "0"
             }
+            // Checkbox
             node {
                 isAccessibilityElement = true
                 traits(
                     UIAccessibilityTraitButton,
-                    UIAccessibilityTraitNotEnabled
+                    UIAccessibilityTraitNotEnabled,
+                    CMPAccessibilityTraitToggle
                 )
+                value = "0"
             }
+            // TriStateCheckbox
             node {
                 isAccessibilityElement = true
                 traits(
                     UIAccessibilityTraitButton,
-                    UIAccessibilityTraitNotEnabled
+                    UIAccessibilityTraitNotEnabled,
+                    CMPAccessibilityTraitToggle
                 )
+                value = "0"
             }
         }
     }
@@ -551,10 +736,10 @@ class ComponentsAccessibilitySemanticTest {
     }
 
     @Test
-    fun testVisibleNodeContainers() = runUIKitInstrumentedTest {
+    fun testVisibleNodeContainers() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
         var alpha by mutableStateOf(0f)
 
-        setContent {
+        setContent(layoutDirection = layoutDirection) {
             Column {
                 Text("Text 1")
                 Row(modifier = Modifier.graphicsLayer {
@@ -719,8 +904,8 @@ class ComponentsAccessibilitySemanticTest {
     }
 
     @Test
-    fun testChildrenOfCollapsedNode() = runUIKitInstrumentedTest {
-        setContent {
+    fun testChildrenOfCollapsedNode() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
+        setContent(layoutDirection = layoutDirection) {
             Column {
                 Row(modifier = Modifier.testTag("row").clickable {}) {
                     Text("Foo", modifier = Modifier.testTag("row_title"))
@@ -803,8 +988,8 @@ class ComponentsAccessibilitySemanticTest {
     }
 
     @Test
-    fun testNodeHierarchyInsideAccessibilityElementShouldNotFlatten() = runUIKitInstrumentedTest {
-        setContent {
+    fun testNodeHierarchyInsideAccessibilityElementShouldNotFlatten() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
+        setContent(layoutDirection = layoutDirection) {
             Column(modifier = Modifier.clickable {}) {
                 Text("Title 1")
                 Row(modifier = Modifier.testTag("Tag 1")) {
@@ -837,8 +1022,8 @@ class ComponentsAccessibilitySemanticTest {
     }
 
     @Test
-    fun testNodeHierarchyInsideTraversalGroupShouldFlatten() = runUIKitInstrumentedTest {
-        setContent {
+    fun testNodeHierarchyInsideTraversalGroupShouldFlatten() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
+        setContent(layoutDirection = layoutDirection) {
             Column {
                 Column(modifier = Modifier.semantics { isTraversalGroup = true }) {
                     Text("Title 1")
@@ -1231,8 +1416,8 @@ class ComponentsAccessibilitySemanticTest {
     }
 
     @Test
-    fun testTextLinks() = runUIKitInstrumentedTest {
-        setContent {
+    fun testTextLinks() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
+        setContent(layoutDirection = layoutDirection) {
             Text(text = buildAnnotatedString {
                 append("Text ")
                 withAnnotation(
@@ -1269,16 +1454,18 @@ class ComponentsAccessibilitySemanticTest {
                 label = "Text annotation clickable link."
                 traits = listOf(UIAccessibilityTraitStaticText)
             }
-            node {
-                isAccessibilityElement = true
-                label = "clickable"
-                identifier = "clickable tag"
-                traits = listOf(UIAccessibilityTraitButton)
-            }
-            node {
-                isAccessibilityElement = true
-                label = "link"
-                traits = listOf(UIAccessibilityTraitButton)
+            node(layoutDirection = layoutDirection) {
+                node {
+                    isAccessibilityElement = true
+                    label = "clickable"
+                    identifier = "clickable tag"
+                    traits = listOf(UIAccessibilityTraitButton)
+                }
+                node {
+                    isAccessibilityElement = true
+                    label = "link"
+                    traits = listOf(UIAccessibilityTraitButton)
+                }
             }
         }
     }
@@ -1391,8 +1578,8 @@ class ComponentsAccessibilitySemanticTest {
     }
 
     @Test
-    fun testSemanticsMergingWithProgressIndicators() = runUIKitInstrumentedTest {
-        setContent {
+    fun testSemanticsMergingWithProgressIndicators() = runUIKitInstrumentedTestInBothLayoutDirections { layoutDirection ->
+        setContent(layoutDirection = layoutDirection) {
             Column(modifier = Modifier.semantics(mergeDescendants = true) {}) {
                 Row {
                     Text("Circular")
@@ -1485,4 +1672,85 @@ class ComponentsAccessibilitySemanticTest {
             }
         }
     }
+
+    @Test
+    fun testVerbatimTtsAnnotationInAttributedLabel() = runUIKitInstrumentedTest {
+        setContent {
+            Text(
+                text = buildAnnotatedString {
+                    append("Code ")
+                    withAnnotation(VerbatimTtsAnnotation("ABC123")) {
+                        append("ABC123")
+                    }
+                },
+                modifier = Modifier.testTag("Verbatim")
+            )
+        }
+
+        val label = assertNotNull(
+            findNodeWithTag("Verbatim").accessibilityLabel,
+            "Expected an attributed accessibility label"
+        )
+        // The verbatim part must be spelled out, the leading static text must not.
+        label.assertSpelledOut("ABC123")
+        assertEquals(
+            null,
+            label.attributeForSubstring(UIAccessibilitySpeechAttributeSpellOut!!, "Code"),
+            "Plain text should not carry the spell-out attribute"
+        )
+    }
+
+    @Test
+    fun testLanguageSpanInAttributedLabel() = runUIKitInstrumentedTest {
+        setContent {
+            Text(
+                text = buildAnnotatedString {
+                    append("Hello ")
+                    withStyle(SpanStyle(localeList = LocaleList("fr-FR"))) {
+                        append("bonjour")
+                    }
+                },
+                modifier = Modifier.testTag("Language")
+            )
+        }
+
+        val label = assertNotNull(
+            findNodeWithTag("Language").accessibilityLabel,
+            "Expected an attributed accessibility label"
+        )
+        // The localized part must carry the language tag, the leading text must not.
+        label.assertLanguage("bonjour", "fr-FR")
+        assertEquals(
+            null,
+            label.attributeForSubstring(UIAccessibilitySpeechAttributeLanguage!!, "Hello"),
+            "Plain text should not carry the language attribute"
+        )
+    }
+}
+
+@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+private fun NSAttributedString.attributeForSubstring(name: String, substring: String): Any? {
+    val location = string.indexOf(substring)
+    assertTrue(location >= 0, "Substring \"$substring\" not found in \"$string\"")
+    return attributesAtIndex(location.toULong(), null)[name]
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun NSAttributedString.assertSpelledOut(substring: String) {
+    val value = attributeForSubstring(UIAccessibilitySpeechAttributeSpellOut!!, substring)
+    assertEquals(
+        true,
+        (value as? NSNumber)?.boolValue,
+        "Expected spell-out speech attribute on \"$substring\" in \"$string\""
+    )
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun NSAttributedString.assertLanguage(substring: String, languageTag: String) {
+    val value = attributeForSubstring(UIAccessibilitySpeechAttributeLanguage!!, substring)
+    assertEquals(
+        languageTag,
+        value,
+        "Expected language speech attribute on \"$substring\" in \"$string\""
+    )
 }

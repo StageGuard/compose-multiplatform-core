@@ -25,4 +25,5 @@ package androidx.compose.ui.platform
  */
 internal expect inline fun makeSynchronizedObject(ref: Any? = null): SynchronizedObject
 
+@PublishedApi
 internal expect inline fun <R> synchronized(lock: SynchronizedObject, block: () -> R): R

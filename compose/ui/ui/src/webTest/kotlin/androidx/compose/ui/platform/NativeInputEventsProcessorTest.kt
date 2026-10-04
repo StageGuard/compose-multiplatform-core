@@ -16,12 +16,7 @@
 
 package androidx.compose.ui.platform
 
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.MultiParagraph
-import androidx.compose.ui.text.TextLayoutInput
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.input.BackspaceCommand
 import androidx.compose.ui.text.input.CommitTextCommand
@@ -30,17 +25,13 @@ import androidx.compose.ui.text.input.EditingBuffer
 import androidx.compose.ui.text.input.SetComposingTextCommand
 import androidx.compose.ui.text.input.SetSelectionCommand
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.input.key.InternalKeyEvent
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.events.beforeInput
 import androidx.compose.ui.events.compositionEnd
 import androidx.compose.ui.events.compositionStart
 import androidx.compose.ui.events.keyEvent
+import androidx.compose.ui.events.setFirstRange
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -81,37 +72,6 @@ class NativeInputEventsProcessorTest {
         override fun sendKeyboardEvent(keyboardEvent: KeyEvent): Boolean {
             keyboardEvents.add(keyboardEvent)
             return true
-        }
-
-        override fun currentTextLayoutResult(): TextLayoutResult? {
-            val text = editingBuffer.toString()
-            val annotatedString = AnnotatedString(text)
-            val density = Density(1f)
-            val constraints = Constraints()
-            val style = TextStyle.Default
-
-            return TextLayoutResult(
-                layoutInput = TextLayoutInput(
-                    text = annotatedString,
-                    style = style,
-                    placeholders = emptyList(),
-                    maxLines = Int.MAX_VALUE,
-                    softWrap = true,
-                    overflow = TextOverflow.Clip,
-                    density = density,
-                    layoutDirection = LayoutDirection.Ltr,
-                    fontFamilyResolver = fontFamilyResolver,
-                    constraints = constraints
-                ),
-                multiParagraph = MultiParagraph(
-                    annotatedString = annotatedString,
-                    style = style,
-                    constraints = constraints,
-                    density = density,
-                    fontFamilyResolver = fontFamilyResolver
-                ),
-                size = IntSize(0, 0)
-            )
         }
 
         @Suppress("INVISIBLE_REFERENCE")
@@ -218,8 +178,7 @@ class NativeInputEventsProcessorTest {
 
         processor.registerEvent(
             beforeInput("insertText", "a").asInputEventExt().apply {
-                    textRangeStart = 3
-                    textRangeEnd = 4
+                setFirstRange(3, 4)
             }
         )
         processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
@@ -246,8 +205,7 @@ class NativeInputEventsProcessorTest {
 
         processor.registerEvent(
             beforeInput("deleteContentBackward", "").asInputEventExt().apply {
-                textRangeStart = 3
-                textRangeEnd = 4
+                setFirstRange(3, 4)
             }
         )
         processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
@@ -259,6 +217,38 @@ class NativeInputEventsProcessorTest {
         assertEquals(4, command.end)
 
         assertEquals("tes", communicator.currentTextFieldValue().text)
+    }
+
+    @Test
+    fun testInsertText_collapsed_target_range_pins_the_insertion_point() {
+        // see https://youtrack.jetbrains.com/issue/CMP-10753
+        // The browser applies the edit natively and moves the DOM caret, which could reach Compose
+        // as a selection change before the collected events are processed.
+        // The collapsed target range reported by the browser must win over the drifted caret.
+        val communicator = MockComposeCommandCommunicator(
+            TextFieldValue("Text line 0 \nText line 1", selection = TextRange(12))
+        )
+        val processor = TestNativeInputEventsProcessor(communicator)
+
+        processor.registerEvent(
+            beforeInput("insertText", "is").asInputEventExt().apply {
+                setFirstRange(12, 12)
+            }
+        )
+
+        // the caret has drifted while the event was waiting for the checkpoint
+        communicator.sendEditCommand(listOf(SetSelectionCommand(14, 14)))
+        communicator.editCommands.clear()
+
+        processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
+
+        assertEquals(2, communicator.editCommands.size)
+        val selectionCommand = communicator.editCommands[0]
+        assertTrue(selectionCommand is SetSelectionCommand)
+        assertEquals(12, selectionCommand.start)
+        assertEquals(12, selectionCommand.end)
+
+        assertEquals("Text line 0 is\nText line 1", communicator.currentTextFieldValue().text)
     }
 
     @Test
@@ -292,21 +282,13 @@ class NativeInputEventsProcessorTest {
 
         processor.registerEvent(
             beforeInput("deleteContentBackward", null).asInputEventExt().apply {
-                textRangeStart = 3
-                textRangeEnd = 4
+                setFirstRange(3, 4)
             }
         )
         processor.manuallyRunCheckpoint(TextFieldValue("test", selection = TextRange(3, 4)))
 
-        assertEquals(1, communicator.keyboardEvents.size, "exactly one key event should be sent")
-        assertEquals(0, communicator.editCommands.size, "editCommands should not be sent")
-
-        val sentKeyEvent = communicator.keyboardEvents[0]
-        assertEquals(
-            "Backspace",
-            ((sentKeyEvent.nativeKeyEvent as InternalKeyEvent).nativeEvent as KeyboardEvent).key,
-            "keyboardEvent for Backspace should be sent"
-        )
+        assertEquals(0, communicator.keyboardEvents.size, "Backspace is not processed by compose")
+        assertEquals(2, communicator.editCommands.size)
     }
 
     @Test
@@ -318,9 +300,8 @@ class NativeInputEventsProcessorTest {
 
         processor.registerEvent(
             beforeInput("insertReplacementText", "replacement").asInputEventExt().apply {
-                textRangeStart = 5
-                textRangeEnd = 9
-            },
+                setFirstRange(5, 9)
+            }
         )
 
         processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
@@ -378,8 +359,7 @@ class NativeInputEventsProcessorTest {
         // 3. Simulate the input event for the accented character
         processor.registerEvent(
             beforeInput("insertText", "é").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             }
         )
 
@@ -446,8 +426,7 @@ class NativeInputEventsProcessorTest {
         processor.registerEvent(
             beforeInput("insertText", "è").asInputEventExt().apply {
                 // to replace `e`
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             },
         )
 
@@ -511,8 +490,7 @@ class NativeInputEventsProcessorTest {
         processor.registerEvent(keyEvent(key = "ArrowRight", code = "ArrowRight", isComposing = true))
         processor.registerEvent(
             beforeInput("insertText", "è", isComposing = true).asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             }
         )
         processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
@@ -522,8 +500,7 @@ class NativeInputEventsProcessorTest {
         processor.registerEvent(keyEvent(key = "ArrowRight", code = "ArrowRight", isComposing = true))
         processor.registerEvent(
             beforeInput("insertCompositionText", "é").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             }
         )
 
@@ -534,8 +511,7 @@ class NativeInputEventsProcessorTest {
         processor.registerEvent(keyEvent(key = "ArrowRight", code = "ArrowRight", isComposing = true))
         processor.registerEvent(
             beforeInput("insertCompositionText", "ê").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             }
         )
 
@@ -553,8 +529,7 @@ class NativeInputEventsProcessorTest {
 
         processor.registerEvent(
             beforeInput("insertCompositionText", "é").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             }
         )
 
@@ -568,8 +543,7 @@ class NativeInputEventsProcessorTest {
         // 4. Simulate the input event for the selected accented character
         processor.registerEvent(
             beforeInput("insertCompositionText", "é").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(0, 1)
             }
         )
 
@@ -597,14 +571,16 @@ class NativeInputEventsProcessorTest {
 
         // Add deleteContentBackward event
         processor.registerEvent(
-            beforeInput("deleteContentBackward", "") as InputEvent
+            beforeInput("deleteContentBackward", "").asInputEventExt().apply {
+                setFirstRange(2, 7)
+            }
         )
 
         // Process the event with a non-collapsed selection
         processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
 
-        assertEquals(1, communicator.editCommands.size)
-        val command = communicator.editCommands[0]
+        assertEquals(2, communicator.editCommands.size)
+        val command = communicator.editCommands[1]
         assertTrue(command is BackspaceCommand)
 
         assertEquals("ex text", communicator.currentTextFieldValue().text)
@@ -624,8 +600,7 @@ class NativeInputEventsProcessorTest {
         // Add deleteContentBackward event
         processor.registerEvent(
             beforeInput("deleteContentBackward", "").asInputEventExt().apply {
-                textRangeStart = 3
-                textRangeEnd = 5
+                setFirstRange(3, 5)
             },
         )
 
@@ -646,7 +621,6 @@ class NativeInputEventsProcessorTest {
         val communicator = MockComposeCommandCommunicator()
         val processor = TestNativeInputEventsProcessor(communicator)
 
-        // First add a keydown event for Backspace
         val backspaceEvent = keyEvent(
             key = "Backspace",
             code = "Backspace",
@@ -654,12 +628,10 @@ class NativeInputEventsProcessorTest {
         )
         processor.registerEvent(backspaceEvent)
 
-        // Then add a deleteContentBackward event
         processor.registerEvent(
             beforeInput("deleteContentBackward", "").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
-            },
+                setFirstRange(2, 7)
+            }
         )
 
         // With a non-collapsed selection
@@ -671,8 +643,8 @@ class NativeInputEventsProcessorTest {
         processor.manuallyRunCheckpoint(textFieldValue)
 
         // The deleteContentBackward event should be ignored since Backspace key was pressed
-        assertEquals(1, communicator.keyboardEvents.size)
-        assertEquals(0, communicator.editCommands.size)
+        assertEquals(0, communicator.keyboardEvents.size, "Backspace is not processed by compose")
+        assertEquals(2, communicator.editCommands.size)
     }
 
     @Test
@@ -694,14 +666,13 @@ class NativeInputEventsProcessorTest {
 
         processor.registerEvent(
             beforeInput("deleteContentBackward", "").asInputEventExt().apply {
-                textRangeStart = 8
-                textRangeEnd = 12
+                setFirstRange(8, 12)
             },
         )
 
         processor.manuallyRunCheckpoint(communicator.currentTextFieldValue())
 
-        assertEquals(1, communicator.keyboardEvents.size)
+        assertEquals(0, communicator.keyboardEvents.size, "Backspace is not processed by compose")
         assertEquals(2, communicator.editCommands.size)
 
         val selectionCommand = communicator.editCommands[0]
@@ -736,16 +707,14 @@ class NativeInputEventsProcessorTest {
         // Then add a deleteContentBackward event
         processor.registerEvent(
             beforeInput("deleteContentBackward", "").asInputEventExt().apply {
-                textRangeStart = 0
-                textRangeEnd = 1
+                setFirstRange(2, 7)
             },
         )
 
         processor.manuallyRunCheckpoint(textFieldValue)
 
-        // The deleteContentBackward event should be ignored since Backspace key was pressed
-        assertEquals(1, communicator.keyboardEvents.size)
-        assertEquals(0, communicator.editCommands.size)
+        assertEquals(0, communicator.keyboardEvents.size, "Backspace is not processed by compose")
+        assertEquals(2, communicator.editCommands.size)
     }
 
 }

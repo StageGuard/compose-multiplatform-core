@@ -24,48 +24,30 @@
 
 import androidx.build.SoftwareType
 import androidx.build.PlatformIdentifier
-import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 
 plugins {
     id("AndroidXPlugin")
     id("AndroidXComposePlugin")
-    id("JetBrainsAndroidXPlugin")
-    alias(libs.plugins.atomicFu)
 }
 
-def composeWinUiJvmTargetEnabled = providers
-        .gradleProperty("composeWinUi.enableJvmTarget")
-        .map { it.toBoolean() }
-        .orElse(false)
-        .get()
-def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
 androidXMultiplatform {
     androidLibrary {
-        compileSdk = 35
+        compileSdk { version = release(37) }
         namespace = "androidx.compose.animation.core"
-        optimization {
-            it.consumerKeepRules.publish = true
-            it.consumerKeepRules.files.add(new File("proguard-rules.pro"))
-        }
     }
-    if (!composeWinUiJvmTargetEnabled) {
-        desktop()
-    }
-    mac()
-    ios()
-    js()
-    wasmJs()
+    jvmStubs()
+    linuxX64Stubs()
 
     defaultPlatform(PlatformIdentifier.ANDROID)
 
     sourceSets {
         commonMain.dependencies {
             implementation(project(":compose:runtime:runtime"))
-            implementation(project(":compose:ui:ui"))
-            implementation(project(":compose:ui:ui-unit"))
-            implementation(project(":compose:ui:ui-graphics"))
-            implementation(project(":compose:ui:ui-util"))
-            implementation("androidx.collection:collection:1.5.0")
+            implementation("androidx.compose.ui:ui:1.10.0")
+            implementation("androidx.compose.ui:ui-unit:1.10.0")
+            implementation("androidx.compose.ui:ui-graphics:1.10.0")
+            implementation("androidx.compose.ui:ui-util:1.10.0")
+            implementation("androidx.collection:collection:1.6.0")
             api(libs.kotlinCoroutinesCore)
         }
 
@@ -101,69 +83,6 @@ androidXMultiplatform {
             implementation(libs.truth)
             implementation(libs.kotlinCoroutinesCore)
         }
-
-        // TODO: Align naming: nonAndroidMain
-        jbMain {
-            dependsOn(commonMain)
-        }
-
-        jbTest {
-            dependsOn(commonTest)
-        }
-
-        desktopMain {
-            dependsOn(jbMain)
-        }
-
-        desktopTest {
-            dependsOn(jbTest)
-        }
-
-        nonJvmMain {
-            dependsOn(jbMain)
-            dependencies {
-                implementation(libs.atomicFu)
-                // To comply with Klib resolver until https://youtrack.jetbrains.com/issue/KT-61096 is fixed
-                implementation("org.jetbrains.compose.collection-internal:collection:1.10.0")
-            }
-        }
-
-        nonJvmTest {
-            dependsOn(jbTest)
-        }
-
-        nativeMain {
-            dependsOn(nonJvmMain)
-        }
-
-        nativeTest {
-            dependsOn(nonJvmTest)
-        }
-    }
-}
-
-kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
-
-        sourceSets {
-            winuiJvmMain {
-                dependsOn(jbMain)
-            }
-
-            winuiJvmTest {
-                dependsOn(jbTest)
-            }
-        }
-    }
-}
-
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
-            freeCompilerArgs.add("-Xjdk-release=25")
-        }
     }
 }
 
@@ -177,19 +96,4 @@ androidx {
     inceptionYear = "2019"
     description = "Animation engine and animation primitives that are the building blocks of the Compose animation library"
     samples(project(":compose:animation:animation-core:animation-core-samples"))
-}
-
-configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
-    }
-}
-
-tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.enabled = false
-    }
 }

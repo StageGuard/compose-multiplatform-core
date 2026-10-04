@@ -31,6 +31,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.util.fastForEach
 import com.google.common.truth.Truth.assertThat
 import kotlin.test.fail
@@ -228,6 +229,7 @@ class SelectionManagerTest {
         val anotherSelectableId = 100L
         val selectableAnother = mock<Selectable>()
         whenever(selectableAnother.selectableId).thenReturn(anotherSelectableId)
+        whenever(selectableAnother.getLayoutCoordinates()).thenReturn(FakeCoordinates())
 
         selectionRegistrar.subscribe(selectableAnother)
 
@@ -1120,13 +1122,17 @@ class SelectionManagerTest {
         expectedResult: Boolean,
         vararg selectableStates: IsEntireContainerSelectedData,
     ) {
-        val selectables =
-            selectableStates.mapIndexed { index, item ->
-                FakeSelectable().apply {
-                    selectableId = index + 1L
-                    textToReturn = AnnotatedString(item.text)
-                }
+        val selectables = selectableStates.mapIndexed { index, item ->
+            FakeSelectable().apply {
+                selectableId = index + 1L
+                textToReturn = AnnotatedString(item.text)
+                layoutCoordinatesToReturn =
+                    FakeCoordinates(
+                        rootOffset = Offset(0f, index * 10f),
+                        size = IntSize(100, 10),
+                    )
             }
+        }
 
         val registrar =
             SelectionRegistrarImpl().apply {
@@ -1338,33 +1344,31 @@ class SelectionManagerTest {
         expectedSubSelectionRanges: Map<Long, TextRange>,
         vararg selectableStates: SelectAllData,
     ) {
-        val selectables =
-            selectableStates.mapIndexed { index, item ->
-                val id = index + 1L
-                val range = item.selection
-                FakeSelectable().apply {
-                    selectableId = id
-                    textToReturn = AnnotatedString(item.text)
-                    fakeSelectAllSelection =
-                        range?.let {
-                            Selection(
-                                start =
-                                    Selection.AnchorInfo(
-                                        direction = ResolvedTextDirection.Ltr,
-                                        offset = it.start,
-                                        selectableId = id,
-                                    ),
-                                end =
-                                    Selection.AnchorInfo(
-                                        direction = ResolvedTextDirection.Ltr,
-                                        offset = it.end,
-                                        selectableId = id,
-                                    ),
-                                handlesCrossed = it.reversed,
-                            )
-                        }
+        val selectables = selectableStates.mapIndexed { index, item ->
+            val id = index + 1L
+            val range = item.selection
+            FakeSelectable().apply {
+                selectableId = id
+                textToReturn = AnnotatedString(item.text)
+                fakeSelectAllSelection = range?.let {
+                    Selection(
+                        start =
+                            Selection.AnchorInfo(
+                                direction = ResolvedTextDirection.Ltr,
+                                offset = it.start,
+                                selectableId = id,
+                            ),
+                        end =
+                            Selection.AnchorInfo(
+                                direction = ResolvedTextDirection.Ltr,
+                                offset = it.end,
+                                selectableId = id,
+                            ),
+                        handlesCrossed = it.reversed,
+                    )
                 }
             }
+        }
 
         val registrar = SelectionRegistrarImpl().apply { selectables.fastForEach { subscribe(it) } }
 

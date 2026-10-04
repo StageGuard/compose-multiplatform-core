@@ -1,13 +1,13 @@
 public final class androidx/navigation/compose/ComposableSingletons$ComposeNavigatorKt {
 	public static final field INSTANCE Landroidx/navigation/compose/ComposableSingletons$ComposeNavigatorKt;
 	public fun <init> ()V
-	public final fun getLambda$127448943$navigation_compose ()Lkotlin/jvm/functions/Function4;
+	public final fun getLambda$127448943$org_jetbrains_androidx_navigation_navigation_compose ()Lkotlin/jvm/functions/Function4;
 }
 
 public final class androidx/navigation/compose/ComposableSingletons$DialogNavigatorKt {
 	public static final field INSTANCE Landroidx/navigation/compose/ComposableSingletons$DialogNavigatorKt;
 	public fun <init> ()V
-	public final fun getLambda$-1092249270$navigation_compose ()Lkotlin/jvm/functions/Function3;
+	public final fun getLambda$-1092249270$org_jetbrains_androidx_navigation_navigation_compose ()Lkotlin/jvm/functions/Function3;
 }
 
 public final class androidx/navigation/compose/ComposeNavigator : androidx/navigation/Navigator {
@@ -83,6 +83,17 @@ public final class androidx/navigation/compose/DialogNavigatorDestinationBuilder
 	public fun <init> (Landroidx/navigation/compose/DialogNavigator;Ljava/lang/String;Landroidx/compose/ui/window/DialogProperties;Lkotlin/jvm/functions/Function3;)V
 	public fun <init> (Landroidx/navigation/compose/DialogNavigator;Lkotlin/reflect/KClass;Ljava/util/Map;Landroidx/compose/ui/window/DialogProperties;Lkotlin/jvm/functions/Function3;)V
 	public synthetic fun instantiateDestination ()Landroidx/navigation/NavDestination;
+}
+
+public final class androidx/navigation/compose/NavBackStackEntryInfo : androidx/navigationevent/NavigationEventInfo {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Landroidx/navigation/NavBackStackEntry;)V
+	public synthetic fun <init> (Landroidx/navigation/NavBackStackEntry;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getVisibleEntry ()Landroidx/navigation/NavBackStackEntry;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class androidx/navigation/compose/NavBackStackEntryProviderKt {

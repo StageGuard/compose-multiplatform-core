@@ -19,6 +19,12 @@ package androidx.compose.ui.window
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.fail
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
+import kotlin.time.TimeSource
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.readValue
 import kotlinx.coroutines.runBlocking
@@ -86,11 +92,10 @@ class FocusedViewsListTest {
         list.addAndFocus(view3)
         assertTrue(view3.isFirstResponder())
 
-        list.remove(view3, delayMillis = 50)
+        list.remove(view3, delay = 50.milliseconds)
         assertTrue(view3.isFirstResponder())
 
-        performRunLoopCycle(delayMills = 200)
-        assertTrue(view2.isFirstResponder())
+        waitUntil(message = "view2 should become first responder") { view2.isFirstResponder() }
     }
 
     @Test
@@ -204,8 +209,28 @@ class FocusedViewsListTest {
         assertTrue(view.isFirstResponder())
     }
 
-    private fun performRunLoopCycle(delayMills: Long = 10) {
-        NSRunLoop.currentRunLoop.runUntilDate(NSDate.dateWithTimeIntervalSinceNow(delayMills.toDouble() / 1000.0))
+    private fun waitUntil(
+        timeout: Duration = 5.seconds,
+        message: String,
+        isTrue: () -> Boolean
+    ) {
+        val deadline = TimeSource.Monotonic.markNow() + timeout
+        while (!isTrue()) {
+            if (deadline.hasPassedNow()) {
+                fail(message)
+            }
+            performRunLoopCycle(delay = 1.milliseconds)
+        }
+    }
+
+    private fun performRunLoopCycle(delay: Duration = 10.milliseconds) {
+        NSRunLoop.currentRunLoop.runUntilDate(
+            NSDate.dateWithTimeIntervalSinceNow(
+                delay.toDouble(
+                    DurationUnit.SECONDS
+                )
+            )
+        )
     }
 
     var focusedView: UIView? = null

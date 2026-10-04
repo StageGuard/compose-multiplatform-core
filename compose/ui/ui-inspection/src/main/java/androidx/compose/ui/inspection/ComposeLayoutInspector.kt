@@ -161,7 +161,7 @@ class ComposeLayoutInspector(
     override fun onDispose() {
         disposed = true
         recompositionHandler.dispose()
-        cachedNodes.clear()
+        _cachedNodes.clear()
     }
 
     override fun onReceiveCommand(data: ByteArray, callback: CommandCallback) {
@@ -379,18 +379,17 @@ class ComposeLayoutInspector(
             getCachedComposableNodes(getParameterDetailsCommand.rootViewId)
                 ?.lookup
                 ?.get(getParameterDetailsCommand.reference.composableId)
-        val expanded =
-            foundComposable?.let { composable ->
-                layoutInspectorTree.expandParameter(
-                    getParameterDetailsCommand.rootViewId,
-                    semanticsNode ?: composable,
-                    reference,
-                    getParameterDetailsCommand.startIndex,
-                    getParameterDetailsCommand.maxElements,
-                    getParameterDetailsCommand.maxRecursions.orElse(MAX_RECURSIONS),
-                    getParameterDetailsCommand.maxInitialIterableSize.orElse(MAX_ITERABLE_SIZE),
-                )
-            }
+        val expanded = foundComposable?.let { composable ->
+            layoutInspectorTree.expandParameter(
+                getParameterDetailsCommand.rootViewId,
+                semanticsNode ?: composable,
+                reference,
+                getParameterDetailsCommand.startIndex,
+                getParameterDetailsCommand.maxElements,
+                getParameterDetailsCommand.maxRecursions.orElse(MAX_RECURSIONS),
+                getParameterDetailsCommand.maxInitialIterableSize.orElse(MAX_ITERABLE_SIZE),
+            )
+        }
 
         callback.reply {
             getParameterDetailsResponse =

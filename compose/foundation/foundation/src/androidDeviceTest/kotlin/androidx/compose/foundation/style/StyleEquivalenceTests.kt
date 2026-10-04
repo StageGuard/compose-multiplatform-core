@@ -48,10 +48,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -61,8 +67,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -70,17 +79,16 @@ import androidx.test.filters.MediumTest
 import androidx.test.filters.SdkSuppress
 import androidx.test.screenshot.matchers.MSSIMMatcher
 import kotlin.math.ceil
-import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Rule
 import org.junit.runner.RunWith
 
+@SdkSuppress(minSdkVersion = 25) // b/538599561
 @MediumTest
 @RunWith(AndroidJUnit4::class)
 class StyleEquivalenceTests {
-    @get:Rule val rule = createComposeRule(effectContext = StandardTestDispatcher())
+    @get:Rule val rule = createComposeRule()
 
     @Test
     fun background() {
@@ -153,36 +161,6 @@ class StyleEquivalenceTests {
     }
 
     @Test
-    @Ignore("Flaky: b/488190299")
-    // Re-enabling tracked by b/493662885
-    fun border_shape_background() {
-        checkEquivalence(
-            styleVersion = {
-                BaseStyleableButton(
-                    onClick = {},
-                    style = {
-                        border(2.dp, Color.Red)
-                        shape(RoundedCornerShape(2.dp))
-                        background(Color.Blue)
-                    },
-                ) {
-                    Box(modifier = Modifier.size(20.dp))
-                }
-            },
-            modifierVersion = {
-                BaseModifierButton(
-                    onClick = {},
-                    border = BorderStroke(2.dp, Color.Red),
-                    shape = RoundedCornerShape(2.dp),
-                    background = SolidColor(Color.Blue),
-                ) {
-                    Box(modifier = Modifier.size(20.dp))
-                }
-            },
-        )
-    }
-
-    @Test
     fun border_genericShape_background() {
         checkEquivalence(
             styleVersion = {
@@ -231,6 +209,205 @@ class StyleEquivalenceTests {
                     shape = RoundedCornerShape(topStart = 5.dp, bottomEnd = 10.dp),
                 ) {
                     Box(modifier = Modifier.size(20.dp))
+                }
+            },
+        )
+    }
+
+    @Test
+    fun border_customOutline_rectangle() {
+        val customShape =
+            object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density,
+                ): Outline = Outline.Rectangle(Rect(5f, 5f, size.width - 5f, size.height - 5f))
+            }
+        checkEquivalence(
+            styleVersion = {
+                BaseStyleableButton(
+                    onClick = {},
+                    style = {
+                        border(2.dp, Color.Red)
+                        shape(customShape)
+                    },
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+            modifierVersion = {
+                BaseModifierButton(
+                    onClick = {},
+                    border = BorderStroke(2.dp, Color.Red),
+                    shape = customShape,
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+        )
+    }
+
+    @Test
+    fun border_customOutline_rounded() {
+        val customShape =
+            object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density,
+                ): Outline =
+                    Outline.Rounded(
+                        RoundRect(5f, 5f, size.width - 5f, size.height - 5f, CornerRadius(8f))
+                    )
+            }
+        checkEquivalence(
+            styleVersion = {
+                BaseStyleableButton(
+                    onClick = {},
+                    style = {
+                        border(2.dp, Color.Red)
+                        shape(customShape)
+                    },
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+            modifierVersion = {
+                BaseModifierButton(
+                    onClick = {},
+                    border = BorderStroke(2.dp, Color.Red),
+                    shape = customShape,
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+        )
+    }
+
+    @Test
+    fun border_customOutline_rounded_notSimple() {
+        val customShape =
+            object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density,
+                ): Outline =
+                    Outline.Rounded(
+                        RoundRect(
+                            left = 5f,
+                            top = 5f,
+                            right = size.width - 5f,
+                            bottom = size.height - 5f,
+                            topLeftCornerRadius = CornerRadius(4f),
+                            bottomRightCornerRadius = CornerRadius(10f),
+                        )
+                    )
+            }
+        checkEquivalence(
+            styleVersion = {
+                BaseStyleableButton(
+                    onClick = {},
+                    style = {
+                        border(2.dp, Color.Red)
+                        shape(customShape)
+                    },
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+            modifierVersion = {
+                BaseModifierButton(
+                    onClick = {},
+                    border = BorderStroke(2.dp, Color.Red),
+                    shape = customShape,
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+        )
+    }
+
+    @Test
+    fun border_customOutline_generic() {
+        val customShape =
+            object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density,
+                ): Outline {
+                    val path =
+                        Path().apply { addRect(Rect(5f, 5f, size.width - 5f, size.height - 5f)) }
+                    return Outline.Generic(path)
+                }
+            }
+        checkEquivalence(
+            styleVersion = {
+                BaseStyleableButton(
+                    onClick = {},
+                    style = {
+                        border(2.dp, Color.Red)
+                        shape(customShape)
+                    },
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+            modifierVersion = {
+                BaseModifierButton(
+                    onClick = {},
+                    border = BorderStroke(2.dp, Color.Red),
+                    shape = customShape,
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+        )
+    }
+
+    @SdkSuppress(minSdkVersion = 28)
+    @Test
+    fun border_customOutline_generic_background() {
+        val customShape =
+            object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density,
+                ): Outline {
+                    val path =
+                        Path().apply {
+                            moveTo(size.width / 2, 0f)
+                            lineTo(size.width, size.height)
+                            lineTo(0f, size.height)
+                            close()
+                        }
+                    return Outline.Generic(path)
+                }
+            }
+        checkEquivalence(
+            styleVersion = {
+                BaseStyleableButton(
+                    onClick = {},
+                    style = {
+                        border(2.dp, Color.Red)
+                        background(Color.Blue)
+                        shape(customShape)
+                    },
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
+                }
+            },
+            modifierVersion = {
+                BaseModifierButton(
+                    onClick = {},
+                    border = BorderStroke(2.dp, Color.Red),
+                    background = SolidColor(Color.Blue),
+                    shape = customShape,
+                ) {
+                    Box(modifier = Modifier.size(30.dp))
                 }
             },
         )
@@ -373,6 +550,29 @@ class StyleEquivalenceTests {
                     background = SolidColor(Color.Red),
                 ) {
                     Box(modifier = Modifier.size(10.dp).background(Color.Blue))
+                }
+            },
+        )
+    }
+
+    @Test // b/509438572
+    fun textStylePriority() {
+        checkEquivalence(
+            styleVersion = {
+                Box(
+                    modifier =
+                        Modifier.styleable(null) {
+                            contentPadding(10.dp)
+                            contentColor(Color.Red)
+                            // fontWeight(FontWeight.Bold)
+                        }
+                ) {
+                    BasicText("Expected yellow", style = TextStyle(color = Color.Yellow))
+                }
+            },
+            modifierVersion = {
+                Box(modifier = Modifier.padding(10.dp)) {
+                    BasicText("Expected yellow", style = TextStyle(color = Color.Yellow))
                 }
             },
         )
@@ -562,7 +762,7 @@ internal fun BaseModifierButton(
     minSize: DpSize = DpSize.Unspecified,
     maxSize: DpSize = DpSize.Unspecified,
     layerSpec: (GraphicsLayerScope.() -> Unit)? = null,
-    fill: Fill? = null,
+    fill: FillSpace? = null,
     clip: Boolean = false,
     shape: Shape = RectangleShape,
     content: @Composable RowScope.() -> Unit,
@@ -600,7 +800,7 @@ internal fun BaseModifierButton(
                 }
                 .ifNonNull(border) {
                     // Compute the padding necessary to match the border. Padding uses
-                    // value.roundToPx(). Border uses ceil(value.toPx()). The styleable modifier
+                    // `value.roundToPx()`. Border uses `ceil(value.toPx()`. The styleable modifier
                     // uses width computed for the border width to compute the padding. This
                     // uses the border computation to compute the Dp value that will produce the
                     // same number of pixels used by the border.
@@ -641,10 +841,10 @@ inline fun Modifier.ifEitherSpecified(
 inline fun Modifier.ifTrue(value: Boolean, block: Modifier.() -> Modifier): Modifier =
     if (value) block() else this
 
-internal class Fill(val width: Float, val height: Float) {
+internal class FillSpace(val width: Float, val height: Float) {
     companion object {
-        fun width(width: Float) = Fill(width, Float.NaN)
+        fun width(width: Float) = FillSpace(width, Float.NaN)
 
-        fun height(height: Float) = Fill(Float.NaN, height)
+        fun height(height: Float) = FillSpace(Float.NaN, height)
     }
 }

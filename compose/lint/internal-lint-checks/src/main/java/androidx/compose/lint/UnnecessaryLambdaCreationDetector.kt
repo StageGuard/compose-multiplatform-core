@@ -29,7 +29,7 @@ import com.android.tools.lint.detector.api.Severity
 import com.android.tools.lint.detector.api.SourceCodeScanner
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.resolution.KaSimpleFunctionCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaImplicitInvokeCall
 import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -203,7 +203,10 @@ class UnnecessaryLambdaCreationDetector : Detector(), SourceCodeScanner {
                 Category.PERFORMANCE,
                 5,
                 Severity.ERROR,
-                Implementation(UnnecessaryLambdaCreationDetector::class.java, Scope.JAVA_FILE_SCOPE),
+                Implementation(
+                    UnnecessaryLambdaCreationDetector::class.java,
+                    Scope.JAVA_FILE_SCOPE,
+                ),
             )
     }
 }
@@ -212,8 +215,7 @@ private fun KaSession.dispatchReceiverType(callElement: KtCallElement): KaFuncti
     callElement
         .resolveToCall()
         ?.singleFunctionCallOrNull()
-        ?.takeIf { it is KaSimpleFunctionCall && it.isImplicitInvoke }
-        ?.partiallyAppliedSymbol
+        ?.takeIf { it is KaImplicitInvokeCall }
         ?.dispatchReceiver
         ?.type as? KaFunctionType
 

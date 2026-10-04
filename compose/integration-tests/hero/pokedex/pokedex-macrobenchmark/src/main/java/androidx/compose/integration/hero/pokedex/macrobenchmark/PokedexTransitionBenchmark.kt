@@ -35,6 +35,7 @@ import androidx.test.uiautomator.Until
 import androidx.testutils.CpuFrequencyChangeMetric
 import androidx.testutils.createCompilationParams
 import androidx.testutils.defaultComposeScrollingMetrics
+import androidx.testutils.defaultMemoryMetrics
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
@@ -90,19 +91,22 @@ class PokedexTransitionBenchmark(
         enableSharedTransitionScope: Boolean = this.enableSharedTransitionScope,
         enableSharedElementTransitions: Boolean = this.enableSharedElementTransitions,
         iterations: Int = HeroMacrobenchmarkDefaults.ITERATIONS,
-    ) =
+    ) {
+
         benchmarkRule.measureRepeated(
             packageName = POKEDEX_TARGET_PACKAGE_NAME,
             metrics =
                 defaultComposeScrollingMetrics() +
                     FrameTimingGfxInfoMetric() +
                     transitionDurationMetrics +
-                    CpuFrequencyChangeMetric(),
+                    CpuFrequencyChangeMetric() +
+                    defaultMemoryMetrics(),
             compilationMode = compilationMode,
             iterations = iterations,
             setupBlock = {
                 killProcess()
                 databaseCleanupRule.deleteDatabaseFiles()
+                cacheCleanupRule.deleteCacheFiles()
 
                 val intent = Intent()
                 intent.configure(
@@ -128,6 +132,7 @@ class PokedexTransitionBenchmark(
                 waitForProgressBarAnimation = waitForProgressBarAnimation,
             )
         }
+    }
 
     private fun MacrobenchmarkScope.homeToDetailsAndBackAction(
         pokemonName: String,

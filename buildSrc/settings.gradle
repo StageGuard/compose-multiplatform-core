@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+def isForkModeEnabled = System.getenv().get("PROJECT_MODE") != "AOSP"
+if (isForkModeEnabled) {
+    apply from: "settings-fork.gradle"
+    return
+}
+
 apply from: "settingsScripts/out-setup.groovy"
 getGradle().beforeProject { project ->
     def checkoutRoot = new File("${buildscript.sourceFile.parent}/..")
@@ -44,7 +50,6 @@ include ":imports:stableaidl-gradle-plugin"
 dependencyResolutionManagement {
     versionCatalogs {
         libs {
-            from(files("../gradle/libs.versions.toml"))
             def agpOverride = System.getenv("GRADLE_PLUGIN_VERSION")
             if (agpOverride != null) {
                 logger.warn("Using custom version ${agpOverride} of AGP due to GRADLE_PLUGIN_VERSION being set.")

@@ -22,9 +22,7 @@
  */
 import androidx.build.SoftwareType
 import androidx.build.PlatformIdentifier
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import com.android.build.api.dsl.KotlinMultiplatformAndroidHostTestCompilation
 
 plugins {
     id("AndroidXPlugin")
@@ -32,22 +30,16 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
 }
 
-def composeWinUiJvmTargetEnabled = providers
-        .gradleProperty("composeWinUi.enableJvmTarget")
-        .map { it.toBoolean() }
-        .orElse(false)
-        .get()
-def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
-
 androidXMultiplatform {
     androidLibrary {
-        compileSdk = 36
+        compileSdk { version = release(37) }
         namespace = "androidx.navigation3.runtime"
         androidResources.enable = true
+        compilations.withType(KotlinMultiplatformAndroidHostTestCompilation) {
+            it.returnDefaultValues = true
+        }
     }
-    if (!composeWinUiJvmTargetEnabled) {
-        desktop()
-    }
+    desktop()
     mingwX64()
     linux()
     mac()
@@ -62,12 +54,12 @@ androidXMultiplatform {
     sourceSets {
         commonMain.dependencies {
             api(libs.kotlinSerializationCore)
-            api("org.jetbrains.compose.runtime:runtime:1.10.0")
-            api("org.jetbrains.compose.runtime:runtime-saveable:1.10.0")
+            api("androidx.compose.runtime:runtime:1.9.5")
+            api("androidx.compose.runtime:runtime-saveable:1.9.5")
             api("androidx.savedstate:savedstate:1.4.0")
             api("androidx.savedstate:savedstate-compose:1.4.0")
             implementation("androidx.collection:collection:1.5.0")
-            implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime:2.11.0-beta01")
+            implementation("androidx.lifecycle:lifecycle-runtime:2.10.0")
             api("androidx.navigationevent:navigationevent:1.1.1")
         }
 
@@ -107,40 +99,6 @@ androidXMultiplatform {
         desktopTest.dependsOn(nonAndroidTest)
         nativeTest.dependsOn(nonAndroidTest)
         webTest.dependsOn(nonAndroidTest)
-    }
-}
-
-kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
-
-        sourceSets {
-            winuiJvmMain {
-                dependsOn(nonAndroidMain)
-            }
-
-            winuiJvmTest {
-                dependsOn(nonAndroidTest)
-            }
-        }
-    }
-}
-
-configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
-    }
-}
-
-tasks.withType(KotlinCompile).configureEach { task ->
-    if (task.name.contains("Winui")) {
-        task.compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_25)
-            freeCompilerArgs.add("-Xjdk-release=25")
-        }
     }
 }
 

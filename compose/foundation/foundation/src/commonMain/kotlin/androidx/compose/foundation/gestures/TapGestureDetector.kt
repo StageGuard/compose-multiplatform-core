@@ -48,19 +48,19 @@ import kotlinx.coroutines.sync.Mutex
  * waiting for the press to be released.
  */
 @JvmDefaultWithCompatibility
-interface PressGestureScope : Density {
+public interface PressGestureScope : Density {
     /**
      * Waits for the press to be released before returning. If the gesture was canceled by motion
      * being consumed by another gesture, [GestureCancellationException] will be thrown.
      */
-    suspend fun awaitRelease()
+    public suspend fun awaitRelease()
 
     /**
      * Waits for the press to be released before returning. If the press was released, `true` is
      * returned, or if the gesture was canceled by motion being consumed by another gesture, `false`
      * is returned.
      */
-    suspend fun tryAwaitRelease(): Boolean
+    public suspend fun tryAwaitRelease(): Boolean
 }
 
 private val NoPressGesture: suspend PressGestureScope.(Offset) -> Unit = {}
@@ -91,12 +91,12 @@ private val NoPressGesture: suspend PressGestureScope.(Offset) -> Unit = {}
  * If the first down event is consumed somewhere else, the entire gesture will be skipped, including
  * [onPress].
  */
-suspend fun PointerInputScope.detectTapGestures(
+public suspend fun PointerInputScope.detectTapGestures(
     onDoubleTap: ((Offset) -> Unit)? = null,
     onLongPress: ((Offset) -> Unit)? = null,
     onPress: suspend PressGestureScope.(Offset) -> Unit = NoPressGesture,
     onTap: ((Offset) -> Unit)? = null,
-) = coroutineScope {
+): Unit = coroutineScope {
     // special signal to indicate to the sending side that it shouldn't intercept and consume
     // cancel/up events as we're only require down events
     val pressScope = PressGestureScopeImpl(this@detectTapGestures)
@@ -299,24 +299,48 @@ internal suspend fun PointerInputScope.detectTapAndPress(
     "Maintained for binary compatibility. Use version with PointerEventPass instead.",
     level = DeprecationLevel.HIDDEN,
 )
-suspend fun AwaitPointerEventScope.awaitFirstDown(
+public suspend fun AwaitPointerEventScope.awaitFirstDown(
     requireUnconsumed: Boolean = true
 ): PointerInputChange =
     awaitFirstDown(requireUnconsumed = requireUnconsumed, pass = PointerEventPass.Main)
 
 /**
- * Reads events until the first down is received. If [requireUnconsumed] is `true` and the first
- * down is consumed in the [PointerEventPass.Main] pass, that gesture is ignored.
- * If it was down caused by [PointerType.Mouse], this function reacts only on primary button.
+ * Reads events until the first down is received in the given [pass]. If [requireUnconsumed] is
+ * `true` and the first down is already consumed in the pass, that gesture is ignored.
  */
-suspend fun AwaitPointerEventScope.awaitFirstDown(
+public suspend fun AwaitPointerEventScope.awaitFirstDown(
     requireUnconsumed: Boolean = true,
     pass: PointerEventPass = PointerEventPass.Main,
+): PointerInputChange {
+    return awaitFirstDownImpl(
+        requireUnconsumed = requireUnconsumed,
+        pass = pass,
+        onlyPrimaryMouseButton = firstDownRefersToPrimaryMouseButtonOnly(),
+    )
+}
+
+// TODO(b/384562201): Remove once [awaitFirstDown] will be aligned for all platforms and have this
+// behavior.
+internal suspend fun AwaitPointerEventScope.awaitPrimaryFirstDown(
+    requireUnconsumed: Boolean = true,
+    pass: PointerEventPass = PointerEventPass.Main,
+): PointerInputChange {
+    return awaitFirstDownImpl(
+        requireUnconsumed = requireUnconsumed,
+        pass = pass,
+        onlyPrimaryMouseButton = true,
+    )
+}
+
+private suspend fun AwaitPointerEventScope.awaitFirstDownImpl(
+    requireUnconsumed: Boolean = true,
+    pass: PointerEventPass = PointerEventPass.Main,
+    onlyPrimaryMouseButton: Boolean,
 ): PointerInputChange {
     var event: PointerEvent
     do {
         event = awaitPointerEvent(pass)
-    } while (!event.isChangedToDown(requireUnconsumed))
+    } while (!event.isChangedToDown(requireUnconsumed, onlyPrimaryMouseButton))
     return event.changes[0]
 }
 
@@ -327,10 +351,12 @@ suspend fun AwaitPointerEventScope.awaitFirstDown(
  */
 internal expect fun firstDownRefersToPrimaryMouseButtonOnly(): Boolean
 
-internal fun PointerEvent.isChangedToDown(requireUnconsumed: Boolean): Boolean {
+internal fun PointerEvent.isChangedToDown(
+    requireUnconsumed: Boolean,
+    onlyPrimaryMouseButton: Boolean = firstDownRefersToPrimaryMouseButtonOnly(),
+): Boolean {
     val onlyPrimaryButtonCausesDown =
-        firstDownRefersToPrimaryMouseButtonOnly() &&
-            changes.fastAll { it.type == PointerType.Mouse }
+        onlyPrimaryMouseButton && changes.fastAll { it.type == PointerType.Mouse }
     if (onlyPrimaryButtonCausesDown && !buttons.isPrimaryPressed) return false
 
     return changes.fastAll {
@@ -342,7 +368,7 @@ internal fun PointerEvent.isChangedToDown(requireUnconsumed: Boolean): Boolean {
     "Maintained for binary compatibility. Use version with PointerEventPass instead.",
     level = DeprecationLevel.HIDDEN,
 )
-suspend fun AwaitPointerEventScope.waitForUpOrCancellation(): PointerInputChange? =
+public suspend fun AwaitPointerEventScope.waitForUpOrCancellation(): PointerInputChange? =
     waitForUpOrCancellation(PointerEventPass.Main)
 
 /**
@@ -357,7 +383,7 @@ internal expect val PointerEvent.isDeepPress: Boolean
  * consumed or a pointer down change event was already consumed in the given pass. If the gesture
  * was not canceled, the final up change is returned or `null` if the event was canceled.
  */
-suspend fun AwaitPointerEventScope.waitForUpOrCancellation(
+public suspend fun AwaitPointerEventScope.waitForUpOrCancellation(
     pass: PointerEventPass = PointerEventPass.Main
 ): PointerInputChange? {
     while (true) {

@@ -18,24 +18,47 @@ package androidx.compose.ui.test
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.platform.AccessibilityNotification
+import androidx.compose.ui.platform.FrameChoreographer
 import androidx.compose.ui.platform.InfiniteAnimationPolicy
+import androidx.compose.ui.platform.PlatformContext
+import androidx.compose.ui.platform.PlatformRootForTest
 import androidx.compose.ui.scene.ComposeHostingView
 import androidx.compose.ui.scene.ComposeHostingViewController
 import androidx.compose.ui.scene.ComposeLayersViewController
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.utils.TestHandle
 import androidx.compose.ui.test.utils.beginKeyPress
 import androidx.compose.ui.test.utils.beginModifierKeyPress
 import androidx.compose.ui.test.utils.beginPress
 import androidx.compose.ui.test.utils.center
+import androidx.compose.ui.test.utils.endPinch
+import androidx.compose.ui.test.utils.endScroll
+import androidx.compose.ui.test.utils.dragSelectionHandleImpl
+import androidx.compose.ui.test.utils.findFirstDescendant
 import androidx.compose.ui.test.utils.getTouchesEvent
 import androidx.compose.ui.test.utils.hold
+import androidx.compose.ui.test.utils.isLoupeView
+import androidx.compose.ui.test.utils.leftCenter
 import androidx.compose.ui.test.utils.mouseDown
 import androidx.compose.ui.test.utils.moveToLocationOnWindow
+import androidx.compose.ui.test.utils.pinchBy
+import androidx.compose.ui.test.utils.pinchEventAt
+import androidx.compose.ui.test.utils.offsetBy
 import androidx.compose.ui.test.utils.release
 import androidx.compose.ui.test.utils.resetTouches
+import androidx.compose.ui.test.utils.scrollBy
+import androidx.compose.ui.test.utils.scrollEventAt
+import androidx.compose.ui.test.utils.rightCenter
 import androidx.compose.ui.test.utils.toCGPoint
 import androidx.compose.ui.test.utils.touchDown
 import androidx.compose.ui.test.utils.up
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.uikit.ComposeContainerConfiguration
 import androidx.compose.ui.uikit.ComposeUIViewConfiguration
 import androidx.compose.ui.uikit.ComposeUIViewControllerConfiguration
@@ -52,27 +75,34 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.size
 import androidx.compose.ui.window.KeyboardVisibilityListener
-import androidx.compose.ui.window.MetalRedrawer
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.assertNotNull
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
 import kotlin.time.TimeSource
+import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.ObjCAction
 import kotlinx.cinterop.useContents
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import org.jetbrains.skiko.OS
 import org.jetbrains.skiko.OSVersion
 import org.jetbrains.skiko.available
 import platform.CoreGraphics.CGSizeMake
 import platform.Foundation.NSDate
+import platform.Foundation.NSNotification
+import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSRunLoop
+import platform.Foundation.NSSelectorFromString
 import platform.Foundation.dateWithTimeIntervalSinceNow
 import platform.Foundation.runUntilDate
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDelegateProtocol
 import platform.UIKit.UIColor
+import platform.UIKit.UIContentSizeCategory
 import platform.UIKit.UIDevice
 import platform.UIKit.UIGraphicsBeginImageContextWithOptions
 import platform.UIKit.UIGraphicsEndImageContext
@@ -96,13 +126,19 @@ import platform.UIKit.UIKeyModifierFlags
 import platform.UIKit.UIPressesEvent
 import platform.UIKit.UIPressType
 import platform.UIKit.UITouch
+import platform.UIKit.UITraitCollection
+import platform.UIKit.UITraitEnvironmentLayoutDirection
+import platform.UIKit.UITraitEnvironmentLayoutDirectionLeftToRight
 import platform.UIKit.UIUserInterfaceIdiomPad
 import platform.UIKit.UIView
 import platform.UIKit.UIViewController
 import platform.UIKit.UIWindow
+import platform.UIKit.UIWindowDidBecomeVisibleNotification
 import platform.UIKit.UIWindowScene
 import platform.UIKit.endEditing
+import platform.UIKit.setOverrideTraitCollection
 import platform.UIKit.systemBackgroundColor
+import platform.UIKit.traitOverrides
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
@@ -116,17 +152,13 @@ import platform.darwin.dispatch_get_main_queue
  * @param [testBlock] The test function.
  */
 internal fun runUIKitInstrumentedTest(testBlock: UIKitInstrumentedTest.() -> Unit) {
-    println("Debug: Running test with ComposeHostingView")
-    with(UIKitInstrumentedTest(useHostingView = true)) {
-        try {
-            testBlock()
-        } finally {
-            tearDown()
-        }
-    }
+    runUIKitInstrumentedTest(useHostingView = true, testBlock)
+    runUIKitInstrumentedTest(useHostingView = false, testBlock)
+}
 
-    println("Debug: Running test with ComposeHostingViewController")
-    with(UIKitInstrumentedTest(useHostingView = false)) {
+internal fun runUIKitInstrumentedTest(useHostingView: Boolean, testBlock: UIKitInstrumentedTest.() -> Unit) {
+    println("Debug: Running test with ${if (useHostingView) "ComposeHostingView" else "ComposeHostingViewController"}")
+    with(UIKitInstrumentedTest(useHostingView = useHostingView)) {
         try {
             testBlock()
         } finally {
@@ -158,21 +190,7 @@ internal fun <T> runUIKitInstrumentedTest(
     }
 
     for (param in params) {
-        with(UIKitInstrumentedTest(useHostingView = true)) {
-            try {
-                testBlock(param)
-            } finally {
-                tearDown()
-            }
-        }
-
-        with(UIKitInstrumentedTest(useHostingView = false)) {
-            try {
-                testBlock(param)
-            } finally {
-                tearDown()
-            }
-        }
+        runUIKitInstrumentedTest(testBlock = { testBlock(param) })
     }
 }
 
@@ -206,14 +224,41 @@ internal fun runUIKitInstrumentedTest(
  * Constructor properties are initialized with the attributes of the main screen and a mock delegate to simulate
  * the application setup.
  */
-@OptIn(ExperimentalForeignApi::class)
+@OptIn(ExperimentalForeignApi::class, InternalComposeUiApi::class)
 internal class UIKitInstrumentedTest(
-    private val useHostingView: Boolean
+    val useHostingView: Boolean
 ) {
     companion object {
-        fun delay(timeoutMillis: Long) {
+        /**
+         * The factor by which animations are sped up in instrumented tests.
+         */
+        internal const val TestsAnimationSpeed = 100f
+
+        /**
+         * Real animation speed for tests that require one-to-one animations.
+         */
+        internal const val RealAnimationSpeed = 1f
+
+        /**
+         * The default duration of drag gestures in instrumented tests.
+         */
+        internal val DefaultDragDuration = 0.1.seconds
+
+        /**
+         * The time given to UIKit to complete a requested interface orientation change.
+         *
+         * The orientation change is driven by the system rather than by the window's layer, so this
+         * duration doesn't scale with [animationSpeed].
+         */
+        internal val InterfaceOrientationChangeDuration = 700.milliseconds
+
+        fun delay(timeoutMillis: Long) = delay(timeoutMillis.milliseconds)
+
+        fun delay(duration: Duration) {
             val runLoop = NSRunLoop.currentRunLoop()
-            runLoop.runUntilDate(NSDate.dateWithTimeIntervalSinceNow(timeoutMillis.toDouble() / 1000.0))
+            runLoop.runUntilDate(
+                NSDate.dateWithTimeIntervalSinceNow(duration.toDouble(DurationUnit.SECONDS))
+            )
         }
 
         fun waitUntil(
@@ -237,9 +282,13 @@ internal class UIKitInstrumentedTest(
         val isRunningOnIPad: Boolean get() = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
     }
 
+    internal val rootForTestRegistry = RootForTestRegistry()
+
     private val screen = UIScreen.mainScreen()
     val density = Density(density = screen.scale.toFloat())
     val appDelegate = MockAppDelegate()
+    var animationSpeed: Float by appDelegate::animationSpeed
+
     val keyboardHeight: Dp get() =
         KeyboardVisibilityListener.keyboardFrame.useContents { size.height.dp }
     val screenBounds: DpRect get() = screen.bounds().toDpRect()
@@ -260,73 +309,155 @@ internal class UIKitInstrumentedTest(
     private var hostingViewController: ComposeHostingViewController? = null
     private var hostingView: ComposeHostingView? = null
 
-    val viewController: UIViewController get() =
-        appDelegate.window?.rootViewController ?: error("Cannot find active UIViewController")
+    val viewController: UIViewController get() = awaitViewController()
 
-    val rootRedrawer: MetalRedrawer? get() =
-        hostingView?.rootRedrawer ?: hostingViewController?.rootRedrawer
+    private val attachedViewController: UIViewController?
+        get() = appDelegate.window?.rootViewController
 
-    private val infiniteAnimationPolicy = object : InfiniteAnimationPolicy {
-        override suspend fun <R> onInfiniteOperation(block: suspend () -> R): R {
-            throw CancellationException("Infinite animations are disabled on tests")
-        }
+    private fun awaitViewController(): UIViewController {
+        val rootViewController = attachedViewController
+        if (rootViewController != null) { return rootViewController }
+
+        waitUntil(
+            conditionDescription = "viewController: timeout waiting for the root view controller.",
+        ) { attachedViewController != null }
+
+        return checkNotNull(attachedViewController)
     }
 
-    private val coroutineContext = Dispatchers.Main + infiniteAnimationPolicy
+    val frameChoreographer: FrameChoreographer? get() =
+        appDelegate.window()?.windowScene?.let { FrameChoreographer.choreographerForScene(it) }
 
     fun setContent(
         configure: ComposeContainerConfiguration.() -> Unit = {},
         interfaceOrientation: UIInterfaceOrientation = UIInterfaceOrientationPortrait,
+        layoutDirection: UITraitEnvironmentLayoutDirection = UITraitEnvironmentLayoutDirectionLeftToRight,
         content: @Composable () -> Unit
+    ) = setupWindow(
+        interfaceOrientation = interfaceOrientation,
+        rootViewController = {
+            createViewControllerHostingCompose(configure, content).also {
+                it.setLayoutDirection(layoutDirection)
+            }
+        }
+    )
+
+    /**
+     * Installs [rootViewController] into the test window and waits until the Compose scene owned by
+     * this [UIKitInstrumentedTest] is idle.
+     *
+     * Use this when a test needs a custom UIKit hierarchy around Compose, for example a navigation
+     * controller or a view controller presented by UIKit.
+     */
+    fun setupWindow(
+        interfaceOrientation: UIInterfaceOrientation = UIInterfaceOrientationPortrait,
+        rootViewController: () -> UIViewController,
     ) {
         accessibilityNotifications.clear()
         AccessibilityNotification.onNotificationPostedForTests = {
             accessibilityNotifications.add(it)
         }
-        val innerConfigure: ComposeContainerConfiguration.() -> Unit = {
-            enforceStrictPlistSanityCheck = false
-            configure()
-        }
 
-        val rootViewController: UIViewController = if (useHostingView) {
-            hostingView = ComposeHostingView(
-                configuration = ComposeUIViewConfiguration().apply(innerConfigure),
-                content = content,
-                coroutineContext = coroutineContext
-            )
-            UIViewController().also {
-                it.view.embedSubview(hostingView!!)
-            }
-        } else {
-            ComposeHostingViewController(
-                configuration = ComposeUIViewControllerConfiguration().apply(innerConfigure),
-                content = content,
-                coroutineContext = coroutineContext
-            ).also {
-                hostingViewController = it
-            }
-        }
+        appDelegate.setUpWindow(rootViewController())
 
-        appDelegate.setUpWindow(rootViewController)
         waitForIdle()
 
+        rotateTo(interfaceOrientation)
+    }
+
+    /**
+     * Rotates the test window to [interfaceOrientation] and waits until the rotation transition and
+     * the layout it triggers are finished.
+     */
+    fun rotateTo(interfaceOrientation: UIInterfaceOrientation) {
         if (appDelegate.requestInterfaceOrientationChangeIfNeeded(interfaceOrientation)) {
-            delay(700)
+            delay(InterfaceOrientationChangeDuration)
+            waitForIdle()
+        }
+    }
+
+    /**
+     * Creates a [UIViewController] that hosts [content] using the container variant selected by
+     * [useHostingView].
+     */
+    fun createViewControllerHostingCompose(
+        configure: ComposeContainerConfiguration.() -> Unit = {},
+        content: @Composable () -> Unit
+    ): UIViewController = if (useHostingView) {
+        UIViewController().also {
+            it.view.embedSubview(createComposeHostingView(configure, content))
+        }
+    } else {
+        createComposeHostingViewController(configure, content)
+    }
+
+    /**
+     * Creates a [ComposeHostingView] for [content] and records it as the active Compose container
+     * for idleness and redrawer checks.
+     */
+    fun createComposeHostingView(
+        configure: ComposeUIViewConfiguration.() -> Unit = {},
+        content: @Composable () -> Unit
+    ): ComposeHostingView {
+        val configuration = ComposeUIViewConfiguration()
+            .apply({ enforceStrictPlistSanityCheck = false })
+            .apply(configure)
+
+        return ComposeHostingView(
+            configuration = configuration,
+            content = content,
+        ).also {
+            it.rootForTestListener = rootForTestRegistry
+            this.hostingView = it
+        }
+    }
+
+    /**
+     * Creates a [ComposeHostingViewController] for [content] and records it as the active Compose
+     * container for idleness and redrawer checks.
+     */
+    fun createComposeHostingViewController(
+        configure: ComposeUIViewControllerConfiguration.() -> Unit = {},
+        content: @Composable () -> Unit
+    ): ComposeHostingViewController {
+        val configuration = ComposeUIViewControllerConfiguration()
+            .apply({ enforceStrictPlistSanityCheck = false })
+            .apply(configure)
+
+        return ComposeHostingViewController(
+            configuration = configuration,
+            content = content,
+        ).also {
+            it.rootForTestListener = rootForTestRegistry
+            this.hostingViewController = it
         }
     }
 
     fun tearDown() {
-        // Stop text editing and hide keyboard if any
-        viewController.view.endEditing(force = true)
-        waitForIdle()
+        clearComposeContainerReferencesIfDetached()
 
-        AccessibilityNotification.onNotificationPostedForTests = null
-        appDelegate.cleanUp()
+        // Stop text editing and hide keyboard if any
+        attachedViewController?.view?.endEditing(force = true)
+        try {
+            waitForIdle()
+        } finally {
+            AccessibilityNotification.onNotificationPostedForTests = null
+            appDelegate.cleanUp()
+        }
     }
 
     fun stopComposeScene() {
         hostingView?.viewDidLeaveWindowHierarchy()
         hostingViewController?.viewControllerDidLeaveWindowHierarchy()
+    }
+
+    private fun clearComposeContainerReferencesIfDetached() {
+        if (hostingView != null && hostingView?.window == null) {
+            hostingView = null
+        }
+        if (hostingViewController != null && hostingViewController?.view?.window == null) {
+            hostingViewController = null
+        }
     }
 
     private val isIdle: Boolean
@@ -336,7 +467,6 @@ internal class UIKitInstrumentedTest(
             val containerInvalidations =
                 hostingViewController?.hasInvalidations() ?: hostingView?.hasInvalidations()
                 ?: false
-
             return !hadSnapshotChanges && !isApplyObserverNotificationPending && !containerInvalidations
         }
 
@@ -344,16 +474,24 @@ internal class UIKitInstrumentedTest(
         waitUntil(
             conditionDescription = "waitForIdle: timeout ${timeoutMillis}ms reached.",
             timeoutMillis = timeoutMillis
-        ) { isIdle }
+        ) {
+            clearComposeContainerReferencesIfDetached()
+            isIdle
+        }
     }
 
     fun delay(timeoutMillis: Long) = UIKitInstrumentedTest.delay(timeoutMillis)
+
+    fun delay(duration: Duration) = UIKitInstrumentedTest.delay(duration)
 
     fun waitUntil(
         conditionDescription: String? = null,
         timeoutMillis: Long = 5_000,
         condition: () -> Boolean
     ) = UIKitInstrumentedTest.waitUntil(conditionDescription, timeoutMillis, condition)
+
+    fun setLayoutDirection(layoutDirection: UITraitEnvironmentLayoutDirection) =
+        viewController.setLayoutDirection(layoutDirection)
 
     // Touches:
 
@@ -363,10 +501,33 @@ internal class UIKitInstrumentedTest(
      * @param position The position on the window.
      * @param window will be used to handle touches; otherwise,
      * the window hosting the view will be used.
+     * @param fromEdge If true, the touch will be simulated from the edge of the screen.
      * @return A UITouch object representing the touch interaction.
      */
-    fun touchDown(position: DpOffset, window: UIWindow? = null): UITouch {
-        return getTargetWindow(position, window).touchDown(position)
+    fun touchDown(position: DpOffset, window: UIWindow? = null, fromEdge: Boolean = false): UITouch {
+        return getTargetWindow(position, window).touchDown(position, fromEdge)
+    }
+
+    private val EdgeSwipeDuration = 500.milliseconds
+
+    fun swipeFromLeftEdge(
+        duration: Duration = EdgeSwipeDuration,
+    ): UITouch {
+        val fromPosition = screenBounds.leftCenter()
+        val toPosition = screenBounds.rightCenter().offsetBy(dx = (-16).dp)
+
+        return touchDown(fromPosition, fromEdge = true)
+            .dragTo(toPosition, duration = duration)
+    }
+
+    fun swipeFromRightEdge(
+        duration: Duration = EdgeSwipeDuration,
+    ): UITouch {
+        val fromPosition = screenBounds.rightCenter().offsetBy(dx = (-1).dp)
+        val toPosition = screenBounds.leftCenter().offsetBy(dx = 16.dp)
+
+        return touchDown(fromPosition, fromEdge = true)
+            .dragTo(toPosition, duration = duration)
     }
 
     /**
@@ -511,6 +672,12 @@ internal class UIKitInstrumentedTest(
         return tap(frame.center())
     }
 
+    fun AccessibilityTestNode.focusThenDoubleTap(delayMillis: Long = 500L) {
+        tap()
+        delay(delayMillis)
+        doubleTap()
+    }
+
     /**
      * Simulates a touch-down event at the center of a given AccessibilityTestNode.
      */
@@ -520,24 +687,127 @@ internal class UIKitInstrumentedTest(
         return touchDown(frame.center(), window)
     }
 
+    fun AccessibilityTestNode.longPressAndReleaseAfterLoupe() {
+        val touch = touchDown()
+        waitUntil("Selection loupe should appear after long press") {
+            findFirstDescendant { it.isLoupeView } != null
+        }
+        touch.up()
+    }
+
+    fun AccessibilityTestNode.openToolbarForLeadingWord(
+        doubleTapPreparationDelay: Long,
+        manualDoubleTapIntervalDelay: Long
+    ) {
+        tap()
+        delay(doubleTapPreparationDelay)
+        val tapPoint = pointInNode(xFraction = 0.1f, yFraction = 0.5f)
+        tap(tapPoint)
+        delay(manualDoubleTapIntervalDelay)
+        tap(tapPoint)
+        waitForContextMenu()
+    }
+
+    fun AccessibilityTestNode.pointInNode(
+        xFraction: Float,
+        yFraction: Float,
+    ): DpOffset {
+        val frame = frame!!
+        return DpOffset(
+            x = frame.left + (frame.right - frame.left) * xFraction,
+            y = frame.top + (frame.bottom - frame.top) * yFraction,
+        )
+    }
+
+    /**
+     * The semantics node this accessibility node was built from, located by its test tag.
+     */
+    val AccessibilityTestNode.semanticsNode: SemanticsNode
+        get() = findSemanticsNode(
+            identifier ?: error("Accessibility node \"$label\" has no testTag to be found by.")
+        )
+
+    /**
+     * The window-space point (in Dp) of the caret for character [offset] in this text node. Use it
+     * to aim touch gestures at a specific character.
+     *
+     * Caveat — a tap on an iOS field (including the focus-gaining tap) does not leave the caret
+     * mid-word: it snaps to a word boundary, so this point is an aim, not a guaranteed landing offset.
+     * On the Compose path the snap splits at the word's midpoint (first half → word start, second half
+     * → word end; see `determineCursorDesiredOffset`). The native UITextInput path follows the same
+     * idea, but its split point is private to iOS and varies with word length, font and more; treat it
+     * as the Compose path, yet only clearly-leading and clearly-trailing taps are deterministic — a tap
+     * in the start-to-middle zone may snap either way.
+     */
+    fun AccessibilityTestNode.characterPosition(offset: Int): DpOffset {
+        val node = semanticsNode
+        val results = mutableListOf<TextLayoutResult>()
+        node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(results)
+        val layout = results.firstOrNull()
+            ?: error("Node with testTag \"$identifier\" has no GetTextLayoutResult action (not a text field?).")
+        val caret = layout.getCursorRect(offset)
+        val origin = node.positionInWindow
+        return with(density) {
+            DpOffset(
+                (origin.x + caret.center.x).toDp(),
+                (origin.y + caret.center.y).toDp(),
+            )
+        }
+    }
+
+    fun AccessibilityTestNode.tapCharacter(offset: Int) {
+        tap(characterPosition(offset))
+    }
+
+    fun AccessibilityTestNode.longPressCharacter(offset: Int) {
+        val touch = touchDown(characterPosition(offset))
+        waitUntil("Selection loupe should appear after long press") {
+            findFirstDescendant { it.isLoupeView } != null
+        }
+        touch.up()
+    }
+
+    /** Taps character [offset] in this text node [count] times in a row: 2 = double tap, 3 = triple. */
+    fun AccessibilityTestNode.multiTapCharacter(offset: Int, count: Int) {
+        require(count >= 1) { "count must be >= 1, was $count" }
+        val point = characterPosition(offset)
+        repeat(count) { i ->
+            if (i > 0) delay(50)
+            tap(point)
+        }
+    }
+
+    /**
+     * Drags the [handle] of the selection in this text node until the edge it holds reaches
+     * character [toOffset]. See [dragSelectionHandleImpl] for which offset the edge actually lands
+     * on.
+     */
+    fun AccessibilityTestNode.dragSelectionHandle(
+        handle: TestHandle,
+        toOffset: Int,
+        duration: Duration = DefaultDragDuration,
+    ) = dragSelectionHandleImpl(this, handle, toOffset, duration)
+
     /**
      * Simulates a drag gesture on the screen, moving the touch from its current location to a specified position
      * over a given duration.
      *
      * @param location The target position of the drag in DpOffset.
-     * @param duration The duration of the drag gesture, defaulting to 0.5 seconds.
+     * @param duration The duration of the drag gesture, defaulting to [DefaultDragDuration].
      * @return The same UITouch instance after completing the drag gesture.
      */
-    private fun UITouch.dragTo(location: DpOffset, duration: Duration = 0.5.seconds): UITouch {
+    private fun UITouch.dragTo(location: DpOffset, duration: Duration = DefaultDragDuration): UITouch {
         val startLocation = locationInView(null).toDpOffset()
 
         val startTime = TimeSource.Monotonic.markNow()
-        while (TimeSource.Monotonic.markNow() <= startTime + duration) {
-            val progress = ((TimeSource.Monotonic.markNow() - startTime) / duration).coerceIn(0.0, 1.0)
+        var currentTime = startTime
+        while (currentTime <= startTime + duration) {
+            val progress = ((currentTime - startTime) / duration).coerceIn(0.0, 1.0)
             val touchLocation = lerp(startLocation, location, progress.toFloat())
 
             this.moveToLocationOnWindow(touchLocation)
             NSRunLoop.currentRunLoop().runUntilDate(NSDate.dateWithTimeIntervalSinceNow(1.0 / 60))
+            currentTime = TimeSource.Monotonic.markNow()
         }
         this.moveToLocationOnWindow(location)
         return this
@@ -548,10 +818,10 @@ internal class UIKitInstrumentedTest(
      * over a given duration.
      *
      * @param offset The offset by which the touch is moved, specified as a DpOffset.
-     * @param duration The duration of the drag gesture, defaulting to 0.5 seconds.
+     * @param duration The duration of the drag gesture, defaulting to [DefaultDragDuration].
      * @return The same UITouch instance after completing the drag gesture.
      */
-    fun UITouch.dragBy(offset: DpOffset, duration: Duration = 0.5.seconds): UITouch {
+    fun UITouch.dragBy(offset: DpOffset, duration: Duration = DefaultDragDuration): UITouch {
         return dragTo(locationInView(null).toDpOffset() + offset, duration)
     }
 
@@ -561,11 +831,69 @@ internal class UIKitInstrumentedTest(
      *
      * @param dx The horizontal offset by which the touch is moved, specified as a Dp. Defaults to 0.dp.
      * @param dy The vertical offset by which the touch is moved, specified as a Dp. Defaults to 0.dp.
-     * @param duration The duration of the drag gesture, specified as a Duration. Defaults to 0.5 seconds.
+     * @param duration The duration of the drag gesture, specified as a Duration. Defaults to [DefaultDragDuration].
      * @return The same UITouch instance after completing the drag gesture.
      */
-    fun UITouch.dragBy(dx: Dp = 0.dp, dy: Dp = 0.dp, duration: Duration = 0.5.seconds): UITouch {
+    fun UITouch.dragBy(dx: Dp = 0.dp, dy: Dp = 0.dp, duration: Duration = DefaultDragDuration): UITouch {
         return dragBy(DpOffset(dx, dy), duration)
+    }
+
+    /**
+     * Simulates a trackpad continuous pan gesture as a stateful scroll session anchored
+     * at [position].
+     * All scroll synthesis goes through the `UIEvent (CMPScroll)` category in
+     * `UIEvent+Test.m`, which dispatches via `-[UIApplication sendEvent:]` and
+     * then forces each [UIPanGestureRecognizer] into the matching state so
+     * target-actions observe the proper `Began → Changed …→ Ended` lifecycle.
+     */
+    fun trackpadPan(
+        position: DpOffset,
+        dx: Dp = 0.dp,
+        dy: Dp = 0.dp,
+        duration: Duration = 0.5.seconds,
+    ) {
+        val stepInterval = 16.milliseconds
+        val steps = maxOf(1, (duration / stepInterval).toInt())
+        val targetWindow = appDelegate.window()!!
+        val scrollEvent = targetWindow.scrollEventAt(location = position)
+
+        val perStepDelta = DpOffset(dx / steps.toFloat(), dy / steps.toFloat())
+        repeat(steps) {
+            delay(stepInterval.inWholeMilliseconds)
+            scrollEvent.scrollBy(perStepDelta, targetWindow)
+        }
+
+        delay(stepInterval.inWholeMilliseconds)
+        scrollEvent.endScroll(targetWindow)
+    }
+
+    /**
+     * Simulates a trackpad continuous pinch gesture as a stateful transform session anchored
+     * at [position]. The gesture ramps the absolute scale linearly from `1.0` to [finalScale]
+     * over [duration], emitting one `phase-Began`, multiple `phase-Changed`, and a final
+     * `phase-Ended` event. All transform synthesis goes through the `UIEvent (CMPPinch)`
+     * category in `UIEvent+Test.m`, which drives each [platform.UIKit.UIPinchGestureRecognizer]
+     * directly so target-actions observe the proper `Began → Changed …→ Ended` lifecycle.
+     */
+    fun trackpadPinch(
+        position: DpOffset,
+        finalScale: Float,
+        duration: Duration = 0.5.seconds,
+    ) {
+        val stepInterval = 16.milliseconds
+        val steps = maxOf(1, (duration / stepInterval).toInt())
+        val targetWindow = appDelegate.window()!!
+        val pinchEvent = targetWindow.pinchEventAt(location = position, scale = 1.0)
+
+        repeat(steps) { i ->
+            delay(stepInterval.inWholeMilliseconds)
+            val progress = (i + 1).toFloat() / steps.toFloat()
+            val scale = 1.0 + (finalScale - 1.0) * progress
+            pinchEvent.pinchBy(scale.toDouble(), targetWindow)
+        }
+
+        delay(stepInterval.inWholeMilliseconds)
+        pinchEvent.endPinch(targetWindow)
     }
 
     /**
@@ -574,12 +902,33 @@ internal class UIKitInstrumentedTest(
      *
      * @param x The horizontal destination point. The default value does not change the current horizontal offset.
      * @param y The vertical destination point. The default value does not change the current vertical offset.
-     * @param duration The duration of the drag gesture, specified as a Duration. Defaults to 0.5 seconds.
+     * @param duration The duration of the drag gesture, specified as a Duration. Defaults to [DefaultDragDuration].
      * @return The same UITouch instance after completing the drag gesture.
      */
-    fun UITouch.dragTo(x: Dp? = null, y: Dp? = null, duration: Duration = 0.5.seconds): UITouch {
+    fun UITouch.dragTo(x: Dp? = null, y: Dp? = null, duration: Duration = DefaultDragDuration): UITouch {
         val location = locationInView(null).toDpOffset()
         return dragTo(DpOffset(x ?: location.x, y ?: location.y), duration)
+    }
+
+    private val SwipeDuration = 0.5.seconds
+
+    fun AccessibilityTestNode.swipe(
+        fromPosition: DpRect.() -> DpOffset = { center() },
+        toPosition: DpRect.() -> DpOffset = { center() },
+        fromEdge: Boolean = false,
+        duration: Duration = SwipeDuration
+    ): UITouch {
+        val frame = frame ?: error("Internal error. Frame is missing.")
+        return touchDown(frame.fromPosition(), fromEdge = fromEdge)
+            .dragTo(frame.toPosition(), duration)
+    }
+
+    fun AccessibilityTestNode.swipeRight(fromEdge: Boolean = false, duration: Duration = SwipeDuration): UITouch {
+        return swipe(fromPosition = { leftCenter().offsetBy(dx = 16.dp) }, toPosition = { rightCenter().offsetBy(dx = (-16).dp) }, fromEdge = fromEdge, duration = duration)
+    }
+
+    fun AccessibilityTestNode.swipeLeft(fromEdge: Boolean = false, duration: Duration = SwipeDuration): UITouch {
+        return swipe(fromPosition = { rightCenter().offsetBy(dx = (-16).dp) }, toPosition = { leftCenter().offsetBy(dx = 16.dp) }, fromEdge = fromEdge, duration = duration)
     }
 }
 
@@ -588,17 +937,41 @@ internal class MockAppDelegate: NSObject(), UIApplicationDelegateProtocol {
     private var _window: UIWindow? = UIWindow(frame = UIScreen.mainScreen.bounds)
     override fun window(): UIWindow? = _window
 
+    var animationSpeed: Float = UIKitInstrumentedTest.TestsAnimationSpeed
+        set(value) {
+            field = value
+            applyAnimationSpeed()
+        }
+    private var isObservingWindowVisibility = false
+
     private var supportedInterfaceOrientations: UIInterfaceOrientationMask = UIInterfaceOrientationMaskAll
+
+    private val infiniteAnimationPolicy = object : InfiniteAnimationPolicy {
+        override suspend fun <R> onInfiniteOperation(block: suspend () -> R): R {
+            throw CancellationException("Infinite animations are disabled on tests")
+        }
+    }
+    private var sceneJob = Job()
 
     fun setUpWindow(viewController: UIViewController) {
         UIApplication.sharedApplication().setDelegate(this)
 
         val scene = UIApplication.sharedApplication().connectedScenes.first() as? UIWindowScene
             ?: error("No window scene found")
+
+        sceneJob.cancel()
+        sceneJob = Job()
+        FrameChoreographer.configureForScene(scene, Dispatchers.Main + infiniteAnimationPolicy + sceneJob)
+
         val allWindows = scene.windows - _window
 
         _window?.backgroundColor = UIColor.systemBackgroundColor
         _window?.windowScene = scene
+
+        // Must be applied before the Compose container is attached to the window: it picks the
+        // window layer speed up in `onDidMoveToWindow` to derive its `MotionDurationScale`.
+        startObservingWindowVisibility()
+        applyAnimationSpeed()
 
         _window?.rootViewController = viewController
         _window?.makeKeyAndVisible()
@@ -608,7 +981,14 @@ internal class MockAppDelegate: NSObject(), UIApplicationDelegateProtocol {
         }
     }
 
+    private fun applyAnimationSpeed() {
+        _window?.applyAnimationSpeed()
+        _window?.windowScene?.windows?.forEach { (it as UIWindow).applyAnimationSpeed() }
+    }
+
     fun cleanUp() {
+        stopObservingWindowVisibility()
+        sceneJob.cancel()
         val scene = UIApplication.sharedApplication().connectedScenes.first() as? UIWindowScene
         val allWindows = scene?.windows ?: emptyList<UIWindow>()
 
@@ -631,6 +1011,37 @@ internal class MockAppDelegate: NSObject(), UIApplicationDelegateProtocol {
         allWindows.forEach {
             (it as UIWindow).setHidden(true)
         }
+    }
+
+    private fun startObservingWindowVisibility() {
+        if (isObservingWindowVisibility) return
+        isObservingWindowVisibility = true
+        NSNotificationCenter.defaultCenter.addObserver(
+            observer = this,
+            selector = NSSelectorFromString(::windowDidBecomeVisible.name + ":"),
+            name = UIWindowDidBecomeVisibleNotification,
+            `object` = null
+        )
+    }
+
+    private fun stopObservingWindowVisibility() {
+        if (!isObservingWindowVisibility) return
+        isObservingWindowVisibility = false
+        NSNotificationCenter.defaultCenter.removeObserver(
+            observer = this,
+            name = UIWindowDidBecomeVisibleNotification,
+            `object` = null
+        )
+    }
+
+    @OptIn(BetaInteropApi::class)
+    @ObjCAction
+    fun windowDidBecomeVisible(arg: NSNotification) {
+        (arg.`object` as? UIWindow)?.applyAnimationSpeed()
+    }
+
+    private fun UIWindow.applyAnimationSpeed() {
+        layer.speed = animationSpeed
     }
 
     /**
@@ -713,6 +1124,60 @@ internal fun UIKitInstrumentedTest.findFocusedUITextInput(): UITextInputProtocol
     } as? UITextInputProtocol
 }
 
+internal fun UIKitInstrumentedTest.findAllUITextInputViews(): List<UIView> {
+    val windowScene = viewController.view.window?.windowScene ?: return emptyList()
+
+    fun collect(view: UIView, into: MutableList<UIView>) {
+        if (view is UITextInputProtocol) {
+            into.add(view)
+        }
+        view.subviews.forEach { collect(it as UIView, into) }
+    }
+
+    return buildList {
+        windowScene.windows.reversed().forEach { collect(it as UIView, this) }
+    }
+}
+
+/**
+ * A registry to track roots for testing purposes in the context of the platform UI.
+ * Implements the `PlatformContext.RootForTestListener` interface to manage the lifecycle
+ * of roots being created and disposed.
+ */
+@OptIn(InternalComposeUiApi::class)
+internal class RootForTestRegistry : PlatformContext.RootForTestListener {
+    private val trackedRoots = mutableSetOf<PlatformRootForTest>()
+
+    val roots: Set<PlatformRootForTest> get() = trackedRoots.toSet()
+
+    override fun onRootForTestCreated(root: PlatformRootForTest) {
+        trackedRoots.add(root)
+    }
+
+    override fun onRootForTestDisposed(root: PlatformRootForTest) {
+        trackedRoots.remove(root)
+    }
+}
+
+@OptIn(InternalComposeUiApi::class)
+internal fun UIKitInstrumentedTest.allSemanticsNodes(): List<SemanticsNode> =
+    rootForTestRegistry.roots.flatMap {
+        it.semanticsOwner.getAllSemanticsNodes(mergingEnabled = false)
+    }
+
+private fun UIKitInstrumentedTest.findSemanticsNodeOrNull(tag: String): SemanticsNode? {
+    waitForIdle()
+    return allSemanticsNodes().firstOrNull {
+        it.config.getOrNull(SemanticsProperties.TestTag) == tag
+    }
+}
+
+private fun UIKitInstrumentedTest.findSemanticsNode(tag: String): SemanticsNode =
+    findSemanticsNodeOrNull(tag) ?: run {
+        val knownTags = allSemanticsNodes().mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }
+        error("No semantics node with testTag \"$tag\". Known tags: $knownTags")
+    }
+
 internal fun ComposeHostingViewController.waitForIdle() {
     UIKitInstrumentedTest.waitUntil { !this.hasInvalidations() }
 }
@@ -744,16 +1209,62 @@ internal fun UIKitInstrumentedTest.captureScreenshot(): UIImage? {
 }
 
 internal fun UIKitInstrumentedTest.waitForContextMenu() {
+    waitForIdle()
+    waitUntil("Waiting for context menu to appear") { isContextMenuVisible }
+    delay(200) // wait for toolbar animation
+    waitForIdle()
+}
+
+internal val UIKitInstrumentedTest.isContextMenuVisible: Boolean get() {
     val menuClassName = if (available(OS.Ios to OSVersion(16))) {
         "_UIEditMenuContainerView"
     } else {
         "UICalloutBar"
     }
-    waitForIdle()
-    waitUntil("Waiting for context menu to appear") {
-        firstNodeOrNull { node ->
-            node.element?.let { it::class.simpleName } == menuClassName
-        } != null
+
+    return firstNodeOrNull { node ->
+        node.element?.let { it::class.simpleName } == menuClassName
+    } != null
+}
+
+internal fun UIViewController.setLayoutDirection(
+    layoutDirection: UITraitEnvironmentLayoutDirection
+) {
+    if (available(OS.Ios to OSVersion(major = 17))) {
+        traitOverrides.setLayoutDirection(layoutDirection)
+    } else {
+        setOverrideTraitCollection(
+            collection = UITraitCollection.traitCollectionWithLayoutDirection(layoutDirection),
+            forChildViewController = this
+        )
     }
-    delay(500) // wait for toolbar animation
+}
+
+internal fun UIViewController.setPreferredContentSizeCategory(
+    preferredContentSizeCategory: UIContentSizeCategory
+) {
+    if (available(OS.Ios to OSVersion(17))) {
+        traitOverrides.setPreferredContentSizeCategory(preferredContentSizeCategory)
+    } else {
+        setOverrideTraitCollection(
+            collection = UITraitCollection.traitCollectionWithPreferredContentSizeCategory(
+                preferredContentSizeCategory
+            ),
+            forChildViewController = this,
+        )
+    }
+}
+
+internal fun UIKitInstrumentedTest.tapContextMenuButton(label: String) {
+    if (available(OS.Ios to OSVersion(16))) {
+        findNodeWithLabel(label).tap()
+    } else {
+        // Because on iOS < 16 the context menu is shown in a separate window,
+        // it's not fully interactive with the default Tap action.
+        findNodeWithLabel(label)
+            .touchDown(useNodeWindow = true)
+            .hold()
+            .also { delay(100) }
+            .up()
+    }
 }
