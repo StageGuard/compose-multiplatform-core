@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,9 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text.modifiers
+package androidx.compose.mpp.demo.components
 
-import androidx.compose.foundation.text.selection.SelectionRegistrar
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.input.pointer.PointerIcon
 
-internal actual fun SelectionRegistrar.makeSelectionModifier(
-    selectableId: Long,
-    layoutCoordinatesProvider: () -> LayoutCoordinates?
-): Modifier = makeDefaultSelectionModifier(selectableId, layoutCoordinatesProvider)
+// No WinUI-specific pointer icon factories yet: fall back to the built-in aliases.
+internal actual val platformPointerIcons: List<Pair<String, PointerIcon>> = emptyList()

@@ -60,12 +60,12 @@ class WinUISourceSetIsolationTest {
     @Test
     fun winuiSourceSetsDoNotDependOnDesktopMain() {
         val moduleRoot = findUiModuleRoot()
-        val buildScript = moduleRoot.resolve("build.gradle").readText()
+        val buildScript = moduleRoot.resolve("build-fork.gradle").readText()
         val forbiddenSourceSets = listOf("desktopMain", "desktopJvmMain")
 
         listOf("winuiMain", "winuiJvmMain").forEach { sourceSet ->
             val block = checkNotNull(sourceSetBlock(buildScript, sourceSet)) {
-                "Could not find $sourceSet in compose/ui/ui/build.gradle."
+                "Could not find $sourceSet in compose/ui/ui/build-fork.gradle."
             }
             forbiddenSourceSets.forEach { forbidden ->
                 assertFalse(
@@ -95,11 +95,11 @@ class WinUISourceSetIsolationTest {
             "java.",
             "javax.",
             "java.lang.foreign.",
-            "WinRTWindowsAppSdkBootstrap",
+            "WindowsAppSdkBootstrap",
             "RuntimeScope",
             "JavaExec",
-            "stageWinRT",
-            "buildWinRT",
+            "stageWindowsPackage",
+            "buildWinApp",
             "System.getProperty",
             "System.load",
             "Class.forName",
@@ -127,16 +127,16 @@ class WinUISourceSetIsolationTest {
     @Test
     fun winuiUsesSourceSetSplitForSharedSkikoRenderingSource() {
         val moduleRoot = findUiModuleRoot()
-        val buildScript = moduleRoot.resolve("build.gradle").readText()
+        val buildScript = moduleRoot.resolve("build-fork.gradle").readText()
         val sharedSource = moduleRoot.resolve(
             "src/skikoRenderingMain/kotlin/androidx/compose/ui/skiko/" +
                 "RecordDrawRectRenderDecorator.skiko.kt"
         )
         val skikoRenderingBlock = checkNotNull(sourceSetBlock(buildScript, "skikoRenderingMain")) {
-            "Could not find skikoRenderingMain in compose/ui/ui/build.gradle."
+            "Could not find skikoRenderingMain in compose/ui/ui/build-fork.gradle."
         }
         val winuiMainBlock = checkNotNull(sourceSetBlock(buildScript, "winuiMain")) {
-            "Could not find winuiMain in compose/ui/ui/build.gradle."
+            "Could not find winuiMain in compose/ui/ui/build-fork.gradle."
         }
 
         assertTrue(
@@ -145,7 +145,7 @@ class WinUISourceSetIsolationTest {
         )
         assertTrue(
             skikoRenderingBlock.contains("dependsOn(commonMain)") &&
-                skikoRenderingBlock.contains("api(libs.skiko)"),
+                skikoRenderingBlock.contains("api(project(\":compose:ui:ui-skiko\"))"),
             "skikoRenderingMain should carry shared Skiko API sources and dependencies.",
         )
         assertTrue(
@@ -158,10 +158,14 @@ class WinUISourceSetIsolationTest {
             "winuiMain should reuse the shared Skiko rendering source set.",
         )
         assertTrue(
-            buildScript.contains("generated/kotlin-winrt/src/commonMain/kotlin") &&
-                buildScript.contains("generated/kotlin-winrt-authoring/src/commonMain/kotlin") &&
-                buildScript.contains("task.dependsOn(\"generateWinRTProjections\")"),
-            "Generated WinRT sources should remain wired by the kotlin-winrt plugin and task dependency.",
+            buildScript.contains("apply plugin: \"io.github.compose-fluent.windows-toolkit\""),
+            "Generated WinRT sources should be wired by the kotlin-winrt plugin.",
+        )
+        assertFalse(
+            buildScript.contains("generated/kotlin-winrt/src/") ||
+                buildScript.contains("dependsOn(\"generateWinRTProjections\")"),
+            "The kotlin-winrt plugin owns its generated sources and task dependencies; the build " +
+                "script should not wire them by hand.",
         )
         assertFalse(
             buildScript.contains("task.setSource(project.files("),
@@ -217,9 +221,15 @@ class WinUISourceSetIsolationTest {
         error("Could not find compose/ui/ui module root from $start.")
     }
 
+    /** All blocks that configure [sourceSet]; the build script may configure it more than once. */
     private fun sourceSetBlock(buildScript: String, sourceSet: String): String? {
-        val start = buildScript.indexOf("$sourceSet {")
-        if (start < 0) return null
+        val blocks = Regex("(?m)^\\s*${Regex.escape(sourceSet)} \\{").findAll(buildScript)
+            .mapNotNull { match -> blockAt(buildScript, match.range.first) }
+            .toList()
+        return blocks.takeIf { it.isNotEmpty() }?.joinToString(separator = "\n")
+    }
+
+    private fun blockAt(buildScript: String, start: Int): String? {
         var depth = 0
         for (index in start until buildScript.length) {
             when (buildScript[index]) {

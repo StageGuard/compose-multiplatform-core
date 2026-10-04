@@ -19,6 +19,7 @@ package androidx.compose.ui.draganddrop
 import androidx.compose.runtime.retain.ForgetfulRetainedValuesStore
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.WinUISkikoTestBase
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
@@ -40,7 +41,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class WinUIDragAndDropManagerTest {
+class WinUIDragAndDropManagerTest : WinUISkikoTestBase() {
     private lateinit var manager: WinUIDragAndDropManager
 
     @BeforeTest

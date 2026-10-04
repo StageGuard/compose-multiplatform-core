@@ -20,6 +20,7 @@ import androidx.compose.runtime.retain.ForgetfulRetainedValuesStore
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.FrameRateCategory
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.WinUISkikoTestBase
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
@@ -101,7 +102,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class WinUIOwnerTest {
+class WinUIOwnerTest : WinUISkikoTestBase() {
     @Test
     fun ownerRecordsPlatformStateHooks() {
         val events = OwnerEvents()

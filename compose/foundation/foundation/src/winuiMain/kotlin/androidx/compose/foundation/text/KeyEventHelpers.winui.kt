@@ -17,8 +17,8 @@
 package androidx.compose.foundation.text
 
 import androidx.compose.ui.input.key.KeyEvent
-import org.jetbrains.skiko.orderEmojiAndSymbolsPopup
 
 internal actual fun KeyEvent.cancelsTextSelection(): Boolean = false
 
-internal actual fun showCharacterPalette() = orderEmojiAndSymbolsPopup()
+// The character palette is a macOS concept; Windows opens its emoji panel itself (Win + .).
+internal actual fun showCharacterPalette() = Unit

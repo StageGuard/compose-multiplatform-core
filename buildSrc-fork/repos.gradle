@@ -65,6 +65,20 @@ def addMavenRepositories(RepositoryHandler handler) {
         }
     }
     */
+    // SKIKO-011: local Maven repositories with compose-winui dependencies that are not published yet
+    // (for example a skiko-winui build: <skiko>/skiko/build/repo). Listed first so that they win
+    // over the published snapshots of the same version.
+    def composeWinUiRepoOverride = System.getenv("COMPOSE_WINUI_MAVEN_REPO")
+    if (composeWinUiRepoOverride != null) {
+        for(extraRepo in composeWinUiRepoOverride.split(File.pathSeparator)) {
+            handler.maven {
+                url = new File(extraRepo).toURI()
+                content {
+                    includeGroup("io.github.compose-fluent")
+                }
+            }
+        }
+    }
     if (true /* In JetBrains Fork */) {
         handler.mavenCentral()
         handler.maven {
@@ -93,7 +107,11 @@ def addMavenRepositories(RepositoryHandler handler) {
             }
         }
         handler.maven {
-            url = "https://central.sonatype.com/repository/maven-snapshots"
+            name = "mavenCentralSnapshots"
+            url = "https://central.sonatype.com/repository/maven-snapshots/"
+            mavenContent {
+                snapshotsOnly()
+            }
         }
         handler.mavenLocal()
     }

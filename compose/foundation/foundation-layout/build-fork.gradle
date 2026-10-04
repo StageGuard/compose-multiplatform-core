@@ -32,6 +32,16 @@ plugins {
     id("JetBrainsAndroidXPlugin")
 }
 
+def composeWinUiJvmTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableJvmTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiGradlePluginAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
+def composeWinUiSkikoWinUiVersion = providers
+        .gradleProperty("composeWinUi.skikoWinUiVersion")
+        .orElse("0.0.0-SNAPSHOT")
+
 androidXMultiplatform {
     redirect("androidx.compose.foundation") {
         androidLibrary {
@@ -39,7 +49,9 @@ androidXMultiplatform {
             namespace = "org.jetbrains.androidx.compose.foundation.layout"
         }
     }
-    desktop()
+    if (!composeWinUiJvmTargetEnabled) {
+        desktop()
+    }
     mac()
     ios()
     js()
@@ -102,4 +114,49 @@ androidx {
     description = "Compose layout implementations"
     legacyDisableKotlinStrictApiMode = true
     deviceTests.minSdkForFtlOverride = 24 // b/437944630
+}
+
+kotlin {
+    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+        jvm("winuiJvm")
+
+        sourceSets {
+            winuiJvmMain {
+                dependsOn(skikoMain)
+            }
+
+            winuiJvmTest {
+                dependsOn(skikoTest)
+            }
+        }
+    }
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
+    if (task.name.contains("Winui")) {
+        task.compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
+            freeCompilerArgs.add("-Xjdk-release=25")
+        }
+    }
+}
+
+configurations.configureEach { configuration ->
+    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
+        configuration.attributes.attribute(
+                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                25
+        )
+        configuration.resolutionStrategy.dependencySubstitution {
+            substitute(module("org.jetbrains.skiko:skiko"))
+                    .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
+                    .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
+        }
+    }
+}
+
+tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach { task ->
+    if (task.name.contains("Winui")) {
+        task.enabled = false
+    }
 }

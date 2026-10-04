@@ -31,6 +31,20 @@ buildscript {
     // Needed for atomicfu plugin
     apply(from: "buildSrc-fork/repos.gradle")
     repos.addMavenRepositories(repositories)
+
+    // KWINRT-061: the kotlin-winrt Gradle plugin needs JDK 25, so it is only put on the classpath
+    // when the WinUI JVM target is enabled. Projects apply it by id
+    // ("io.github.compose-fluent.windows-toolkit").
+    def composeWinUiJvmTargetEnabled = providers
+            .gradleProperty("composeWinUi.enableJvmTarget")
+            .map { it.toBoolean() }
+            .getOrElse(false)
+    if (composeWinUiJvmTargetEnabled) {
+        def kotlinWinRtVersion = providers.gradleProperty("kotlinWinRt.version").getOrElse("0.1.0-SNAPSHOT")
+        dependencies {
+            classpath("io.github.compose-fluent:windows-toolkit-gradle-plugin:$kotlinWinRtVersion")
+        }
+    }
 }
 
 apply plugin: AndroidXRootPlugin

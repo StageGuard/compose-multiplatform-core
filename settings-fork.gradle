@@ -19,6 +19,9 @@ dependencyResolutionManagement {
 apply(from: "buildSrc-fork/settingsScripts/skiko-setup.groovy")
 skikoSetup.defineSkikoInVersionCatalog(settings)
 
+apply(from: "buildSrc-fork/settingsScripts/winui-setup.groovy")
+winUISetup.pinKotlinVersionInVersionCatalog(settings)
+
 def supportRootFolder = buildscript.sourceFile.getParentFile()
 
  // TODO remove, it doesn't exist and not used in fork
@@ -390,6 +393,15 @@ includeProject(":navigation:navigation-compose")
 includeProject(":navigation:navigation-runtime")
 includeProject(":navigation:navigation-testing")
 includeProject(":navigation3:navigation3-ui")
+
+// Projects that only exist for the WinUI JVM target. They apply the kotlin-winrt Gradle plugin,
+// which is only on the classpath when that target is enabled (see build-fork.gradle).
+if (winUISetup.isJvmTargetEnabled(settings)) {
+    includeProject(":compose:mpp:demo-winui")
+    includeProject(":compose:ui:ui:winui-samples")
+    includeProject(":navigation:navigation-compose-winui")
+    includeProject(":navigation3:navigation3-ui-winui")
+}
 
 includeProject(":internal-testutils-fonts", "testutils/testutils-fonts")
 includeProject(":internal-testutils-navigation", "testutils/testutils-navigation")

@@ -58,6 +58,13 @@ actual interface PlatformTextInputMethodRequest {
     val unclippedTextOffsetInRoot: () -> Offset?
     @ExperimentalComposeUiApi
     val editText: (block: TextEditingScope.() -> Unit) -> Unit
+
+    /**
+     * Opaque token that uniquely identifies the text editor.
+     */
+    @ExperimentalComposeUiApi
+    val editorToken: Any?
+        get() = null
 }
 
 actual interface PlatformTextInputSession {

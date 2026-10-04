@@ -17,6 +17,7 @@
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.WinUISkikoTestBase
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Matrix
@@ -70,7 +71,7 @@ import windows.ui.text.core.CoreTextRange
 import windows.ui.text.core.CoreTextSelectionUpdatingResult
 import windows.ui.text.core.CoreTextTextUpdatingResult
 
-class WinUIPlatformTextInputServiceTest {
+class WinUIPlatformTextInputServiceTest : WinUISkikoTestBase() {
     @BeforeTest
     fun setUp() {
         System.setProperty(CoreTextInputDisabledProperty, "true")

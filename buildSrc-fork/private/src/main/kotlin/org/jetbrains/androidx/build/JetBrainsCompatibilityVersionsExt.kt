@@ -28,7 +28,9 @@ fun jetBrainsGetDefaultTargetJavaVersion(
     project: Project? = null,
     targetName: String? = null,
 ): JavaVersion =
-    if (project != null && isJetBrainsFork(project)) {
+    if (targetName == "winuiJvm") {
+        JavaVersion.VERSION_22
+    } else if (project != null && isJetBrainsFork(project)) {
         JETBRAINS_MINIMAL_JAVA_VERSION
     } else {
         aospGetDefaultTargetJavaVersion(softwareType, project?.name, targetName)

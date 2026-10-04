@@ -16,6 +16,7 @@
 
 package androidx.compose.ui.graphics
 
+import androidx.compose.ui.WinUISkikoTestBase
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -26,7 +27,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class WinUIGraphicsContextTest {
+class WinUIGraphicsContextTest : WinUISkikoTestBase() {
     @BeforeTest
     fun setUp() {
         WinUIGraphicsContext.resetForTest()

@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
-import io.github.composefluent.winrt.gradle.BuildWinRTApplicationHostTask
-import io.github.composefluent.winrt.gradle.GenerateWinRTProjectionsTask
+import io.github.composefluent.windows.toolkit.gradle.BuildWinAppHostTask
+import io.github.composefluent.windows.toolkit.gradle.GenerateWinRTProjectionsTask
+import io.github.composefluent.windows.toolkit.gradle.RunWinAppHostTask
+import io.github.composefluent.windows.toolkit.gradle.WindowsPackageType
+import io.github.composefluent.windows.toolkit.gradle.registerWinAppHostRunTask
+import java.util.Date
 import java.util.zip.ZipFile
-import org.gradle.api.tasks.Exec
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -25,7 +28,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("AndroidXComposePlugin")
     id("kotlin-multiplatform")
-    id("io.github.composefluent.winrt")
+    id("io.github.compose-fluent.windows-toolkit")
     alias(libs.plugins.kotlinSerialization)
 }
 
@@ -35,27 +38,21 @@ val composeWinUiWindowsSdkVersion = providers
 val composeWinUiWindowsAppSdkVersion = providers
     .gradleProperty("composeWinUi.windowsAppSdkVersion")
     .orElse(providers.gradleProperty("kotlinWinRt.samples.windowsAppSdkVersion"))
-    .orElse("2.1.3")
+    .orElse("2.2.0")
 val kotlinWinRtVersion = providers
     .gradleProperty("kotlinWinRt.version")
     .orElse("0.1.0-SNAPSHOT")
 val composeWinUiSkikoWinUiVersion = providers
     .gradleProperty("composeWinUi.skikoWinUiVersion")
     .orElse("0.0.0-SNAPSHOT")
-val lifecycleVersion = providers
-    .gradleProperty("artifactRedirection.version.androidx.lifecycle")
-    .orElse("2.11.0-beta01")
-val navigationEventVersion = providers
-    .gradleProperty("artifactRedirection.version.androidx.navigationevent")
-    .orElse("1.1.0-alpha01")
-val composeVersion = providers
-    .gradleProperty("artifactRedirection.version.androidx.compose")
-    .orElse("1.12.0-alpha02")
+// The Windows 10 version that the Windows App SDK supports as a minimum.
+val composeWinUiMinWindowsVersion = "10.0.19041.0"
 
 val localWinUiJarProjects = listOf(
     ":compose:ui:ui",
     ":compose:ui:ui-graphics",
     ":compose:ui:ui-text",
+    ":compose:ui:ui-skiko",
 )
 val localWinUiCompileProjects = listOf(
     ":compose:animation:animation-core",
@@ -74,13 +71,8 @@ val navigationWinUiCompileTasks = listOf(
     ":navigation:navigation-compose:compileKotlinWinuiJvm",
     ":navigation3:navigation3-ui:compileKotlinWinuiJvm",
 )
-val gradleWrapper = rootProject.layout.projectDirectory.file(
-    if (System.getProperty("os.name").startsWith("Windows")) {
-        "gradlew.bat"
-    } else {
-        "gradlew"
-    }
-)
+val winUiMppRuntimeAssetsDir =
+    layout.buildDirectory.dir("kotlin-winrt/application-layout/winuiJvm_main/runtime-assets")
 val winUiMppSampleResourcesDir = layout.buildDirectory.dir("winui-mpp-sample-resources")
 val winUiMppSampleResourceFiles = listOf(
     project.file("../demo/src/commonMain/resources/RobotoFlex-VariableFont.ttf"),
@@ -196,12 +188,13 @@ kotlin {
             kotlin.exclude("androidx/compose/mpp/demo/components/dialog/DialogExample.kt")
             kotlin.exclude("androidx/compose/mpp/demo/components/popup/ConfigurablePopup.kt")
             kotlin.exclude("androidx/compose/mpp/demo/components/text/FontRasterization.kt")
+            // SKIKO-012: Skottie is published separately from Skiko and has no WinUI artifact.
+            kotlin.exclude("androidx/compose/mpp/demo/LottieAnimation.kt")
             resources.srcDir("../demo/src/commonMain/resources")
             dependencies {
                 implementation(kotlin("stdlib"))
                 implementation(libs.kotlinCoroutinesCore)
                 implementation(libs.kotlinSerializationCore)
-                implementation(libs.skiko)
 
                 implementation(project(":compose:animation:animation"))
                 implementation(project(":compose:animation:animation-core"))
@@ -214,19 +207,19 @@ kotlin {
                 implementation(project(":compose:material3:adaptive:adaptive-layout"))
                 implementation(project(":compose:material3:adaptive:adaptive-navigation"))
                 implementation(project(":compose:runtime:runtime"))
-                implementation("androidx.compose.runtime:runtime-retain:${composeVersion.get()}")
                 implementation(project(":compose:ui:ui-backhandler"))
                 implementation(project(":compose:ui:ui-geometry"))
                 implementation(project(":compose:ui:ui"))
                 implementation(project(":compose:ui:ui-graphics"))
                 implementation(project(":compose:ui:ui-text"))
+                implementation(project(":compose:ui:ui-skiko"))
                 implementation(project(":compose:ui:ui-unit"))
                 implementation(project(":compose:ui:ui-util"))
-                implementation(project(":lifecycle:lifecycle-common"))
-                implementation(project(":lifecycle:lifecycle-runtime"))
-                implementation(project(":lifecycle:lifecycle-runtime-compose"))
-                implementation(project(":lifecycle:lifecycle-viewmodel-compose"))
-                implementation(project(":lifecycle:lifecycle-viewmodel-savedstate"))
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-common:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0")
                 implementation(project(":navigation:navigation-common"))
                 implementation(project(":navigation:navigation-compose"))
                 implementation(project(":navigation:navigation-runtime"))
@@ -234,8 +227,10 @@ kotlin {
                     exclude(group = "org.jetbrains.compose.runtime")
                     exclude(group = "org.jetbrains.compose.ui")
                 }
-                implementation("androidx.savedstate:savedstate-compose:1.4.0")
-                implementation("androidx.navigationevent:navigationevent-compose:${navigationEventVersion.get()}")
+                implementation("org.jetbrains.compose.components:components-resources:1.11.1") {
+                    exclude(group = "org.jetbrains.compose.runtime")
+                    exclude(group = "org.jetbrains.compose.ui")
+                }
                 implementation("io.github.compose-fluent:winrt-runtime-jvm:${kotlinWinRtVersion.get()}")
                 implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
             }
@@ -252,9 +247,72 @@ kotlin {
     }
 }
 
-winRT {
+// Same generated BuildInfo and resources as the original MPP demo, whose sources this module compiles.
+val demoBuildInfoDir = layout.buildDirectory.dir("generated/buildInfo/kotlin")
+
+val generateDemoBuildInfo = tasks.register("generateDemoBuildInfo") {
+    val outputDir = demoBuildInfoDir
+    val repoDir = projectDir
+    outputs.dir(outputDir)
+    outputs.upToDateWhen { false }
+    doLast {
+        fun exec(command: List<String>): String = try {
+            val process = ProcessBuilder(command)
+                .directory(repoDir)
+                .start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            output
+        } catch (e: Exception) {
+            ""
+        }
+
+        fun git(vararg args: String) = exec(listOf("git") + args)
+
+        fun esc(value: String) = value
+            .replace("\\", "\\\\")
+            .replace("$", "\\\$")
+            .replace("\"", "\\\"")
+            .replace("\r", "")
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+
+        val branch = git("rev-parse", "--abbrev-ref", "HEAD")
+        val hash = git("rev-parse", "--short", "HEAD")
+        val author = git("log", "-1", "--format=%an")
+        val message = git("log", "-1", "--format=%B")
+        val buildTime = "%1\$tF %1\$tT %1\$tZ (%1\$tz)".format(Date())
+
+        val outFile = outputDir.get()
+            .file("androidx/compose/mpp/demo/BuildInfo.kt").asFile
+        outFile.parentFile.mkdirs()
+        outFile.writeText(
+            """
+            |package androidx.compose.mpp.demo
+            |
+            |internal object BuildInfo {
+            |    const val branch: String = "${esc(branch)}"
+            |    const val commitHash: String = "${esc(hash)}"
+            |    const val author: String = "${esc(author)}"
+            |    const val buildTime: String = "${esc(buildTime)}"
+            |    const val commitMessage: String = "${esc(message)}"
+            |}
+            |""".trimMargin()
+        )
+    }
+}
+
+kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(generateDemoBuildInfo)
+kotlin.sourceSets.getByName("commonMain").resources.srcDir("../demo/src/commonMain/composeResources")
+
+windows {
     application {
         mainClass.set("androidx.compose.mpp.demo.Main_winuiKt")
+        // A loose layout that carries its own Windows App SDK runtime, started through the
+        // generated host.
+        packageType.set(WindowsPackageType.None)
+        selfContained()
+        minWindowsVersion.set(composeWinUiMinWindowsVersion)
         projectPriIndexName.set("ComposeWinUi.MppDemo")
         projectPriInitialPath.set("Appx")
         enableDefaultProjectPriResources.set(false)
@@ -265,9 +323,39 @@ winRT {
         projectPriContent(winUiMppPriContent, "Assets/Sample.txt")
         projectPriEmbedFile(winUiMppPriEmbed, "Embedded/Payload.bin")
     }
-    windowsSdk(composeWinUiWindowsSdkVersion.get(), includeExtensions = false)
-    nugetPackage("Microsoft.WindowsAppSDK", composeWinUiWindowsAppSdkVersion.get())
-    type("Windows.Foundation.Uri")
+    packageReferences {
+        windowsSdk(
+            composeWinUiWindowsSdkVersion.get(),
+            includeExtensions = false,
+            generateProjection = true,
+        )
+        nugetPackage("Microsoft.WindowsAppSDK", composeWinUiWindowsAppSdkVersion.get()) {
+            generateProjection = true
+        }
+        type("Windows.Foundation.Uri")
+    }
+}
+
+configurations.configureEach {
+    if (name.lowercase().contains("winui")) {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("org.jetbrains.skiko:skiko"))
+                .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
+                .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
+        }
+    }
+    // KWINRT-056: kotlin-winrt does not regenerate the WinRT types that its dependencies already
+    // project, so their projections have to be on the classpath of its projection compilation.
+    // The plugin only adds project dependencies that are already configured, which configuration
+    // on demand does not guarantee, and no external modules, so add both explicitly.
+    if (name == "kotlinWinRTProjectionWinuiJvmCompileClasspath") {
+        dependencies.add(project.dependencies.project(":compose:ui:ui"))
+        dependencies.add(
+            project.dependencies.create(
+                "io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"
+            )
+        )
+    }
 }
 
 tasks.named<GenerateWinRTProjectionsTask>("generateWinRTProjections") {
@@ -285,17 +373,35 @@ tasks.named("processWinuiJvmMainResources") {
     dependsOn(stageWinUIMppSampleResources)
 }
 
-tasks.named<BuildWinRTApplicationHostTask>("buildWinRTApplicationHost") {
-    val winuiJvmJar = tasks.named("winuiJvmJar", Jar::class)
-    runtimeClasspath.from(configurations.named("winuiJvmRuntimeClasspath"))
-    runtimeClasspath.from(winuiJvmJar.flatMap { it.archiveFile })
-    dependsOn(winuiJvmJar)
+// KWINRT-057: JetBrains publishes its JVM redirect artifacts (e.g. org.jetbrains.androidx.
+// lifecycle:lifecycle-common-jvm) as jars without classes, named like the androidx jar they
+// depend on. The application host stages its runtime jars into one directory and rejects two
+// jars with the same file name, so leave the jars without content out.
+tasks.named<BuildWinAppHostTask>("buildWinAppHostWinuiJvmMain") {
+    val wiredRuntimeClasspath = files(runtimeClasspath.from.toList())
+    runtimeClasspath.setFrom(wiredRuntimeClasspath.filter { file -> !isJarWithoutContent(file) })
+}
+
+fun isJarWithoutContent(file: File): Boolean =
+    file.isFile && file.extension == "jar" && ZipFile(file).use { zip ->
+        zip.entries().asSequence().none { !it.isDirectory && !it.name.startsWith("META-INF/") }
+    }
+
+// KWINRT-058: the application host loads jvm.dll of its bundled runtime by path, but the
+// libraries the JVM loads next (zip.dll) import java.dll by name. With another JDK on PATH that
+// JDK's java.dll is picked up and the VM fails to initialize, so put the bundled runtime first.
+tasks.withType<RunWinAppHostTask>().configureEach {
+    environmentVariables.put(
+        "PATH",
+        hostExecutable.map { executable ->
+            val runtimeBin = executable.asFile.parentFile.resolve("runtime/bin")
+            listOfNotNull(runtimeBin.absolutePath, System.getenv("PATH")).joinToString(File.pathSeparator)
+        },
+    )
 }
 
 tasks.withType<KotlinCompile>().configureEach {
     if (name.contains("Winui")) {
-        dependsOn("generateWinRTProjections")
-        dependsOn("mergeWinRTCompilerSupport")
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_25)
             freeCompilerArgs.add("-Xjdk-release=25")
@@ -303,7 +409,7 @@ tasks.withType<KotlinCompile>().configureEach {
     }
 }
 
-fun Exec.configureWinUIMppSampleApplicationHost(
+fun RunWinAppHostTask.configureWinUIMppSampleApplicationHost(
     taskDescription: String,
     reportName: String,
     requiredEvents: List<String>,
@@ -315,25 +421,19 @@ fun Exec.configureWinUIMppSampleApplicationHost(
     dependsOn("validateWinUIMppSamplePackaging")
     val reportFile = layout.buildDirectory.file("validation/$reportName-events.txt")
     outputs.file(reportFile)
-    commandLine(
-        gradleWrapper.asFile.absolutePath,
-        "${project.path}:runWinRTApplicationHost",
-        "-PcomposeWinUi.enableJvmTarget=true",
-        "--no-configuration-cache",
-        "--no-configure-on-demand",
-        "--no-build-cache",
-        "--no-daemon",
-        "--console=plain",
+    // The sample is observed through its report, so every run has to start the application.
+    outputs.upToDateWhen { false }
+    jvmArgs.addAll(
+        reportFile.map { report ->
+            listOf(
+                "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
+                "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",
+                "-Dcompose.winui.mpp.sample.validationReport=${report.asFile.absolutePath}",
+            )
+        }
     )
     doFirst {
-        val report = reportFile.get().asFile
-        report.delete()
-        val jvmOptions = mutableListOf(
-            "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
-            "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",
-            "-Dcompose.winui.mpp.sample.validationReport=${report.absolutePath}",
-        )
-        environment("KOTLIN_WINRT_JVM_OPTIONS", jvmOptions.joinToString(separator = ";"))
+        reportFile.get().asFile.delete()
 
         val runtimeArtifacts = configurations.named("winuiJvmRuntimeClasspath").get().files
         val runtimeArtifactNames = runtimeArtifacts.map { it.name }
@@ -380,7 +480,7 @@ tasks.register("validateWinUIMppSamplePackaging") {
     group = "verification"
     description = "Validates WinUI MPP sample resources and Windows App SDK runtime packaging."
     dependsOn(stageWinUIMppSampleResources)
-    dependsOn("stageWinRTRuntimeAssets")
+    dependsOn("stageWindowsPackageRuntimeAssetsWinuiJvmMain")
     inputs.files(
         winUiMppSampleResourceFiles + listOf(
             winUiMppAppxManifest,
@@ -417,7 +517,7 @@ tasks.register("validateWinUIMppSamplePackaging") {
             )
         }
 
-        val runtimeAssets = layout.buildDirectory.dir("kotlin-winrt/runtime-assets").get().asFile
+        val runtimeAssets = winUiMppRuntimeAssetsDir.get().asFile
         requireFile(runtimeAssets.resolve("resources.pri"), "application resources.pri")
         requireFile(runtimeAssets.resolve("Microsoft.UI.pri"), "Microsoft.UI component PRI")
         requireFile(
@@ -478,7 +578,12 @@ tasks.register("validateWinUIMppSampleSourceIsolation") {
             check(sourceFile.isFile) {
                 "Missing WinUI MPP sample source file: ${sourceFile.absolutePath}"
             }
-            val source = sourceFile.readText()
+            val source = sourceFile.readLines()
+                .filterNot { line ->
+                    val trimmed = line.trimStart()
+                    trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")
+                }
+                .joinToString(separator = "\n")
             val forbiddenTokens = winUiMppSampleForbiddenSourceTokens.filter(source::contains)
             check(forbiddenTokens.isEmpty()) {
                 "WinUI MPP sample source ${sourceFile.absolutePath} uses Desktop/AWT/Swing-only APIs: " +
@@ -628,8 +733,10 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
                 .map { it.name }
                 .toSet()
         }
+        check(uiJarEntries.any(::isWinRTCompilerSupportManifest)) {
+            "compose-ui WinUI jar is missing the kotlin-winrt compiler support manifest."
+        }
         val requiredUiJarEntries = listOf(
-            "io/github/composefluent/winrt/projections/support/WinRTCompilerSupportManifest.class",
             "io/github/composefluent/winrt/projections/support/WinRTAuthoringTypeDetailsRegistrar_ui.class",
             "kotlin-winrt/type-index.tsv",
             "kotlin-winrt-authoring/ui.host.json",
@@ -655,11 +762,19 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
             .dir("classes/kotlin/winuiJvm/main")
             .get()
             .asFile
-        val requiredDemoFiles = listOf(
-            demoClassesDir.resolve(
-                "io/github/composefluent/winrt/projections/support/" +
-                    "WinRTCompilerSupportManifest.class"
-            ),
+        val demoProjectionClassesDir = layout.buildDirectory
+            .dir("classes/kotlin-winrt/projection/compileKotlinWinuiJvm")
+            .get()
+            .asFile
+        val demoCompilerSupportManifests = demoProjectionClassesDir
+            .resolve("io/github/composefluent/winrt/projections/support")
+            .listFiles { file -> isWinRTCompilerSupportManifest(file.name) }
+            .orEmpty()
+        check(demoCompilerSupportManifests.isNotEmpty()) {
+            "Missing demo-winui kotlin-winrt compiler support manifest in " +
+                demoProjectionClassesDir.absolutePath
+        }
+        val requiredDemoFiles = demoCompilerSupportManifests.toList() + listOf(
             demoClassesDir.resolve("kotlin-winrt/type-index.tsv"),
             demoClassesDir.resolve("kotlin-winrt/authored-candidates.tsv"),
             demoClassesDir.resolve("kotlin-winrt-authoring/demo-winui.host.json"),
@@ -697,18 +812,10 @@ tasks.register("validateWinUiKotlinWinRtKmpGraphBaseline") {
     }
 }
 
-val validateWinUINavigationCompileOnly = tasks.register<Exec>("validateWinUINavigationCompileOnly") {
+val validateWinUINavigationCompileOnly = tasks.register("validateWinUINavigationCompileOnly") {
     group = "verification"
     description = "Compiles the Navigation Compose and Navigation3 UI WinUI JVM targets."
-    commandLine(
-        gradleWrapper.asFile.absolutePath,
-        *navigationWinUiCompileTasks.toTypedArray(),
-        "-PcomposeWinUi.enableJvmTarget=true",
-        "--no-configuration-cache",
-        "--no-configure-on-demand",
-        "--no-build-cache",
-        "--console=plain",
-    )
+    dependsOn(navigationWinUiCompileTasks)
 }
 
 tasks.register("validateWinUIMppSampleCompileOnly") {
@@ -719,7 +826,7 @@ tasks.register("validateWinUIMppSampleCompileOnly") {
     dependsOn("validateWinUiKotlinWinRtKmpGraphBaseline")
 }
 
-val smokeWinUIMppSampleLaunchWindow = tasks.register<Exec>("smokeWinUIMppSampleLaunchWindow") {
+val smokeWinUIMppSampleLaunchWindow = registerWinAppHostRunTask("smokeWinUIMppSampleLaunchWindow") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until the application window composes.",
         reportName = "winui-mpp-sample-launch-window",
@@ -731,7 +838,7 @@ val smokeWinUIMppSampleLaunchWindow = tasks.register<Exec>("smokeWinUIMppSampleL
     )
 }
 
-val smokeWinUIMppSampleRenderOutput = tasks.register<Exec>("smokeWinUIMppSampleRenderOutput") {
+val smokeWinUIMppSampleRenderOutput = registerWinAppHostRunTask("smokeWinUIMppSampleRenderOutput") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until the image viewer reaches a laid-out frame.",
         reportName = "winui-mpp-sample-render-output",
@@ -746,7 +853,7 @@ val smokeWinUIMppSampleRenderOutput = tasks.register<Exec>("smokeWinUIMppSampleR
     )
 }
 
-val smokeWinUIMppSampleInputFocus = tasks.register<Exec>("smokeWinUIMppSampleInputFocus") {
+val smokeWinUIMppSampleInputFocus = registerWinAppHostRunTask("smokeWinUIMppSampleInputFocus") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until pointer/input handlers compose on a live window.",
         reportName = "winui-mpp-sample-input-focus",
@@ -757,7 +864,7 @@ val smokeWinUIMppSampleInputFocus = tasks.register<Exec>("smokeWinUIMppSampleInp
     )
 }
 
-val smokeWinUIMppSampleResourceLoading = tasks.register<Exec>("smokeWinUIMppSampleResourceLoading") {
+val smokeWinUIMppSampleResourceLoading = registerWinAppHostRunTask("smokeWinUIMppSampleResourceLoading") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until bundled resources load through the runtime classpath.",
         reportName = "winui-mpp-sample-resource-loading",
@@ -765,7 +872,7 @@ val smokeWinUIMppSampleResourceLoading = tasks.register<Exec>("smokeWinUIMppSamp
     )
 }
 
-val smokeWinUIMppSampleShutdownDisposal = tasks.register<Exec>("smokeWinUIMppSampleShutdownDisposal") {
+val smokeWinUIMppSampleShutdownDisposal = registerWinAppHostRunTask("smokeWinUIMppSampleShutdownDisposal") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the WinUI MPP sample until auto-exit disposes the window content.",
         reportName = "winui-mpp-sample-shutdown-disposal",
@@ -776,7 +883,7 @@ val smokeWinUIMppSampleShutdownDisposal = tasks.register<Exec>("smokeWinUIMppSam
     )
 }
 
-val smokeWinUIMppSampleAutoTraverse = tasks.register<Exec>("smokeWinUIMppSampleAutoTraverse") {
+val smokeWinUIMppSampleAutoTraverse = registerWinAppHostRunTask("smokeWinUIMppSampleAutoTraverse") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Automatically traverses WinUI MPP sample demo screens and exercises pointer input.",
         reportName = "winui-mpp-sample-auto-traverse",
@@ -792,7 +899,7 @@ val smokeWinUIMppSampleAutoTraverse = tasks.register<Exec>("smokeWinUIMppSampleA
     )
 }
 
-tasks.register<Exec>("runWinUIMppSample") {
+registerWinAppHostRunTask("runWinUIMppSample") {
     dependsOn("validateWinUIMppSampleCompileOnly")
     dependsOn("validateWinUIMppSampleSourceIsolation")
     dependsOn("validateWinUIMppSampleApiSurface")
@@ -825,7 +932,7 @@ tasks.register<Exec>("runWinUIMppSample") {
     )
 }
 
-tasks.register<Exec>("runWinUIMppSampleInteractive") {
+registerWinAppHostRunTask("runWinUIMppSampleInteractive") {
     configureWinUIMppSampleApplicationHost(
         taskDescription = "Runs the original MPP demo through the compose-winui JVM target without auto-exit.",
         reportName = "winui-mpp-sample-interactive",
@@ -833,6 +940,12 @@ tasks.register<Exec>("runWinUIMppSampleInteractive") {
         autoExit = false,
     )
     group = "application"
+}
+
+fun isWinRTCompilerSupportManifest(path: String): Boolean {
+    val name = path.substringAfterLast('/')
+    return name.startsWith("WinRTCompilerSupportManifest_") && name.endsWith(".class") &&
+        (path == name || path.startsWith("io/github/composefluent/winrt/projections/support/"))
 }
 
 fun linkedMapMapOfProjectionOwners(files: Set<File>): Map<String, Set<String>> {

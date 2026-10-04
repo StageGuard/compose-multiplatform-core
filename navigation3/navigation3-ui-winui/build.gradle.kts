@@ -22,6 +22,13 @@ plugins {
     id("kotlin-multiplatform")
 }
 
+// The artifact-redirection versions of the fork (see redirectversions.toml in the repo root).
+fun redirectVersion(group: String): String =
+    Regex("^\"${Regex.escape(group)}\"\\s*=\\s*\"([^\"]+)\"", RegexOption.MULTILINE)
+        .find(rootProject.file("redirectversions.toml").readText())
+        ?.groupValues?.get(1)
+        ?: error("No redirect version for $group in redirectversions.toml")
+
 kotlin {
     jvmToolchain(25)
     jvm("winuiJvm")
@@ -30,13 +37,10 @@ kotlin {
         commonMain {
             kotlin.srcDir("../navigation3-ui/src/commonMain/kotlin")
             dependencies {
-                val navigation3Version =
-                    project.findProperty("artifactRedirection.version.androidx.navigation3")
-                val navigationEventVersion =
-                    project.findProperty("artifactRedirection.version.androidx.navigationevent")
+                val navigation3Version = redirectVersion("androidx.navigation3")
 
                 api("androidx.navigation3:navigation3-runtime:$navigation3Version")
-                api("org.jetbrains.androidx.navigationevent:navigationevent-compose:1.0.1")
+                api("org.jetbrains.androidx.navigationevent:navigationevent-compose:1.1.0")
                 api("org.jetbrains.compose.animation:animation:1.10.0")
                 api("org.jetbrains.compose.runtime:runtime:1.10.0")
                 api("org.jetbrains.compose.runtime:runtime-saveable:1.10.0")
@@ -47,7 +51,6 @@ kotlin {
                 implementation("androidx.collection:collection:1.5.0")
                 implementation("androidx.lifecycle:lifecycle-runtime:2.10.0")
                 implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-                implementation("androidx.navigationevent:navigationevent-testing:$navigationEventVersion")
             }
         }
 

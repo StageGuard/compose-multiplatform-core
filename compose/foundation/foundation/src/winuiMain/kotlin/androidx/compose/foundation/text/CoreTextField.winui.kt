@@ -16,8 +16,11 @@
 
 package androidx.compose.foundation.text
 
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.text.input.internal.TransformedTextFieldState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.input.ImeOptions
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 
@@ -34,3 +37,15 @@ internal actual fun Modifier.textFieldDraw(
     value: TextFieldValue,
     offsetMapping: OffsetMapping,
 ): Modifier = defaultTextFieldDraw(state, value, offsetMapping)
+
+internal actual fun Modifier.textFieldOverlay(
+    state: LegacyTextFieldState,
+    imeOptions: ImeOptions,
+    interactionSource: InteractionSource?,
+): Modifier = this
+
+internal actual fun Modifier.textFieldOverlay(
+    transformedState: TransformedTextFieldState,
+    keyboardOptions: KeyboardOptions,
+    interactionSource: InteractionSource,
+): Modifier = this

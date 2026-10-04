@@ -16,6 +16,7 @@
 
 package androidx.compose.ui.text.intl
 
+import androidx.compose.ui.InternalComposeUiApi
 import java.util.Locale as JavaLocale
 
 internal actual fun createPlatformLocaleDelegate() = object : PlatformLocaleDelegate {
@@ -26,4 +27,5 @@ internal actual fun createPlatformLocaleDelegate() = object : PlatformLocaleDele
 // Matches the non-AWT ComponentOrientation language list used by other Skiko targets.
 private val rtlLanguagesSet = setOf("ar", "fa", "he", "iw", "ji", "ur", "yi")
 
-internal actual fun Locale.isRtl(): Boolean = language in rtlLanguagesSet
+@InternalComposeUiApi
+actual fun Locale.isRtl(): Boolean = language in rtlLanguagesSet

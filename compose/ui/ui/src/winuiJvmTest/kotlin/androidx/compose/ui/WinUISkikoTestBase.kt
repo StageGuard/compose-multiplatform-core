@@ -16,22 +16,17 @@
 
 package androidx.compose.ui
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.registerSkikoComposeImplementation
 
-enum class SystemTheme {
-    Dark, Light, Unknown
-}
-
-@InternalComposeUiApi
-val LocalSystemTheme = staticCompositionLocalOf {
-    SystemTheme.Unknown
-}
-
-@InternalComposeUiApi
-@Composable
-@ReadOnlyComposable
-fun isUiSystemInDarkTheme(): Boolean {
-    return LocalSystemTheme.current == SystemTheme.Dark
+/**
+ * Base class for WinUI tests that use Compose primitives backed by the Skiko implementation.
+ *
+ * The implementation is registered at construction time (rather than in a per-test setup method)
+ * so that it is already available to subclass field initializers. Registration is idempotent.
+ */
+@OptIn(InternalComposeUiApi::class)
+abstract class WinUISkikoTestBase {
+    init {
+        registerSkikoComposeImplementation()
+    }
 }

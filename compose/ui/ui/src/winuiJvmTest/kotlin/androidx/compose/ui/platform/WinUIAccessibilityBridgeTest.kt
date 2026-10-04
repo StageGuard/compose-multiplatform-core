@@ -17,6 +17,7 @@
 package androidx.compose.ui.platform
 
 import androidx.collection.mutableIntObjectMapOf
+import androidx.compose.ui.WinUISkikoTestBase
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.RootMeasurePolicy
 import androidx.compose.ui.node.LayoutNode
@@ -29,7 +30,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class WinUIAccessibilityBridgeTest {
+class WinUIAccessibilityBridgeTest : WinUISkikoTestBase() {
     @Test
     fun recordsInvalidationWithoutSchedulingWhenAccessibilityIsDisabled() {
         val scheduled = mutableListOf<() -> Unit>()

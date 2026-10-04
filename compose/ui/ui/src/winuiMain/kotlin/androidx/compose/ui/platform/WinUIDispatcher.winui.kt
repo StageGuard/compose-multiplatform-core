@@ -20,13 +20,20 @@ import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import microsoft.ui.dispatching.DispatcherQueue
 
+/**
+ * Dispatches to [dispatcherQueue].
+ *
+ * @param immediate when `true`, coroutines resumed on the thread of [dispatcherQueue] continue in
+ * place instead of being posted to the queue.
+ */
 internal class WinUIDispatcher(
     private val dispatcherQueue: DispatcherQueue,
+    private val immediate: Boolean = true,
 ) : CoroutineDispatcher() {
     private val dispatchQueue = WinUIDispatchQueue(dispatcherQueue)
 
     override fun isDispatchNeeded(context: CoroutineContext): Boolean =
-        runCatching { !dispatcherQueue.hasThreadAccess }.getOrDefault(true)
+        !immediate || runCatching { !dispatcherQueue.hasThreadAccess }.getOrDefault(true)
 
     override fun dispatch(context: CoroutineContext, block: Runnable) {
         if (!dispatchQueue.dispatch { block.run() }) {

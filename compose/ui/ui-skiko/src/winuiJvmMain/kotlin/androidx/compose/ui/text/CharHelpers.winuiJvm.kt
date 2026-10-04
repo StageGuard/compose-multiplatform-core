@@ -39,8 +39,5 @@ internal actual fun CodePoint.isNeutralDirection(): Boolean =
         else -> false
     }
 
-internal actual fun CodePoint.isNonSpacingMark(): Boolean =
-    getDirectionality() == CharDirectionality.NONSPACING_MARK
-
 private fun CodePoint.getDirectionality(): CharDirectionality =
     CharDirectionality.valueOf(Character.getDirectionality(this).toInt())

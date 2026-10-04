@@ -96,6 +96,11 @@ class WinUIComposeView internal constructor(
         onSensitiveContentChanged: (Boolean) -> Unit,
     ) : this(WinUIRootContentHost(), onSensitiveContentChanged, window)
 
+    // Register before any property initializer below (e.g. [owner]) touches the Skiko backend.
+    init {
+        registerSkikoComposeImplementation()
+    }
+
     internal val rootNode = LayoutNode().also {
         it.measurePolicy = RootMeasurePolicy
     }
@@ -327,13 +332,13 @@ class WinUIComposeView internal constructor(
                 LocalSaveableStateRegistry provides registry,
                 LocalHostDefaultProvider provides hostDefaultProvider,
                 LocalPlatformWindowInsets provides platformWindowInsets,
+                LocalPlatformPrefetchScheduler provides NoOpPlatformPrefetchScheduler,
                 LocalWinUIRoot provides rootContentControl,
                 LocalWinUIWindow provides window,
             ) {
                 LocalRetainedValuesStoreProvider(retainedValuesStore) {
                     ProvideCommonCompositionLocals(
                         owner = owner,
-                        uriHandler = createWinUIUriHandler(),
                         content = content,
                     )
                 }
@@ -428,8 +433,10 @@ class WinUIComposeView internal constructor(
     private fun createComposition(): Composition {
         val dispatcherQueue = requireRootDispatcherQueue()
         WinUIScheduler.register(dispatcherQueue)
-        GlobalSnapshotManager.ensureStarted(dispatcherQueue)
-        val dispatcher = WinUIDispatcher(dispatcherQueue)
+        // FrameRecomposer queues its work on dispatchers that follow the host dispatcher and rolls
+        // those queues in performFrame, so the host dispatcher must always dispatch: with an
+        // immediate one, work resumed on the UI thread would bypass the queues and miss the frame.
+        val dispatcher = WinUIDispatcher(dispatcherQueue, immediate = false)
         val currentFrameRecomposer = FrameRecomposer(dispatcher, ::requestRender)
         frameRecomposer = currentFrameRecomposer
         ownerCoroutineContext = currentFrameRecomposer.compositionContext.effectCoroutineContext

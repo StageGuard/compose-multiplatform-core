@@ -38,6 +38,32 @@ plugins {
     alias(libs.plugins.atomicFu)
 }
 
+def composeWinUiJvmTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableJvmTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiGradlePluginRuntimeAvailable = JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_22)
+def composeWinUiGradlePluginAvailable =
+        composeWinUiJvmTargetEnabled && composeWinUiGradlePluginRuntimeAvailable
+def composeWinUiWindowsSdkVersion = providers
+        .gradleProperty("composeWinUi.windowsSdkVersion")
+        .orElse("10.0.26100.0")
+def composeWinUiWindowsAppSdkVersion = providers
+        .gradleProperty("composeWinUi.windowsAppSdkVersion")
+        .orElse(providers.gradleProperty("kotlinWinRt.samples.windowsAppSdkVersion"))
+        .orElse("2.2.0")
+def kotlinWinRtVersion = providers
+        .gradleProperty("kotlinWinRt.version")
+        .orElse("0.1.0-SNAPSHOT")
+def composeWinUiSkikoWinUiVersion = providers
+        .gradleProperty("composeWinUi.skikoWinUiVersion")
+        .orElse("0.0.0-SNAPSHOT")
+
+if (composeWinUiJvmTargetEnabled && !composeWinUiGradlePluginRuntimeAvailable) {
+    throw new GradleException("compose-winui JVM target requires running Gradle on JDK 22 or newer.")
+}
+
 androidXMultiplatform {
     redirect("androidx.compose.ui") {
         androidLibrary {
@@ -57,7 +83,9 @@ androidXMultiplatform {
             }
         }
     }
-    desktop()
+    if (!composeWinUiJvmTargetEnabled) {
+        desktop()
+    }
     mac()
     ios()
     js()
@@ -94,7 +122,9 @@ androidXMultiplatform {
             implementation(libs.kotlinCoroutinesTest)
             implementation(libs.kotlinReflect)
             implementation(project(":compose:ui:ui-util"))
-            implementation(project(":compose:ui:ui-test"))
+            if (!composeWinUiJvmTargetEnabled) {
+                implementation(project(":compose:ui:ui-test"))
+            }
         }
 
         // jbVerifyForkDependencies: suppress
@@ -336,27 +366,29 @@ tasks.register("updateTranslationsIos", UpdateTranslationsTask.class) {
     ]
 }
 
-tasks.findByName("desktopTest").configure {
-    systemProperties["GOLDEN_PATH"] = project.rootDir.absolutePath + "/golden"
-}
-
-tasks.register("desktopHeadlessTest", Test) {
-    group = "verification"
-    description = "Headless desktop tests"
-    testClassesDirs = sourceSets.desktopTest.output.classesDirs
-    classpath = sourceSets.desktopTest.runtimeClasspath
-
-    useJUnit {
-        includeCategories("androidx.compose.ui.HeadlessTest")
+if (!composeWinUiJvmTargetEnabled) {
+    tasks.findByName("desktopTest").configure {
+        systemProperties["GOLDEN_PATH"] = project.rootDir.absolutePath + "/golden"
     }
-    systemProperty("java.awt.headless", "true")
-}
 
-tasks.desktopTest {
-    useJUnit {
-        excludeCategories("androidx.compose.ui.HeadlessTest")
+    tasks.register("desktopHeadlessTest", Test) {
+        group = "verification"
+        description = "Headless desktop tests"
+        testClassesDirs = sourceSets.desktopTest.output.classesDirs
+        classpath = sourceSets.desktopTest.runtimeClasspath
+
+        useJUnit {
+            includeCategories("androidx.compose.ui.HeadlessTest")
+        }
+        systemProperty("java.awt.headless", "true")
     }
-    jvmArgs("--add-opens=java.desktop/javax.swing=ALL-UNNAMED")
+
+    tasks.desktopTest {
+        useJUnit {
+            excludeCategories("androidx.compose.ui.HeadlessTest")
+        }
+        jvmArgs("--add-opens=java.desktop/javax.swing=ALL-UNNAMED")
+    }
 }
 
 // Regenerates NotoFontFallbackData.web.kt from the latest Google Fonts data.
@@ -366,4 +398,255 @@ tasks.register("generateNotoFontFallbackData", GenerateNotoFontFallbackDataTask.
     outputFile = project.file(
         "src/webMain/kotlin/androidx/compose/ui/platform/NotoFontFallbackData.web.kt"
     )
+}
+
+// KWINRT-053: applied after the Android target is declared, because AGP only allows the
+// dependency resolution that the plugin does in its afterEvaluate hook once AGP's own
+// afterEvaluate hook has run.
+if (composeWinUiGradlePluginAvailable) {
+    apply plugin: "io.github.compose-fluent.windows-toolkit"
+
+    windows {
+        packageReferences {
+            restoreNuGetPackages = providers
+                    .gradleProperty("composeWinUi.restoreNuGetPackages")
+                    .map { it.toBoolean() }
+                    .orElse(true)
+            windowsSdk(composeWinUiWindowsSdkVersion.get(), false, true)
+            nugetPackage("Microsoft.WindowsAppSDK", composeWinUiWindowsAppSdkVersion.get()) {
+                generateProjection = true
+            }
+            type("Windows.Foundation.IStringable")
+            type("Windows.Foundation.Point")
+            type("Windows.Foundation.Uri")
+            type("Windows.Foundation.Collections.CollectionChange")
+            type("Windows.Foundation.Collections.IIterable")
+            type("Windows.Foundation.Collections.IIterator")
+            type("Windows.Foundation.Collections.IKeyValuePair")
+            type("Windows.Foundation.Collections.IObservableVector")
+            type("Windows.Foundation.Collections.IVector")
+            type("Windows.Foundation.Collections.IVectorChangedEventArgs")
+            type("Windows.Foundation.Collections.IVectorView")
+            type("Windows.Foundation.Collections.VectorChangedEventHandler")
+            type("Windows.ApplicationModel.DataTransfer.Clipboard")
+            type("Windows.ApplicationModel.DataTransfer.DataPackage")
+            type("Windows.ApplicationModel.DataTransfer.DataPackageView")
+            type("Windows.ApplicationModel.DataTransfer.StandardDataFormats")
+            type("Windows.System.Display.DisplayRequest")
+            type("Windows.System.Launcher")
+            type("Windows.System.VirtualKey")
+            type("Windows.System.VirtualKeyModifiers")
+            type("Windows.UI.Text.Core.CoreTextCompositionCompletedEventArgs")
+            type("Windows.UI.Text.Core.CoreTextCompositionSegment")
+            type("Windows.UI.Text.Core.CoreTextCompositionStartedEventArgs")
+            type("Windows.UI.Text.Core.CoreTextEditContext")
+            type("Windows.UI.Text.Core.CoreTextFormatUpdatingEventArgs")
+            type("Windows.UI.Text.Core.CoreTextFormatUpdatingResult")
+            type("Windows.UI.Text.Core.CoreTextInputPaneDisplayPolicy")
+            type("Windows.UI.Text.Core.CoreTextInputScope")
+            type("Windows.UI.Text.Core.CoreTextLayoutBounds")
+            type("Windows.UI.Text.Core.CoreTextLayoutRequest")
+            type("Windows.UI.Text.Core.CoreTextLayoutRequestedEventArgs")
+            type("Windows.UI.Text.Core.CoreTextRange")
+            type("Windows.UI.Text.Core.CoreTextSelectionRequest")
+            type("Windows.UI.Text.Core.CoreTextSelectionRequestedEventArgs")
+            type("Windows.UI.Text.Core.CoreTextSelectionUpdatingEventArgs")
+            type("Windows.UI.Text.Core.CoreTextSelectionUpdatingResult")
+            type("Windows.UI.Text.Core.CoreTextServicesManager")
+            type("Windows.UI.Text.Core.CoreTextTextRequest")
+            type("Windows.UI.Text.Core.CoreTextTextRequestedEventArgs")
+            type("Windows.UI.Text.Core.CoreTextTextUpdatingEventArgs")
+            type("Windows.UI.Text.Core.CoreTextTextUpdatingResult")
+            type("Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop")
+            type("Microsoft.UI.Content.ContentIslandEnvironment")
+            type("Microsoft.UI.Input.InputSystemCursor")
+            type("Microsoft.UI.Input.InputSystemCursorShape")
+            type("Microsoft.UI.Windowing.OverlappedPresenter")
+            type("Microsoft.UI.Xaml.Application")
+            type("Microsoft.UI.Xaml.Automation.AccessibilityView")
+            type("Microsoft.UI.Xaml.CornerRadius")
+            type("Microsoft.UI.Xaml.FrameworkElement")
+            type("Microsoft.UI.Xaml.LaunchActivatedEventArgs")
+            type("Microsoft.UI.Xaml.ResourceDictionary")
+            type("Microsoft.UI.Xaml.RoutedEventHandler")
+            type("Microsoft.UI.Xaml.Setter")
+            type("Microsoft.UI.Xaml.Style")
+            type("Microsoft.UI.Xaml.Thickness")
+            type("Microsoft.UI.Xaml.Window")
+            type("Microsoft.UI.Xaml.Controls.Button")
+            type("Microsoft.UI.Xaml.Controls.Canvas")
+            type("Microsoft.UI.Xaml.Controls.ContentControl")
+            type("Microsoft.UI.Xaml.Controls.Control")
+            type("Microsoft.UI.Xaml.Controls.Flyout")
+            type("Microsoft.UI.Xaml.Controls.FlyoutPresenter")
+            type("Microsoft.UI.Xaml.Controls.LightDismissOverlayMode")
+            type("Microsoft.UI.Xaml.Controls.FontIcon")
+            type("Microsoft.UI.Xaml.Controls.MenuFlyout")
+            type("Microsoft.UI.Xaml.Controls.MenuFlyoutItem")
+            type("Microsoft.UI.Xaml.Controls.MenuFlyoutSeparator")
+            type("Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode")
+            type("Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowMode")
+            type("Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions")
+            type("Microsoft.UI.Xaml.Controls.TextBox")
+            type("Microsoft.UI.Xaml.Controls.ToggleSwitch")
+            type("Microsoft.UI.Xaml.Controls.XamlControlsResources")
+            type("Microsoft.UI.Xaml.Input.CharacterReceivedRoutedEventArgs")
+            type("Microsoft.UI.Xaml.Input.FocusManager")
+            type("Microsoft.UI.Xaml.Input.KeyboardAccelerator")
+            type("Microsoft.UI.Xaml.Interop.IBindableIterable")
+            type("Microsoft.UI.Xaml.Interop.IBindableIterator")
+            type("Microsoft.UI.Xaml.Interop.IBindableObservableVector")
+            type("Microsoft.UI.Xaml.Interop.IBindableVector")
+            type("Microsoft.UI.Xaml.Interop.IBindableVectorView")
+            type("Microsoft.UI.Xaml.Interop.INotifyCollectionChanged")
+            type("Microsoft.UI.Xaml.Interop.NotifyCollectionChangedAction")
+            type("Microsoft.UI.Xaml.Interop.NotifyCollectionChangedEventArgs")
+            type("Microsoft.UI.Xaml.Interop.NotifyCollectionChangedEventHandler")
+            type("Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop")
+            type("Microsoft.UI.Xaml.Media.SolidColorBrush")
+            type("Microsoft.UI.Xaml.Media.SystemBackdrop")
+            type("Windows.UI.ViewManagement.UISettings")
+            type("Windows.UI.Xaml.Interop.Type")
+            type("Windows.UI.Xaml.Interop.NotifyCollectionChangedAction")
+        }
+    }
+}
+
+kotlin {
+    sourceSets {
+        // The part of the Skiko implementation that the WinUI target shares with skikoMain.
+        skikoRenderingMain {
+            dependsOn(commonMain)
+            dependencies {
+                api(project(":compose:ui:ui-skiko"))
+                implementation(libs.atomicFu)
+            }
+        }
+
+        skikoMain {
+            dependsOn(skikoRenderingMain)
+        }
+    }
+
+    if (composeWinUiGradlePluginAvailable) {
+        jvm("winuiJvm")
+        // Enable a WinUI mingw target after kotlin-winrt provides its mingw runtime actuals.
+
+        sourceSets {
+            winuiMain {
+                dependsOn(skikoRenderingMain)
+                dependencies {
+                    def lifecycleVersion = project.redirectVersions.get('androidx.lifecycle')
+                    implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
+                    implementation("io.github.compose-fluent:winrt-runtime:${kotlinWinRtVersion.get()}")
+                    implementation("io.github.compose-fluent:winrt-authoring:${kotlinWinRtVersion.get()}")
+                    implementation("org.jetbrains.androidx.navigationevent:navigationevent-compose:1.1.0")
+                    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:$lifecycleVersion")
+                    implementation("androidx.lifecycle:lifecycle-viewmodel-savedstate:$lifecycleVersion")
+                }
+            }
+
+            winuiTest {
+                dependencies {
+                    implementation(libs.kotlinTest)
+                }
+            }
+
+            winuiJvmMain {
+                dependsOn(winuiMain)
+                dependencies {
+                    runtimeOnly("io.github.compose-fluent:skiko-winui-windows:${composeWinUiSkikoWinUiVersion.get()}")
+                }
+            }
+
+            winuiJvmTest {
+                dependsOn(winuiTest)
+            }
+        }
+    }
+}
+
+if (composeWinUiGradlePluginAvailable) {
+    // The projections generated by kotlin-winrt need Kotlin language version 2.3 or newer. Modules
+    // on the default language version of the fork can still read the 2.3 metadata of this one.
+    androidx {
+        kotlinTarget = androidx.build.KotlinTarget.KOTLIN_2_3
+    }
+    // With the kotlin-winrt plugin applied, KGP's source-set consistency check sees this version
+    // on some source sets and the compiler default on others, so state it on every source set.
+    kotlin.sourceSets.configureEach { sourceSet ->
+        sourceSet.languageSettings.languageVersion = "2.3"
+        sourceSet.languageSettings.apiVersion = "2.3"
+    }
+
+    configurations.configureEach { configuration ->
+        def lowerName = configuration.name.toLowerCase(Locale.ROOT)
+        if (lowerName.contains("winui")) {
+            configuration.attributes.attribute(
+                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                    25
+            )
+            configuration.resolutionStrategy.dependencySubstitution {
+                substitute(module("org.jetbrains.skiko:skiko"))
+                        .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))
+                        .because("compose-winui JVM uses skiko-winui as the WinUI replacement for the regular Skiko distribution.")
+            }
+        }
+        // KWINRT-056: kotlin-winrt does not regenerate the WinRT types that skiko-winui already
+        // projects, but it only puts project dependencies on the classpath of its projection
+        // compilation. skiko-winui is an external module, so add it explicitly.
+        if (configuration.name == "kotlinWinRTProjectionWinuiJvmCompileClasspath") {
+            configuration.dependencies.add(
+                    project.dependencies.create(
+                            "io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"
+                    )
+            )
+        }
+    }
+
+    tasks.withType(KotlinCompile).configureEach { task ->
+        if (task.name.contains("Winui")) {
+            task.compilerOptions {
+                it.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
+                it.freeCompilerArgs.add("-Xjdk-release=25")
+                it.freeCompilerArgs.add("-opt-in=kotlin.time.ExperimentalTime")
+            }
+        }
+    }
+
+    tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach { task ->
+        if (task.name.contains("Winui")) {
+            task.enabled = false
+        }
+    }
+
+    // KWINRT-054: kotlin-winrt registers a projection compilation for every Kotlin/JVM
+    // compilation of the project, including the Android one, whose classpath cannot compile the
+    // JVM projections. Only the WinUI compilation uses them.
+    tasks.withType(KotlinCompile).configureEach { task ->
+        if (task.name.startsWith("compileKotlinWinRTProjection") && !task.name.endsWith("WinuiJvm")) {
+            task.enabled = false
+        }
+    }
+
+    // KWINRT-055: the authoring scanner of the published kotlin-winrt snapshot reads CRLF
+    // sources at the offsets of their LF-normalized text, which loses the package of every
+    // authored class in a checkout with core.autocrlf=true. Scan an LF copy until the fix on
+    // kotlin-winrt's xaml-support branch is published.
+    def prepareWinUiAuthoringSources = tasks.register("prepareWinUiAuthoringSources", Sync) {
+        from(project.file("src/winuiMain/kotlin"))
+        into(layout.buildDirectory.dir("generated/compose-winui/authoring-sources"))
+        filter(
+                org.apache.tools.ant.filters.FixCrLfFilter,
+                eol: org.apache.tools.ant.filters.FixCrLfFilter.CrLf.newInstance("lf")
+        )
+    }
+
+    tasks.named("generateWinRTProjections").configure {
+        sourceRoots.setFrom(prepareWinUiAuthoringSources.map { it.destinationDir })
+    }
+
+    tasks.named("generateWinRTAuthoringCandidates").configure {
+        dependsOn(prepareWinUiAuthoringSources)
+    }
 }

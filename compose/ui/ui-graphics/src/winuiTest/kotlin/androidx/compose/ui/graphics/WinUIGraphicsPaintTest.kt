@@ -19,6 +19,7 @@ package androidx.compose.ui.graphics
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.registerSkikoComposeImplementation
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -26,7 +27,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@OptIn(InternalComposeUiApi::class)
 class WinUIGraphicsPaintTest {
+    // The Skiko implementation of ui-graphics and ui-text is registered at runtime.
+    init {
+        registerSkikoComposeImplementation()
+    }
+
     @Test
     fun dashPathEffectChangesDrawnLinePixels() {
         val image = ImageBitmap(24, 5)
@@ -157,7 +164,7 @@ class WinUIGraphicsPaintTest {
             assertTrue(pixelAt(image, 4, 2).alpha > 0)
         } finally {
             graphicsContext.releaseGraphicsLayer(layer)
-            graphicsContext.dispose()
+            graphicsContext.close()
         }
     }
 

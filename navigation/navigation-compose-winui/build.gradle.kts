@@ -33,20 +33,22 @@ kotlin {
             dependencies {
                 api(project(":navigation:navigation-runtime"))
                 api(project(":navigation:navigation-common"))
-                api("org.jetbrains.compose.animation:animation:1.10.0")
-                api("org.jetbrains.compose.runtime:runtime:1.10.0")
-                api("org.jetbrains.compose.runtime:runtime-saveable:1.10.0")
-                api("org.jetbrains.compose.ui:ui:1.10.0")
-                implementation("org.jetbrains.compose.animation:animation-core:1.10.0")
-                implementation("org.jetbrains.compose.foundation:foundation-layout:1.10.0")
+                implementation("androidx.annotation:annotation:1.8.0")
+                api("org.jetbrains.compose.animation:animation:1.11.0")
+                api("org.jetbrains.compose.runtime:runtime:1.11.0")
+                api("org.jetbrains.compose.runtime:runtime-saveable:1.11.0")
+                api("org.jetbrains.compose.ui:ui:1.11.0")
+                implementation("org.jetbrains.compose.animation:animation-core:1.11.0")
+                implementation("org.jetbrains.compose.foundation:foundation-layout:1.11.0")
                 implementation("androidx.collection:collection:1.5.0")
-                implementation(project(":lifecycle:lifecycle-common"))
-                implementation(project(":lifecycle:lifecycle-runtime-compose"))
-                implementation(project(":lifecycle:lifecycle-viewmodel-savedstate"))
-                implementation(project(":lifecycle:lifecycle-viewmodel"))
-                implementation(project(":lifecycle:lifecycle-viewmodel-compose"))
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-common:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel:2.11.0")
+                implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
                 implementation("androidx.savedstate:savedstate:1.4.0")
                 implementation("androidx.savedstate:savedstate-compose:1.4.0")
+                implementation("org.jetbrains.androidx.navigationevent:navigationevent-compose:1.1.0")
                 implementation(libs.kotlinCoroutinesCore)
                 implementation(libs.kotlinSerializationCore)
             }
@@ -55,9 +57,6 @@ kotlin {
         named("winuiJvmMain") {
             kotlin.srcDir("../navigation-compose/src/nonAndroidMain/kotlin")
             kotlin.srcDir("../navigation-compose/src/desktopMain/kotlin")
-            dependencies {
-                implementation(project(":compose:ui:ui-backhandler"))
-            }
         }
     }
 }

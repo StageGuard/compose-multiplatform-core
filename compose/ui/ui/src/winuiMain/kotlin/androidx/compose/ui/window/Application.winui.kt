@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.WinUIDispatchQueue
 import androidx.compose.ui.platform.WinUIDispatcher
 import androidx.compose.ui.platform.WinUIFrameClock
 import androidx.compose.ui.platform.WinUIScheduler
+import androidx.compose.ui.platform.registerSkikoComposeImplementation
 import microsoft.ui.dispatching.DispatcherQueue
 import microsoft.ui.xaml.DispatcherShutdownMode
 import microsoft.ui.xaml.LaunchActivatedEventArgs
@@ -97,6 +98,10 @@ private class WinUIApplicationRuntime(
     private val recomposerContext =
         WinUIDispatcher(dispatcherQueue) + frameClock + recomposerParentJob
     private val recomposer = Recomposer(recomposerContext)
+
+    // The shared manager only pumps apply notifications on a dispatcher that always dispatches.
+    private val globalSnapshotRegistration =
+        GlobalSnapshotManager.register(WinUIDispatcher(dispatcherQueue, immediate = false))
     private val root = WinUIApplicationNode()
     private val composition = Composition(
         applier = WinUIApplicationApplier(root),
@@ -108,8 +113,8 @@ private class WinUIApplicationRuntime(
     private var isDisposed = false
 
     init {
+        registerSkikoComposeImplementation()
         WinUIScheduler.register(dispatcherQueue)
-        GlobalSnapshotManager.ensureStarted(dispatcherQueue)
         recomposerJob = CoroutineScope(recomposerContext).launch {
             recomposer.runRecomposeAndApplyChanges()
         }
@@ -146,6 +151,7 @@ private class WinUIApplicationRuntime(
         recomposer.close()
         recomposerJob.cancel()
         recomposerParentJob.cancel()
+        globalSnapshotRegistration?.close()
         frameClock.cancel()
         root.removeAll()
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,18 @@
  * limitations under the License.
  */
 
-package androidx.compose.foundation.text.modifiers
+package androidx.compose.mpp.demo
 
-import androidx.compose.foundation.text.selection.SelectionRegistrar
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.unit.dp
 
-internal actual fun SelectionRegistrar.makeSelectionModifier(
-    selectableId: Long,
-    layoutCoordinatesProvider: () -> LayoutCoordinates?
-): Modifier = makeDefaultSelectionModifier(selectableId, layoutCoordinatesProvider)
+@Composable
+fun LottieAnimation() {
+    Text(
+        text = "Skottie is published separately from Skiko and has no WinUI artifact yet.",
+        modifier = Modifier.padding(16.dp),
+    )
+}

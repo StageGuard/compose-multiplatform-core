@@ -16,11 +16,13 @@
 
 package androidx.compose.ui.text
 
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.platform.registerSkikoComposeImplementation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.unit.Constraints
@@ -31,7 +33,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+@OptIn(InternalComposeUiApi::class)
 class WinUIParagraphTest {
+    // The Skiko implementation of ui-graphics and ui-text is registered at runtime.
+    init {
+        registerSkikoComposeImplementation()
+    }
+
     @Test
     fun paragraphMeasuresAndDrawsTextIntoImageBitmap() {
         val paragraph = Paragraph(

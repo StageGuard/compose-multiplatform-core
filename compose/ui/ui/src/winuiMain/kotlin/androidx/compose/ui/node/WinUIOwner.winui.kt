@@ -73,7 +73,9 @@ import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.PlatformTextInputSessionScope
 import androidx.compose.ui.platform.SoftwareKeyboardController
+import androidx.compose.ui.platform.TaskDispatchers
 import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.platform.WinUIAccessibilityBridge
 import androidx.compose.ui.platform.WinUIAccessibilityBridgeState
@@ -89,6 +91,7 @@ import androidx.compose.ui.platform.WinUITextToolbar
 import androidx.compose.ui.platform.WinUIViewConfiguration
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.platform.WindowInfoImpl
+import androidx.compose.ui.platform.createWinUIUriHandler
 import androidx.compose.ui.semantics.EmptySemanticsModifier
 import androidx.compose.ui.semantics.SemanticsOwner
 import androidx.compose.ui.spatial.RectManager
@@ -108,6 +111,13 @@ import androidx.compose.ui.viewinterop.WinUIInteropAction
 import org.jetbrains.skiko.winui.WinUIAccessibilityProvider
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+
+private object WinUITaskDispatchers : TaskDispatchers {
+    override val Default = Dispatchers.Default
+    override val IO = Dispatchers.IO
+}
 
 internal class WinUIOwner(
     override val root: LayoutNode,
@@ -195,6 +205,8 @@ internal class WinUIOwner(
     )
     private val mutableWindowInfo = WindowInfoImpl()
     override val windowInfo: WindowInfo = mutableWindowInfo
+    override val taskDispatchers: TaskDispatchers = WinUITaskDispatchers
+    override val uriHandler: UriHandler = createWinUIUriHandler()
     override val rectManager: RectManager = RectManager(layoutNodes)
     private val textInputSessionMutex = SessionMutex<WinUIPlatformTextInputSession>()
     private val pointerInputEventProcessor = PointerInputEventProcessor(root)

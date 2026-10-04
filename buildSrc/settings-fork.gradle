@@ -28,6 +28,9 @@ dependencyResolutionManagement {
     }
 }
 
+apply(from: "../buildSrc-fork/settingsScripts/winui-setup.groovy")
+winUISetup.pinKotlinVersionInVersionCatalog(settings)
+
 def includeProject(String projectPath, String projectDir) {
     include projectPath
     project(projectPath).projectDir = new File(projectDir)

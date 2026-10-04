@@ -33,7 +33,7 @@ internal object WinUIGraphicsContext : GraphicsContext {
         skiaGraphicsContext.releaseGraphicsLayer(layer)
 
     internal fun resetForTest() {
-        skiaGraphicsContext.dispose()
+        skiaGraphicsContext.close()
         skiaGraphicsContext = SkiaGraphicsContext()
     }
 }
