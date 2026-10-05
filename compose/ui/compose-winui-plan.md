@@ -1,5 +1,67 @@
 # compose-winui implementation plan
 
+## Native demo against the desktop demo 2026-10-05
+
+The MPP demo of the native WinUI target (`winuiMingw`) was compared with the
+desktop (AWT) demo and with the WinUI JVM demo, which had been aligned with the
+desktop one before (see "Desktop parity").
+
+Method: every leaf screen of the demo (105) is opened by its name in a
+1280 x 900 px client area at 150 % scale and captured with `PrintWindow`, on
+each target; the captures are compared pixel by pixel.
+
+Found and fixed:
+
+- [x] The native entry was not the demo that the other targets run: it wrapped
+  the content in a dark or light `MaterialTheme`, extended it into the title
+  bar, had the default window size and ignored the command line. It is the
+  entry of the desktop demo now (`Main.winuiMingw.kt`); the two fonts of the
+  demo are staged next to the executable, and the emoji font is preloaded.
+- [x] `Dispatchers.Main` did not exist in a native application
+  (kotlinx.coroutines has none on Windows), so `collectAsStateWithLifecycle`
+  and `repeatOnLifecycle` threw and ended the process: the WindowFocusDemo
+  screen. `WinUIMainDispatcher` is shared now and injected on the native
+  target when the dispatcher queue is registered.
+- [x] Material 3 date picker on the native target: the weekday header showed
+  the shortest WinRT abbreviation ("Su", "Mo") instead of the narrow name ("S",
+  "M"), and formatted dates carried the direction marks of the WinRT formatter
+  (U+200E), which made "October 2026" a pixel wider.
+
+Result:
+
+- [x] Native against WinUI JVM: no differing pixel on 95 of the 105 screens.
+  Nine of the others differ on every pair of runs of one target as well (random
+  colours of the lazy lists and pagers, the mesh gradient and the progress
+  indicator, which are animations, a counter that runs with time), and one is
+  the resource placeholder (`VectorPainter inside another Painter`).
+- [x] Native against desktop: the same differences as WinUI JVM against
+  desktop, which "Desktop parity" lists (text rasterization of AWT, the
+  screens that the WinUI demo replaces).
+- [x] Release executable (`linkReleaseExecutableWinuiMingw`, 15 minutes) against
+  the debug one: the same captures.
+- [x] Window: the initial size (1024 x 850 dp), maximize, restore, minimize and
+  a size change give the same client sizes and the same captures on the three
+  targets. Closing the window ends the three processes with exit code 0.
+- [x] Idle on the main screen for ten seconds: 16 ms of CPU time on desktop,
+  31 ms on WinUI JVM, 47 ms native; working set 291 MB, 384 MB and 200 MB.
+- [x] `winuiJvmTest` of `ui` after the move of the dispatcher: 360 tests pass.
+- [ ] Not verified yet: the behaviour with real pointer and key input (drag
+  and drop, bottom sheet, drawer, menu keys, wheel, text editing and the
+  clipboard, context menu, text selection, cursors, focus, date picker,
+  pagers). The workstation was locked during this work, and a locked
+  workstation takes no injected input.
+
+Differences that stay:
+
+- An exception that nothing catches (a route that does not exist, for example)
+  ends a native process; the JVM targets print it and go on.
+- The screen `VectorPainter inside another Painter` is a placeholder in a build
+  with the MinGW flag (no Compose resources artifact for mingwX64).
+- The demo entry of the JVM target has the validation hooks of the sample tasks
+  (`compose.winui.mpp.sample.*`); the native entry has none.
+- No test covers the three fixes: the native target has no test compilation
+  (`winuiMingwTest` is not wired, `:compose:ui:ui-test` has no MinGW target).
+
 ## WinUI MinGW target 2026-10-05
 
 The fork build has the native WinUI target of `winui_dev` now: with
@@ -82,10 +144,9 @@ Verification:
   `:compose:ui:ui-test` has no MinGW target); `navigation3` and the WinUI
   samples of `ui`, which have no native variant; the Darwin and web targets,
   which cannot be built on this machine.
-- [ ] Known difference: the native entry (`Main.winuiMingw.kt`, from
-  `winui_dev`) wraps the demo in a dark or light `MaterialTheme` and extends
-  the content into the title bar; the JVM entry does neither, like the desktop
-  demo.
+- [x] The native entry (`Main.winuiMingw.kt`, from `winui_dev`) wrapped the
+  demo in a dark or light `MaterialTheme` and extended the content into the
+  title bar; it is the entry of the desktop demo now (see above).
 
 ## kotlin-winrt fixes after the merge 2026-10-05
 
