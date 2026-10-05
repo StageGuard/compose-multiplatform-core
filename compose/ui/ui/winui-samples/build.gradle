@@ -107,6 +107,19 @@ def registerWinUISampleTask = { String taskName, String descriptionText, String 
         // The sample is observed through its log, so every run has to start the application.
         task.outputs.upToDateWhen { false }
         def jvmOptions = [
+                // Bounds the footprint of the sample host (KWINRT-064), with the bounds of
+                // :compose:mpp:demo-winui, which are measured there.
+                "-Xms8m",
+                "-Xmx64m",
+                "-Xss128k",
+                "-XX:+UseSerialGC",
+                "-XX:TieredStopAtLevel=1",
+                "-XX:CICompilerCount=1",
+                "-XX:ReservedCodeCacheSize=32m",
+                "-XX:MaxMetaspaceSize=96m",
+                "-XX:CompressedClassSpaceSize=64m",
+                "-XX:-UsePerfData",
+                "-Dfile.encoding=UTF-8",
                 "-Dcompose.winui.sample.autoExit=true",
         ]
         if (mode != null) {

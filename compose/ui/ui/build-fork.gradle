@@ -423,6 +423,7 @@ if (composeWinUiGradlePluginAvailable) {
             }
             type("Windows.Foundation.IStringable")
             type("Windows.Foundation.Point")
+            type("Windows.Foundation.Rect")
             type("Windows.Foundation.Uri")
             type("Windows.Foundation.Collections.CollectionChange")
             type("Windows.Foundation.Collections.IIterable")
@@ -435,8 +436,10 @@ if (composeWinUiGradlePluginAvailable) {
             type("Windows.Foundation.Collections.VectorChangedEventHandler")
             type("Windows.ApplicationModel.DataTransfer.Clipboard")
             type("Windows.ApplicationModel.DataTransfer.DataPackage")
+            type("Windows.ApplicationModel.DataTransfer.DataPackageOperation")
             type("Windows.ApplicationModel.DataTransfer.DataPackageView")
             type("Windows.ApplicationModel.DataTransfer.StandardDataFormats")
+            type("Windows.Storage.Streams.DataWriter")
             type("Windows.System.Display.DisplayRequest")
             type("Windows.System.Launcher")
             type("Windows.System.VirtualKey")
@@ -464,6 +467,8 @@ if (composeWinUiGradlePluginAvailable) {
             type("Windows.UI.Text.Core.CoreTextTextUpdatingResult")
             type("Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop")
             type("Microsoft.UI.Content.ContentIslandEnvironment")
+            type("Microsoft.UI.Dispatching.DispatcherQueueController")
+            type("Microsoft.UI.Input.InputKeyboardSource")
             type("Microsoft.UI.Input.InputSystemCursor")
             type("Microsoft.UI.Input.InputSystemCursorShape")
             type("Microsoft.UI.Windowing.OverlappedPresenter")
@@ -475,6 +480,8 @@ if (composeWinUiGradlePluginAvailable) {
             type("Microsoft.UI.Xaml.ResourceDictionary")
             type("Microsoft.UI.Xaml.RoutedEventHandler")
             type("Microsoft.UI.Xaml.Setter")
+            type("Microsoft.UI.Xaml.SizeChangedEventArgs")
+            type("Microsoft.UI.Xaml.SizeChangedEventHandler")
             type("Microsoft.UI.Xaml.Style")
             type("Microsoft.UI.Xaml.Thickness")
             type("Microsoft.UI.Xaml.Window")
@@ -510,7 +517,10 @@ if (composeWinUiGradlePluginAvailable) {
             type("Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop")
             type("Microsoft.UI.Xaml.Media.SolidColorBrush")
             type("Microsoft.UI.Xaml.Media.SystemBackdrop")
+            type("Windows.UI.ViewManagement.InputPane")
+            type("Windows.UI.ViewManagement.InputPaneVisibilityEventArgs")
             type("Windows.UI.ViewManagement.UISettings")
+            type("Windows.UI.Core.CoreVirtualKeyStates")
             type("Windows.UI.Xaml.Interop.Type")
             type("Windows.UI.Xaml.Interop.NotifyCollectionChangedAction")
         }
@@ -519,8 +529,10 @@ if (composeWinUiGradlePluginAvailable) {
 
 kotlin {
     sourceSets {
-        // The part of the Skiko implementation that the WinUI target shares with skikoMain.
-        skikoRenderingMain {
+        // The parts of the Skiko implementation that the WinUI targets share with skikoMain:
+        // skikoHostMain hosts a composition on a Skia surface (frame recomposer, dispatchers),
+        // skikoRenderingMain draws the node tree (owned layers, snapshot manager).
+        skikoHostMain {
             dependsOn(commonMain)
             dependencies {
                 api(project(":compose:ui:ui-skiko"))
@@ -528,8 +540,31 @@ kotlin {
             }
         }
 
+        skikoRenderingMain {
+            dependsOn(skikoHostMain)
+        }
+
         skikoMain {
             dependsOn(skikoRenderingMain)
+        }
+
+        // The Skiko actuals of the non-JVM and native targets. They are kept apart from
+        // nonJvmMain and nativeMain for a WinUI native target, which shares those two but not
+        // skikoMain; the fork build has no such target yet.
+        skikoNonJvmMain {
+            dependsOn(skikoMain)
+        }
+
+        skikoNativeMain {
+            dependsOn(skikoMain)
+        }
+
+        nonJvmMain {
+            dependsOn(skikoNonJvmMain)
+        }
+
+        nativeMain {
+            dependsOn(skikoNativeMain)
         }
     }
 
@@ -568,6 +603,30 @@ kotlin {
                 dependsOn(winuiTest)
             }
         }
+    }
+}
+
+if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+    // The tests that need Windows App SDK objects, such as a dispatcher queue, start the
+    // self-contained runtime that the samples stage (see WinUITestRuntime).
+    def winUiTestRuntimeAssetsDirectory = project(":compose:ui:ui:winui-samples").layout.buildDirectory
+            .dir("kotlin-winrt/application-layout/jvm_main/runtime-assets")
+    tasks.named("winuiJvmTest", KotlinJvmTest).configure {
+        dependsOn(":compose:ui:ui:winui-samples:stageWindowsPackageRuntimeAssets")
+        // A process hosts one Windows App SDK runtime, on one thread.
+        maxParallelForks = 1
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+        jvmArgumentProviders.add(new CommandLineArgumentProvider() {
+            @Input
+            String getRuntimeAssetsRoot() {
+                return winUiTestRuntimeAssetsDirectory.get().asFile.absolutePath
+            }
+
+            @Override
+            Iterable<String> asArguments() {
+                return ["-Dcompose.winui.test.runtimeAssetsRoot=${runtimeAssetsRoot}"]
+            }
+        })
     }
 }
 

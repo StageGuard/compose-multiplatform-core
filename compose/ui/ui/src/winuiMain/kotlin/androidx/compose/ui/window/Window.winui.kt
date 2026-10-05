@@ -324,21 +324,22 @@ private class WinUIWindowNode(
                 registerAppWindowChangedHandler()
                 registerAppWindowClosingHandler()
             }
+            updateWindowInfo()
+            view.setContentWhenWindowReady {
+                this@WinUIWindowNode.field()
+            }
             if (!hasActivated) {
                 window.activate()
                 hasActivated = true
                 updateWindowFocus(true)
             }
             view.setWindowFocused(isWindowFocused)
-            updateWindowInfo()
             if (isFirstActivation) {
                 // The window has its real position and size now, which an unspecified position
                 // or size of the state takes, as on desktop.
+                updateWindowInfo()
                 applyMinimized(state.isMinimized)
                 updateStateFromWindow()
-            }
-            view.setContent {
-                this@WinUIWindowNode.field()
             }
         }
 
@@ -406,29 +407,28 @@ private class WinUIWindowNode(
             "window info clientSize=${clientSize.width}x${clientSize.height} " +
                 "extendsTitleBar=${window.extendsContentIntoTitleBar}"
         }
-        // A minimized window has an empty client area; keep the last size, as desktop does.
-        if (clientSize.width > 0 && clientSize.height > 0) {
-            view.setWindowContainerSize(
-                IntSize(
-                    width = clientSize.width,
-                    height = clientSize.height,
-                )
-            )
-        }
+        // The size of the client area until the XAML root reports its own. A minimized window
+        // has an empty client area; the view keeps its last size then, as desktop does.
+        view.setWindowBootstrapSize(
+            IntSize(
+                width = clientSize.width,
+                height = clientSize.height,
+            ),
+        )
         view.setWindowMinimized(isWindowMinimized(window))
         view.invalidatePositionOnScreen()
         val titleBar = appWindow.titleBar
         if (window.extendsContentIntoTitleBar && titleBar != null) {
             view.setWindowTitleBarInsets(
                 height = titleBar.height,
-                leftPadding = titleBar.leftInset,
-                rightPadding = titleBar.rightInset,
+                leftInset = titleBar.leftInset,
+                rightInset = titleBar.rightInset,
             )
         } else {
             view.setWindowTitleBarInsets(
                 height = 0,
-                leftPadding = 0,
-                rightPadding = 0,
+                leftInset = 0,
+                rightInset = 0,
             )
         }
     }

@@ -26,12 +26,17 @@ internal class WinUIPointerIconService(
 
     override fun setIcon(value: PointerIcon?) {
         icon = value
-        applyIcon(getIcon())
+        applyResolvedIcon()
     }
 
     override fun getStylusHoverIcon(): PointerIcon? = stylusHoverIcon
 
     override fun setStylusHoverIcon(value: PointerIcon?) {
         stylusHoverIcon = value
+        applyResolvedIcon()
+    }
+
+    private fun applyResolvedIcon() {
+        applyIcon(stylusHoverIcon ?: getIcon())
     }
 }

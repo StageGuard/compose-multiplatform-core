@@ -17,48 +17,60 @@
 package androidx.compose.ui.window
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionContext
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.ComposeFeatureFlags
-import androidx.compose.ui.LayerType
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCompositionContext
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ComposeFeatureFlags
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.LayerType
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalWinUIRoot
 import androidx.compose.ui.platform.LocalWinUIWindow
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WinUIComposeView
+import androidx.compose.ui.platform.toWinUIXamlPoint
+import androidx.compose.ui.platform.toWinUIXamlSize
+import androidx.compose.ui.platform.winUIPositionToComposeOffset
 import androidx.compose.ui.semantics.popup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.round
-import windows.foundation.EventRegistrationToken
 import io.github.composefluent.winrt.runtime.asWinRT
-import microsoft.ui.xaml.FrameworkElement
+import microsoft.ui.xaml.Application as XamlApplication
 import microsoft.ui.xaml.CornerRadius
+import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.RoutedEventHandler
 import microsoft.ui.xaml.Setter
 import microsoft.ui.xaml.Style
 import microsoft.ui.xaml.Thickness
 import microsoft.ui.xaml.UIElement
+import microsoft.ui.xaml.Window as XamlWindow
 import microsoft.ui.xaml.controls.Control
 import microsoft.ui.xaml.controls.Flyout
 import microsoft.ui.xaml.controls.FlyoutPresenter
@@ -66,11 +78,13 @@ import microsoft.ui.xaml.controls.LightDismissOverlayMode
 import microsoft.ui.xaml.controls.primitives.FlyoutPlacementMode
 import microsoft.ui.xaml.controls.primitives.FlyoutShowMode
 import microsoft.ui.xaml.controls.primitives.FlyoutShowOptions
+import microsoft.ui.xaml.input.KeyEventHandler
+import microsoft.ui.xaml.input.PointerEventHandler
 import microsoft.ui.xaml.media.SolidColorBrush
-import microsoft.ui.xaml.Application as XamlApplication
+import windows.foundation.EventRegistrationToken
 import windows.foundation.Point
+import windows.system.VirtualKey
 import windows.ui.Color
-import microsoft.ui.xaml.Window as XamlWindow
 
 /**
  * Properties used to customize the behavior of a [Popup], the same as on the Skiko targets.
@@ -278,7 +292,10 @@ fun Popup(
     if (properties.layerType == LayerType.OnWindow) {
         WinUIWindowPopupLayout(
             popupPositionProvider = popupPositionProvider,
+            onDismissRequest = onDismissRequest,
             properties = properties,
+            onPreviewKeyEvent = onPreviewKeyEvent,
+            onKeyEvent = onKeyEvent,
             content = content,
         )
     } else {
@@ -486,7 +503,10 @@ private fun WinUIInlinePopupLayout(
 @Composable
 private fun WinUIWindowPopupLayout(
     popupPositionProvider: PopupPositionProvider,
+    onDismissRequest: (() -> Unit)?,
     properties: PopupProperties,
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
     content: @Composable () -> Unit,
 ) {
     val parentBoundsInWindow = remember { mutableStateOf(IntRect.Zero) }
@@ -506,8 +526,12 @@ private fun WinUIWindowPopupLayout(
     val parentWindow = LocalWinUIWindow.current
     val parentRoot = LocalWinUIRoot.current
     val containerSize = LocalWindowInfo.current.containerSize
+    val parentIsActive = LocalWindowInfo.current.isWindowFocused
     val layoutDirection = LocalLayoutDirection.current
+    val rasterizationScale = LocalDensity.current.density
     val currentContent by rememberUpdatedState(content)
+    val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    val parentCompositionContext = rememberCompositionContext()
     val popupHost = rememberNativePopupHost(parentWindow, parentRoot)
 
     SideEffect {
@@ -516,12 +540,17 @@ private fun WinUIWindowPopupLayout(
             properties = properties,
             parentBoundsInWindow = parentBoundsInWindow.value,
             windowSize = containerSize,
+            parentIsActive = parentIsActive,
             layoutDirection = layoutDirection,
+            rasterizationScale = rasterizationScale,
+            onDismissRequest = currentOnDismissRequest,
+            onPreviewKeyEvent = onPreviewKeyEvent,
+            onKeyEvent = onKeyEvent,
             content = currentContent,
         )
     }
     DisposableEffect(popupHost) {
-        popupHost.setContent {
+        popupHost.setContent(parentCompositionContext) {
             popupHost.Content()
         }
         popupHost.open()
@@ -544,7 +573,13 @@ private class WinUIFlyoutPopupHost(
     parentWindow: XamlWindow?,
     private val parentRoot: FrameworkElement?,
 ) {
-    private val composeView = WinUIComposeView()
+    private val composeView = parentWindow?.let { window ->
+        WinUIComposeView(
+            window = window,
+            onSensitiveContentChanged = {},
+            observeWindowActivation = false,
+        )
+    } ?: WinUIComposeView()
     private val flyout = TransparentComposeFlyout(composeView.root)
     private val transparentBackdrop = parentWindow?.let {
         WinUITransparentBackdrop(
@@ -554,6 +589,7 @@ private class WinUIFlyoutPopupHost(
     }
     private var shouldBeOpen = false
     private var isOpen = false
+    private var parentIsActive = false
     private var contentSize = IntSize.Zero
     private var popupPositionProvider: PopupPositionProvider? = null
     private var properties: PopupProperties by mutableStateOf(PopupProperties())
@@ -562,8 +598,19 @@ private class WinUIFlyoutPopupHost(
     private var layoutDirection: androidx.compose.ui.unit.LayoutDirection by mutableStateOf(
         androidx.compose.ui.unit.LayoutDirection.Ltr
     )
+    private var rasterizationScale: Float = 1f
     private var currentContent: @Composable () -> Unit by mutableStateOf({})
+    private var onDismissRequest: (() -> Unit)? = null
+    private var onPreviewKeyEvent: ((KeyEvent) -> Boolean)? by mutableStateOf(null)
+    private var onKeyEvent: ((KeyEvent) -> Boolean)? by mutableStateOf(null)
+    private val dismissalState = WinUIPopupDismissState(
+        dismissOnBackPress = true,
+        dismissOnClickOutside = true,
+        onDismissRequest = { onDismissRequest?.invoke() },
+    )
+    private var closingToken: EventRegistrationToken? = null
     private var closedToken: EventRegistrationToken? = null
+    private var keyDownToken: EventRegistrationToken? = null
     private var parentRootLoadedHandler: RoutedEventHandler? = null
     private var parentRootLoadedToken: EventRegistrationToken? = null
 
@@ -577,14 +624,26 @@ private class WinUIFlyoutPopupHost(
         flyout.showMode = FlyoutShowMode.Transient
         flyout.systemBackdrop = transparentBackdrop
         flyout.flyoutPresenterStyle = createTransparentFlyoutPresenterStyle()
+        closingToken = flyout.closing.add { _, args ->
+            args.cancel = dismissalState.onNativeClosing(shouldBeOpen)
+        }
         closedToken = flyout.closed.add { _, _ ->
             isOpen = false
+            updateHostActivation()
         }
+        keyDownToken = composeView.root.previewKeyDown.add(KeyEventHandler { _, args ->
+            if (!args.handled && properties.focusable && isOpen && args.key.isPopupBackKey()) {
+                args.handled = dismissalState.onFlyoutBackKey()
+            }
+        })
         registerParentRootLoadedHandler()
     }
 
-    fun setContent(content: @Composable () -> Unit) {
-        composeView.setContent(content)
+    fun setContent(
+        parentCompositionContext: CompositionContext,
+        content: @Composable () -> Unit,
+    ) {
+        composeView.setContent(parentCompositionContext, content)
     }
 
     @Composable
@@ -595,14 +654,20 @@ private class WinUIFlyoutPopupHost(
             content = content,
             modifier = Modifier
                 .onPlaced { coordinates -> updateContentSize(coordinates.size) }
-                .semantics { popup() },
+                .semantics { popup() }
+                .popupKeyEventHandlers(onPreviewKeyEvent, onKeyEvent),
         ) { measurables, constraints ->
             val windowSize = parentWindowSize.takeIf { it != IntSize.Zero }
                 ?: constraints.finiteMaxSizeOr(IntSize.Zero)
+            val availableWidth = constraints.finiteMaxWidthOr(windowSize.width)
             val looseConstraints = constraints.copy(
                 minWidth = 0,
                 minHeight = 0,
-                maxWidth = constraints.finiteMaxWidthOr(windowSize.width),
+                maxWidth = winUIPopupMaxWidth(
+                    windowWidth = windowSize.width,
+                    availableWidth = availableWidth,
+                    usePlatformDefaultWidth = properties.usePlatformDefaultWidth,
+                ),
                 maxHeight = constraints.finiteMaxHeightOr(windowSize.height),
             )
             val placeables = measurables.map { measurable ->
@@ -628,6 +693,11 @@ private class WinUIFlyoutPopupHost(
     fun close() {
         shouldBeOpen = false
         isOpen = false
+        updateHostActivation()
+        closingToken?.let { token ->
+            runCatching { flyout.closing.remove(token) }
+        }
+        closingToken = null
         closedToken?.let { token ->
             runCatching { flyout.closed.remove(token) }
         }
@@ -637,6 +707,10 @@ private class WinUIFlyoutPopupHost(
         }
         parentRootLoadedToken = null
         parentRootLoadedHandler = null
+        keyDownToken?.let { token ->
+            runCatching { composeView.root.previewKeyDown.remove(token) }
+        }
+        keyDownToken = null
         runCatching { flyout.hide() }
         flyout.popupContent = null
         flyout.systemBackdrop = null
@@ -648,20 +722,42 @@ private class WinUIFlyoutPopupHost(
         properties: PopupProperties,
         parentBoundsInWindow: IntRect,
         windowSize: IntSize,
+        parentIsActive: Boolean,
         layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        rasterizationScale: Float,
+        onDismissRequest: (() -> Unit)?,
+        onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+        onKeyEvent: ((KeyEvent) -> Boolean)?,
         content: @Composable () -> Unit,
     ) {
         this.popupPositionProvider = popupPositionProvider
         this.properties = properties
         this.parentBoundsInWindow = parentBoundsInWindow
         this.windowSize = windowSize
+        this.parentIsActive = parentIsActive
         this.layoutDirection = layoutDirection
+        this.rasterizationScale = rasterizationScale
+        this.onDismissRequest = onDismissRequest
+        this.onPreviewKeyEvent = onPreviewKeyEvent
+        this.onKeyEvent = onKeyEvent
         this.currentContent = content
         flyout.allowFocusOnInteraction = properties.focusable
+        flyout.lightDismissOverlayMode = if (properties.dismissOnClickOutside) {
+            LightDismissOverlayMode.On
+        } else {
+            LightDismissOverlayMode.Off
+        }
+        dismissalState.update(
+            dismissOnBackPress = properties.dismissOnBackPress,
+            dismissOnClickOutside = properties.dismissOnClickOutside,
+            onDismissRequest = onDismissRequest,
+        )
+        updateHostActivation()
         if (windowSize != IntSize.Zero) {
             composeView.setWindowContainerSize(windowSize)
-            composeView.rootFrameworkElement.width = windowSize.width.toDouble()
-            composeView.rootFrameworkElement.height = windowSize.height.toDouble()
+            val xamlSize = windowSize.toWinUIXamlSize(rasterizationScale)
+            composeView.rootFrameworkElement.width = xamlSize.width
+            composeView.rootFrameworkElement.height = xamlSize.height
         }
         updateFlyout()
     }
@@ -712,13 +808,17 @@ private class WinUIFlyoutPopupHost(
         } else {
             effectiveWindowSize
         }
-        composeView.rootFrameworkElement.width = hostSize.width.coerceAtLeast(1).toDouble()
-        composeView.rootFrameworkElement.height = hostSize.height.coerceAtLeast(1).toDouble()
+        val xamlHostSize = IntSize(
+            width = hostSize.width.coerceAtLeast(1),
+            height = hostSize.height.coerceAtLeast(1),
+        ).toWinUIXamlSize(rasterizationScale)
+        composeView.rootFrameworkElement.width = xamlHostSize.width
+        composeView.rootFrameworkElement.height = xamlHostSize.height
         if (shouldBeOpen && !isOpen) {
             isOpen = true
             flyout.xamlRoot = rootXamlRoot
             val showOptions = FlyoutShowOptions().also { options ->
-                options.position = Point(popupPosition.x.toFloat(), popupPosition.y.toFloat())
+                options.position = popupPosition.toWinUIXamlPoint(rasterizationScale)
                 options.placement = FlyoutPlacementMode.BottomEdgeAlignedLeft
                 options.showMode = FlyoutShowMode.Transient
             }
@@ -727,9 +827,85 @@ private class WinUIFlyoutPopupHost(
             }.onFailure {
                 isOpen = false
             }
+            updateHostActivation()
         }
     }
+
+    private fun updateHostActivation() {
+        composeView.setHostActive(parentIsActive && isOpen)
+    }
 }
+
+internal class WinUIPopupDismissState(
+    dismissOnBackPress: Boolean,
+    dismissOnClickOutside: Boolean,
+    onDismissRequest: (() -> Unit)?,
+) {
+    private var dismissOnBackPress = dismissOnBackPress
+    private var dismissOnClickOutside = dismissOnClickOutside
+    private var onDismissRequest = onDismissRequest
+
+    fun update(
+        dismissOnBackPress: Boolean = this.dismissOnBackPress,
+        dismissOnClickOutside: Boolean = this.dismissOnClickOutside,
+        onDismissRequest: (() -> Unit)? = this.onDismissRequest,
+    ) {
+        this.dismissOnBackPress = dismissOnBackPress
+        this.dismissOnClickOutside = dismissOnClickOutside
+        this.onDismissRequest = onDismissRequest
+    }
+
+    fun onBackPress(): Boolean {
+        if (!dismissOnBackPress) return false
+        return dispatchDismiss()
+    }
+
+    fun onOutsidePointer(position: Offset, popupBoundsInRoot: IntRect): Boolean {
+        if (!dismissOnClickOutside || popupBoundsInRoot.isEmpty) return false
+        val inside = position.x >= popupBoundsInRoot.left &&
+            position.x < popupBoundsInRoot.right &&
+            position.y >= popupBoundsInRoot.top &&
+            position.y < popupBoundsInRoot.bottom
+        if (inside) return false
+        return dispatchDismiss()
+    }
+
+    fun onOutside(): Boolean {
+        if (!dismissOnClickOutside) return false
+        return dispatchDismiss()
+    }
+
+    fun onFlyoutBackKey(): Boolean {
+        onBackPress()
+        return true
+    }
+
+    fun onNativeClosing(shouldBeOpen: Boolean): Boolean {
+        if (!shouldBeOpen) return false
+        onOutside()
+        return true
+    }
+
+    private fun dispatchDismiss(): Boolean {
+        val callback = onDismissRequest ?: return false
+        callback()
+        return true
+    }
+}
+
+internal fun winUIPopupMaxWidth(
+    windowWidth: Int,
+    availableWidth: Int,
+    usePlatformDefaultWidth: Boolean,
+): Int =
+    winUIDialogMaxWidth(
+        windowWidth = windowWidth,
+        availableWidth = availableWidth,
+        usePlatformDefaultWidth = usePlatformDefaultWidth,
+    )
+
+private fun VirtualKey.isPopupBackKey(): Boolean =
+    this == VirtualKey.Escape || this == VirtualKey.GoBack || this == VirtualKey.NavigationCancel
 
 internal class TransparentComposeFlyout(
     popupContent: microsoft.ui.xaml.UIElement,
@@ -768,6 +944,16 @@ private fun createTransparentFlyoutPresenterStyle(): Style =
         style.setters.add(Setter(FrameworkElement.minHeightProperty, 0.0))
         style.setters.add(Setter(UIElement.useSystemFocusVisualsProperty, false))
     }
+
+private fun Modifier.popupKeyEventHandlers(
+    onPreviewKeyEvent: ((KeyEvent) -> Boolean)?,
+    onKeyEvent: ((KeyEvent) -> Boolean)?,
+): Modifier {
+    var result = this
+    if (onPreviewKeyEvent != null) result = result.onPreviewKeyEvent(onPreviewKeyEvent)
+    if (onKeyEvent != null) result = result.onKeyEvent(onKeyEvent)
+    return result
+}
 
 private fun Constraints.finiteMaxSizeOr(fallback: IntSize): IntSize =
     IntSize(

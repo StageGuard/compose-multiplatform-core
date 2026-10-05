@@ -46,4 +46,12 @@ internal object WinUIScheduler {
     fun dispatch(block: () -> Unit): Boolean {
         return dispatchQueue?.dispatch(block) == true
     }
+
+    fun postDelayed(delayMillis: Long, block: () -> Unit): WinUIDelayedTask =
+        requireDispatchQueue().postDelayed(delayMillis, block)
+
+    private fun requireDispatchQueue(): WinUIDispatchQueue =
+        dispatchQueue ?: WinUIDispatchQueue(DispatcherQueue.getForCurrentThread()).also {
+            dispatchQueue = it
+        }
 }

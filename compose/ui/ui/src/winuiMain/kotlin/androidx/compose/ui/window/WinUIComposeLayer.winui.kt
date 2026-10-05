@@ -44,6 +44,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.node.LayoutNode
+import androidx.compose.ui.node.Owner
 import androidx.compose.ui.node.UiApplier
 import androidx.compose.ui.unit.IntRect
 
@@ -81,6 +82,25 @@ internal class WinUIComposeLayerHost(
         // Layers stay after the nodes of the content, which the content composition inserts by
         // index from the start.
         root.insertAt(root.foldedChildren.size, layer.node)
+        remeasureRootAfterItsLayout()
+    }
+
+    // A popup is often composed while its parent is measured, in a Scaffold or another
+    // SubcomposeLayout. When that is the pass that measures the root, the root does not measure
+    // a child that is added meanwhile, and the request of the insertion is dropped: the layer
+    // would stay unmeasured, and invisible, until the window is resized. Ask again after the pass.
+    private fun remeasureRootAfterItsLayout() {
+        val owner = root.owner ?: return
+        if (root.layoutState == LayoutNode.LayoutState.Idle) return
+        owner.registerOnLayoutCompletedListener(
+            object : Owner.OnLayoutCompletedListener {
+                override fun onLayoutComplete() {
+                    if (root.isAttached) {
+                        root.requestRemeasure(forceRequest = true)
+                    }
+                }
+            }
+        )
     }
 
     internal fun detach(layer: WinUIComposeLayer) {

@@ -17,7 +17,7 @@
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.input.pointer.HistoricalChange
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -26,6 +26,7 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.areAnyPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.node.WinUIOwner
+import androidx.compose.ui.unit.Density
 import io.github.composefluent.winrt.runtime.WinRTEvent
 import microsoft.ui.input.PointerDeviceType
 import microsoft.ui.input.PointerPoint
@@ -39,33 +40,53 @@ import windows.foundation.EventRegistrationToken
 internal class WinUIPointerInputAdapter(
     private val root: UIElement,
     private val owner: WinUIOwner,
+    private val keyboardModifierState: WinUIKeyboardModifierState = WinUIKeyboardModifierState(),
+    private val onSourcePointerPointChanged: (PointerPoint?) -> WinUIOwnedResourceUpdate = {
+        WinUIOwnedResourceUpdate(ownsIncoming = false)
+    },
     // Called around each event, so that the host can lay out before hit testing and run the work
     // that the event handlers scheduled, as the Skiko scenes do.
     private val beforeEvent: (WinUIPointerEvent) -> Unit = {},
     private val afterEvent: () -> Unit = {},
 ) {
     private var isDisposed = false
+    private var cancellationSent = false
     private val pointerEventProcessor = WinUIPointerEventProcessor()
-    private val capturedPointers = mutableMapOf<Long, Pointer>()
-    private val registrations = listOf(
-        register(PointerEventType.Press, root.pointerPressed),
-        register(PointerEventType.Move, root.pointerMoved),
-        register(PointerEventType.Release, root.pointerReleased),
-        register(PointerEventType.Enter, root.pointerEntered),
-        register(PointerEventType.Exit, root.pointerExited),
-        register(PointerEventType.Scroll, root.pointerWheelChanged),
-        registerCancel(root.pointerCanceled),
-        registerCaptureLost(root.pointerCaptureLost),
-    )
+    private val pointerStateTracker = WinUIPointerStateTracker()
+    private val pointerCaptures =
+        WinUIPointerCaptureTracker<Pointer> { first, second ->
+            first.nativeObject.sameIdentity(second.nativeObject)
+        }
+    private val registrations =
+        listOf(
+            register(PointerEventType.Press, root.pointerPressed),
+            register(PointerEventType.Move, root.pointerMoved),
+            register(PointerEventType.Release, root.pointerReleased),
+            register(PointerEventType.Enter, root.pointerEntered),
+            register(PointerEventType.Exit, root.pointerExited),
+            register(PointerEventType.Scroll, root.pointerWheelChanged),
+            registerCancel(root.pointerCanceled),
+            registerCaptureLost(root.pointerCaptureLost),
+        )
 
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
-        releasePointerCaptures()
         registrations.forEach { registration ->
             runCatching { registration.event.remove(registration.token) }
         }
-        owner.cancelPointerInput()
+        cancelPointerInput()
+    }
+
+    internal fun cancelPointerInput() {
+        val sourcePointUpdate = onSourcePointerPointChanged(null)
+        releasePointerCaptures()
+        val hadTrackedPointers = pointerStateTracker.clear()
+        if (!cancellationSent || hadTrackedPointers) {
+            owner.cancelPointerInput()
+            cancellationSent = true
+        }
+        sourcePointUpdate.failure?.let { throw it }
     }
 
     private fun register(
@@ -73,77 +94,125 @@ internal class WinUIPointerInputAdapter(
         event: WinRTEvent<PointerEventHandler>,
     ): WinUIPointerEventRegistration {
         val handler: PointerEventHandler = { sender, args ->
-            if (!isDisposed) {
-                val pointerEvent = createPointerEvent(eventType, args)
-                updatePointerCapture(pointerEvent, args)
-                debugPointerInput {
-                    "native event=$eventType sender=${sender?.debugClassName()} " +
-                        "handledBefore=${args.handled} ${pointerEvent.debugString()}"
-                }
-                beforeEvent(pointerEvent)
-                val handled = pointerEventProcessor.process(
-                    event = pointerEvent,
-                    sendPointerEvent = { eventType, position, uptimeMillis, pointerId, down, type,
-                            buttons, keyboardModifiers, button, scrollDelta, isInBounds,
-                            nativeEvent ->
-                        owner.sendPointerEvent(
-                            eventType = eventType,
-                            position = position,
-                            uptimeMillis = uptimeMillis,
-                            pointerId = pointerId,
-                            down = down,
-                            type = type,
-                            buttons = buttons,
-                            keyboardModifiers = keyboardModifiers,
-                            button = button,
-                            scrollDelta = scrollDelta,
-                            isInBounds = isInBounds,
-                            nativeEvent = nativeEvent,
-                            pressure = pointerEvent.pressure,
-                        )
-                    },
-                ).also { handled ->
-                    debugPointerInput {
-                        "compose event=$eventType id=${pointerEvent.pointerId} " +
-                            "pos=${pointerEvent.position} down=${pointerEvent.down} " +
-                            "type=${pointerEvent.type} buttons=${pointerEvent.buttons} " +
-                            "button=${pointerEvent.button} scroll=${pointerEvent.scrollDelta} " +
-                            "inBounds=${pointerEvent.isInBounds} handled=$handled"
+            // KWINRT-064: callback projections are transients unless ownership is transferred.
+            WinUIOwnedResource(args) { it.nativeObject.close() }
+                .use {
+                    if (!isDisposed) {
+                        cancellationSent = false
+                        val point = args.getCurrentPoint(root)
+                        WinUIOwnedResource(point) { it.nativeObject.close() }
+                            .use { pointOwner ->
+                                val pointerEvent =
+                                    createPointerEvent(eventType, args, pointOwner.value)
+                                updatePointerCapture(pointerEvent, args)
+                                val activePointers =
+                                    pointerStateTracker.update(
+                                        eventType = eventType,
+                                        changedPointer = pointerEvent.toPointerSample(),
+                                    )
+                                debugPointerInput {
+                                    "native event=$eventType sender=${sender?.debugClassName()} " +
+                                        "handledBefore=${args.handled} ${pointerEvent.debugString()}"
+                                }
+                                beforeEvent(pointerEvent)
+                                val handled =
+                                    pointerEventProcessor
+                                        .process(
+                                            event = pointerEvent,
+                                            onBeforeDispatch = { event ->
+                                                val update = updateDragSourcePointer(event)
+                                                if (update.ownsIncoming)
+                                                    pointOwner.releaseOwnership()
+                                                update.failure?.let { throw it }
+                                            },
+                                            sendPointerEvent = {
+                                                eventType,
+                                                position,
+                                                uptimeMillis,
+                                                pointerId,
+                                                down,
+                                                type,
+                                                buttons,
+                                                keyboardModifiers,
+                                                button,
+                                                scrollDelta,
+                                                isInBounds,
+                                                nativeEvent ->
+                                                owner.sendPointerEvent(
+                                                    eventType = eventType,
+                                                    position = position,
+                                                    uptimeMillis = uptimeMillis,
+                                                    pointerId = pointerId,
+                                                    down = down,
+                                                    type = type,
+                                                    buttons = buttons,
+                                                    keyboardModifiers = keyboardModifiers,
+                                                    button = button,
+                                                    scrollDelta = scrollDelta,
+                                                    isInBounds = isInBounds,
+                                                    nativeEvent = nativeEvent,
+                                                    pointerSamples = activePointers,
+                                                )
+                                            },
+                                        )
+                                        .also { handled ->
+                                            debugPointerInput {
+                                                "compose event=$eventType id=${pointerEvent.pointerId} " +
+                                                    "pos=${pointerEvent.position} down=${pointerEvent.down} " +
+                                                    "type=${pointerEvent.type} buttons=${pointerEvent.buttons} " +
+                                                    "button=${pointerEvent.button} " +
+                                                    "scroll=${pointerEvent.scrollDelta} " +
+                                                    "inBounds=${pointerEvent.isInBounds} handled=$handled"
+                                            }
+                                        }
+                                afterEvent()
+                                args.handled = handled
+                                debugPointerInput {
+                                    "native handledAfter event=$eventType handled=${args.handled}"
+                                }
+                            }
                     }
                 }
-                afterEvent()
-                args.handled = handled
-                debugPointerInput {
-                    "native handledAfter event=$eventType handled=${args.handled}"
-                }
-            }
         }
         return WinUIPointerEventRegistration(event, event.add(handler), handler)
     }
 
     private fun registerCancel(
-        event: WinRTEvent<PointerEventHandler>,
+        event: WinRTEvent<PointerEventHandler>
     ): WinUIPointerEventRegistration {
         val handler: PointerEventHandler = { sender, args ->
-            if (!isDisposed) {
-                debugPointerInput {
-                    "native cancel sender=${sender?.debugClassName()} handledBefore=${args.handled}"
+            WinUIOwnedResource(args) { it.nativeObject.close() }
+                .use {
+                    if (!isDisposed) {
+                        debugPointerInput {
+                            "native cancel sender=${sender?.debugClassName()} " +
+                                "handledBefore=${args.handled}"
+                        }
+                        releasePointerCapture(args)
+                        cancelPointerInput()
+                    }
                 }
-                releasePointerCapture(args)
-                owner.cancelPointerInput()
-            }
         }
         return WinUIPointerEventRegistration(event, event.add(handler), handler)
     }
 
     private fun registerCaptureLost(
-        event: WinRTEvent<PointerEventHandler>,
+        event: WinRTEvent<PointerEventHandler>
     ): WinUIPointerEventRegistration {
         val handler: PointerEventHandler = { sender, args ->
-            debugPointerInput {
-                "native captureLost sender=${sender?.debugClassName()} handledBefore=${args.handled}"
-            }
-            removeCapturedPointer(args)
+            WinUIOwnedResource(args) { it.nativeObject.close() }
+                .use {
+                    if (!isDisposed) {
+                        debugPointerInput {
+                            "native captureLost sender=${sender?.debugClassName()} " +
+                                "handledBefore=${args.handled}"
+                        }
+                        val pointer = args.pointer
+                        if (pointer == null || pointerCaptures.onCaptureLost(pointer)) {
+                            cancelPointerInput()
+                        }
+                    }
+                }
         }
         return WinUIPointerEventRegistration(event, event.add(handler), handler)
     }
@@ -151,52 +220,71 @@ internal class WinUIPointerInputAdapter(
     private fun createPointerEvent(
         eventType: PointerEventType,
         args: PointerRoutedEventArgs,
+        point: PointerPoint,
     ): WinUIPointerEvent {
-        val point = args.getCurrentPoint(root)
         val position = point.position
-        val properties = checkNotNull(point.properties) {
-            "WinUI pointer properties are not available."
-        }
-        val buttons = properties.toComposeButtons()
-        return WinUIPointerEvent(
-            eventType = eventType,
-            position = winUIPositionToComposeOffset(position.x, position.y, owner.density),
-            uptimeMillis = point.timestamp.toLong() / MicrosecondsPerMillisecond,
-            pointerId = point.pointerId.toLong(),
-            down = point.isComposePointerDown(eventType, buttons),
-            type = point.toComposePointerType(),
-            buttons = buttons,
-            keyboardModifiers = args.toComposeKeyboardModifiers(),
-            button = properties.pointerUpdateKind.toComposeButton(),
-            scrollDelta = if (eventType == PointerEventType.Scroll) {
-                properties.toComposeScrollDelta(
-                    isShiftPressed = args.toComposeKeyboardModifiers().isShiftPressed
+        val properties =
+            checkNotNull(point.properties) { "WinUI pointer properties are not available." }
+        return WinUIOwnedResource(properties) { it.nativeObject.close() }
+            .use { propertiesOwner ->
+                val ownedProperties = propertiesOwner.value
+                val buttons = ownedProperties.toComposeButtons()
+                val nativeKeyboardModifiers = args.toComposeKeyboardModifiersOrNull()
+                if (nativeKeyboardModifiers != null) {
+                    keyboardModifierState.reconcilePressed(nativeKeyboardModifiers)
+                }
+                val keyboardModifiers =
+                    nativeKeyboardModifiers ?: keyboardModifierState.toPointerKeyboardModifiers()
+                WinUIPointerEvent(
+                    eventType = eventType,
+                    position = winUIPositionToComposeOffset(position.x, position.y, owner.density),
+                    uptimeMillis = point.timestamp.toLong() / MicrosecondsPerMillisecond,
+                    pointerId = point.pointerId.toLong(),
+                    down = point.isComposePointerDown(eventType, buttons),
+                    type = point.toComposePointerType(ownedProperties),
+                    buttons = buttons,
+                    keyboardModifiers = keyboardModifiers,
+                    button = ownedProperties.pointerUpdateKind.toComposeButton(),
+                    scrollDelta =
+                        if (eventType == PointerEventType.Scroll) {
+                            ownedProperties.toComposeScrollDelta(
+                                isShiftPressed = keyboardModifiers.isShiftPressed
+                            )
+                        } else {
+                            Offset.Zero
+                        },
+                    isInBounds = eventType != PointerEventType.Exit,
+                    nativeEvent = args,
+                    sourcePointerPoint = point,
+                    pressure = point.toComposePressure(eventType, ownedProperties),
+                    activeHover = point.toComposeActiveHover(eventType, ownedProperties),
+                    historical = args.toComposeHistoricalChanges(root, owner.density),
                 )
-            } else {
-                Offset.Zero
-            },
-            isInBounds = eventType != PointerEventType.Exit,
-            nativeEvent = args,
-            // Pens report their pressure; WinUI gives mouse and touch input a fixed 0.5.
-            pressure = if (point.pointerDeviceType == PointerDeviceType.Pen) {
-                properties.pressure
-            } else {
-                1f
-            },
-            pointerPoint = point,
-        )
+            }
     }
 
-    private fun updatePointerCapture(
-        event: WinUIPointerEvent,
-        args: PointerRoutedEventArgs,
-    ) {
+    private fun updateDragSourcePointer(event: WinUIPointerEvent): WinUIOwnedResourceUpdate =
+        when (event.eventType) {
+            PointerEventType.Press,
+            PointerEventType.Move -> onSourcePointerPointChanged(event.sourcePointerPoint)
+            PointerEventType.Release -> onSourcePointerPointChanged(null)
+            PointerEventType.Exit ->
+                if (!event.down) {
+                    onSourcePointerPointChanged(null)
+                } else {
+                    WinUIOwnedResourceUpdate(ownsIncoming = false)
+                }
+            else -> WinUIOwnedResourceUpdate(ownsIncoming = false)
+        }
+
+    private fun updatePointerCapture(event: WinUIPointerEvent, args: PointerRoutedEventArgs) {
         when (event.eventType) {
             PointerEventType.Press -> capturePointer(event.pointerId, args)
             PointerEventType.Release -> releasePointerCapture(args)
-            PointerEventType.Exit -> if (!event.down) {
-                releasePointerCapture(args)
-            }
+            PointerEventType.Exit ->
+                if (!event.down) {
+                    releasePointerCapture(args)
+                }
             else -> Unit
         }
     }
@@ -204,28 +292,21 @@ internal class WinUIPointerInputAdapter(
     private fun capturePointer(pointerId: Long, args: PointerRoutedEventArgs) {
         val pointer = args.pointer ?: return
         if (runCatching { root.capturePointer(pointer) }.getOrDefault(false)) {
-            capturedPointers[pointerId] = pointer
+            pointerCaptures.record(pointerId, pointer)
         }
     }
 
     private fun releasePointerCapture(args: PointerRoutedEventArgs) {
         val pointer = args.pointer ?: return
-        runCatching { root.releasePointerCapture(pointer) }
-        removeCapturedPointer(args)
-    }
-
-    private fun removeCapturedPointer(args: PointerRoutedEventArgs) {
-        val pointer = args.pointer ?: return
-        capturedPointers.entries.removeAll { (_, capturedPointer) ->
-            capturedPointer.nativeObject.sameIdentity(pointer.nativeObject)
+        pointerCaptures.release(pointer) { capturedPointer ->
+            runCatching { root.releasePointerCapture(capturedPointer) }
         }
     }
 
     private fun releasePointerCaptures() {
-        capturedPointers.values.forEach { pointer ->
+        pointerCaptures.releaseAll { pointer ->
             runCatching { root.releasePointerCapture(pointer) }
         }
-        capturedPointers.clear()
     }
 }
 
@@ -239,7 +320,8 @@ private inline fun debugPointerInput(message: () -> String) {
     }
 }
 
-private fun Any.debugClassName(): String = this::class.qualifiedName ?: this::class.simpleName ?: toString()
+private fun Any.debugClassName(): String =
+    this::class.qualifiedName ?: this::class.simpleName ?: toString()
 
 private fun WinUIPointerEvent.debugString(): String =
     "id=$pointerId pos=$position uptimeMs=$uptimeMillis down=$down type=$type " +
@@ -248,24 +330,27 @@ private fun WinUIPointerEvent.debugString(): String =
 internal class WinUIPointerEventProcessor {
     fun process(
         event: WinUIPointerEvent,
-        sendPointerEvent: (
-            PointerEventType,
-            Offset,
-            Long,
-            Long,
-            Boolean,
-            PointerType,
-            PointerButtons,
-            PointerKeyboardModifiers,
-            PointerButton?,
-            Offset,
-            Boolean,
-            Any?,
-        ) -> Boolean,
+        onBeforeDispatch: (WinUIPointerEvent) -> Unit = {},
+        sendPointerEvent:
+            (
+                PointerEventType,
+                Offset,
+                Long,
+                Long,
+                Boolean,
+                PointerType,
+                PointerButtons,
+                PointerKeyboardModifiers,
+                PointerButton?,
+                Offset,
+                Boolean,
+                Any?,
+            ) -> Boolean,
     ): Boolean {
         // This adapter is attached to the dedicated Skiko render surface. Routed-event handled
         // state from that surface should not suppress Compose input; WinUIView interop is hosted
         // outside this surface and remains isolated by the native XAML tree.
+        onBeforeDispatch(event)
         return sendPointerEvent(
             event.eventType,
             event.position,
@@ -296,10 +381,23 @@ internal data class WinUIPointerEvent(
     val scrollDelta: Offset,
     val isInBounds: Boolean,
     val nativeEvent: Any?,
+    val sourcePointerPoint: PointerPoint? = null,
     val pressure: Float = 1f,
-    // The WinUI point of the event, which a drag from Compose starts from.
-    val pointerPoint: PointerPoint? = null,
+    val activeHover: Boolean = type == PointerType.Mouse,
+    val historical: List<HistoricalChange> = emptyList(),
 )
+
+internal fun WinUIPointerEvent.toPointerSample(): WinUIPointerSample =
+    WinUIPointerSample(
+        id = pointerId,
+        uptimeMillis = uptimeMillis,
+        position = position,
+        down = down,
+        type = type,
+        pressure = pressure,
+        activeHover = activeHover,
+        historical = historical,
+    )
 
 internal fun winUIPositionToComposeOffset(
     x: Float,
@@ -318,18 +416,83 @@ private data class WinUIPointerEventRegistration(
 
 private const val MicrosecondsPerMillisecond = 1_000L
 
-private fun PointerPoint.toComposePointerType(): PointerType =
-    when (pointerDeviceType) {
-        PointerDeviceType.Mouse,
-        // The desktop target reports touchpad input as mouse input too, which keeps hover working.
-        PointerDeviceType.Touchpad -> PointerType.Mouse
-        PointerDeviceType.Pen -> PointerType.Stylus
-        PointerDeviceType.Touch -> PointerType.Touch
+private fun PointerPoint.toComposePointerType(
+    properties: microsoft.ui.input.PointerPointProperties
+): PointerType =
+    when {
+        pointerDeviceType == PointerDeviceType.Pen && properties.isEraser -> PointerType.Eraser
+        pointerDeviceType == PointerDeviceType.Mouse ||
+            pointerDeviceType == PointerDeviceType.Touchpad -> PointerType.Mouse
+        pointerDeviceType == PointerDeviceType.Pen -> PointerType.Stylus
+        pointerDeviceType == PointerDeviceType.Touch -> PointerType.Touch
         else -> PointerType.Mouse
     }
 
+private fun PointerPoint.toComposePressure(
+    eventType: PointerEventType,
+    properties: microsoft.ui.input.PointerPointProperties,
+): Float {
+    if (
+        eventType == PointerEventType.Release ||
+            (eventType == PointerEventType.Exit && !isInContact)
+    ) {
+        return 0f
+    }
+    // Pens report their pressure. WinUI gives devices without a pressure sensor a fixed 0.5;
+    // the desktop target reports 1 for them.
+    if (pointerDeviceType != PointerDeviceType.Pen) return 1f
+    return properties.pressure.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+}
+
+private fun PointerPoint.toComposeActiveHover(
+    eventType: PointerEventType,
+    properties: microsoft.ui.input.PointerPointProperties,
+): Boolean {
+    if (eventType == PointerEventType.Exit) return false
+    return when {
+        pointerDeviceType == PointerDeviceType.Pen -> properties.isInRange && !isInContact
+        // As on the Skiko targets, the events of a mouse are hover events also while a button
+        // is pressed (ComposeScenePointer: activeHover = type == Mouse).
+        pointerDeviceType == PointerDeviceType.Mouse ||
+            pointerDeviceType == PointerDeviceType.Touchpad -> true
+        else -> false
+    }
+}
+
+private fun PointerRoutedEventArgs.toComposeHistoricalChanges(
+    root: UIElement,
+    density: Density,
+): List<HistoricalChange> =
+    runCatching {
+            val points = getIntermediatePoints(root)
+            mapWinUIOwnedList(
+                values = points,
+                // WinUI includes the current point as the final item.
+                dropLast = 1,
+                closeValues = { values -> (values as AutoCloseable).close() },
+                closeValue = { point -> point.nativeObject.close() },
+            ) { point ->
+                val position = point.position
+                if (!position.x.isFinite() || !position.y.isFinite()) {
+                    null
+                } else {
+                    HistoricalChange(
+                        uptimeMillis = point.timestamp.toLong() / MicrosecondsPerMillisecond,
+                        position = winUIPositionToComposeOffset(position.x, position.y, density),
+                    )
+                }
+            }
+        }
+        .getOrDefault(emptyList())
+
 private fun PointerPoint.isComposePointerDown(
     eventType: PointerEventType,
+    buttons: PointerButtons,
+): Boolean = winUIIsComposePointerDown(eventType, isInContact, buttons)
+
+internal fun winUIIsComposePointerDown(
+    eventType: PointerEventType,
+    isInContact: Boolean,
     buttons: PointerButtons,
 ): Boolean =
     when (eventType) {
@@ -380,6 +543,5 @@ private fun microsoft.ui.input.PointerPointProperties.toComposeScrollDelta(
 
 private const val MouseWheelDeltaPerTick = 120f
 
-private fun PointerRoutedEventArgs.toComposeKeyboardModifiers(): PointerKeyboardModifiers =
-    runCatching { winUIPointerKeyboardModifiersFromWinUI(keyModifiers) }
-        .getOrDefault(PointerKeyboardModifiers())
+private fun PointerRoutedEventArgs.toComposeKeyboardModifiersOrNull(): PointerKeyboardModifiers? =
+    runCatching { winUIPointerKeyboardModifiersFromWinUI(keyModifiers) }.getOrNull()

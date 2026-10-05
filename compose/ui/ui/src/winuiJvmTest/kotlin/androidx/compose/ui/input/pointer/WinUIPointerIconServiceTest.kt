@@ -19,7 +19,6 @@ package androidx.compose.ui.input.pointer
 import microsoft.ui.input.InputSystemCursorShape
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 
 class WinUIPointerIconServiceTest {
     @Test
@@ -47,14 +46,27 @@ class WinUIPointerIconServiceTest {
     }
 
     @Test
-    fun stylusHoverIconIsStoredWithoutChangingRootPointerIcon() {
+    fun stylusHoverIconOverridesAndRestoresRootPointerIcon() {
         val applied = mutableListOf<PointerIcon>()
         val service = WinUIPointerIconService { applied += it }
 
+        service.setIcon(PointerIcon.Hand)
         service.setStylusHoverIcon(PointerIcon.Crosshair)
+        service.setIcon(PointerIcon.Text)
 
         assertEquals(PointerIcon.Crosshair, service.getStylusHoverIcon())
-        assertNull(service.getIcon().takeIf { it != PointerIcon.Default })
-        assertEquals(emptyList(), applied)
+        assertEquals(PointerIcon.Text, service.getIcon())
+
+        service.setStylusHoverIcon(null)
+
+        assertEquals(
+            listOf(
+                PointerIcon.Hand,
+                PointerIcon.Crosshair,
+                PointerIcon.Crosshair,
+                PointerIcon.Text,
+            ),
+            applied,
+        )
     }
 }

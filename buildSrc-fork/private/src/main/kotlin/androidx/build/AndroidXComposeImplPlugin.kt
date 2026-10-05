@@ -62,7 +62,7 @@ class AndroidXComposeImplPlugin : Plugin<Project> {
                     configureComposeCompilerPlugin(project)
                 }
                 is KotlinBaseApiPlugin -> {
-                    // KWINRT-054: without a Kotlin plugin wrapper this is AGP built-in Kotlin.
+                    // KWINRT-067: without a Kotlin plugin wrapper this is AGP built-in Kotlin.
                     // With one, a third-party plugin (kotlin-winrt) applied it to register
                     // standalone compile tasks, and the project is already configured through
                     // the wrapper.
@@ -216,7 +216,7 @@ private fun configureComposeCompilerPlugin(project: Project) {
                 .files
 
         project.tasks.withType(KotlinCompilationTask::class.java).configureEach { compile ->
-            // KWINRT-054: kotlin-winrt compiles its generated WinRT projections in tasks of their
+            // KWINRT-067: kotlin-winrt compiles its generated WinRT projections in tasks of their
             // own, which have no Compose code and no Compose runtime on the classpath.
             if (compile.name.contains("WinRTProjection")) return@configureEach
 

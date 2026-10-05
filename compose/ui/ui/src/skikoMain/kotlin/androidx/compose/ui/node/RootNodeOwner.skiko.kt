@@ -36,6 +36,7 @@ import androidx.compose.ui.autofill.AutofillManager
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusOwner
 import androidx.compose.ui.focus.FocusOwnerImpl
+import androidx.compose.ui.focus.IndirectPointerInputFocusListener
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.SkiaGraphicsContext
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -190,6 +192,7 @@ internal class RootNodeOwner(
     init {
         snapshotObserver.startObserving()
         owner.root.attach(owner)
+        focusOwner.listeners += IndirectPointerInputFocusListener
         platformContext.rootForTestListener?.onRootForTestCreated(rootForTest)
         onRootSizeChanged(size)
         updatePositionCacheAndDispatch()
@@ -205,6 +208,7 @@ internal class RootNodeOwner(
         platformContext.rootForTestListener?.onRootForTestDisposed(rootForTest)
         snapshotObserver.stopObserving()
         graphicsContext.close()
+        focusOwner.listeners -= IndirectPointerInputFocusListener
         _owner.dispose()
         // we don't need to call root.detach() because root will be garbage collected
         isDisposed = true
@@ -359,6 +363,14 @@ internal class RootNodeOwner(
 
     fun onKeyEvent(keyEvent: KeyEvent): Boolean {
         return focusOwner.dispatchKeyEvent(keyEvent) || handleFocusKeys(keyEvent)
+    }
+
+    fun onIndirectPointerEvent(event: IndirectPointerEvent): Boolean {
+        return focusOwner.dispatchIndirectPointerEvent(event)
+    }
+
+    fun onCancelIndirectPointerInput() {
+        focusOwner.dispatchIndirectPointerCancel()
     }
 
     private fun handleFocusKeys(keyEvent: KeyEvent): Boolean {

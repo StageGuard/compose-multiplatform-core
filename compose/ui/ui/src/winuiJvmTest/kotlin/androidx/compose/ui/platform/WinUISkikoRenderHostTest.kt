@@ -16,9 +16,11 @@
 
 package androidx.compose.ui.platform
 
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
+import io.github.composefluent.winrt.runtime.DerivedComposed
 import microsoft.ui.xaml.FrameworkElement
+import microsoft.ui.xaml.Window
 import org.jetbrains.skia.Canvas
 import org.jetbrains.skiko.GraphicsApi
 import org.jetbrains.skiko.SkikoRenderDelegate
@@ -29,11 +31,18 @@ import org.jetbrains.skiko.winui.WinUIAccessibilityNode
 import org.jetbrains.skiko.winui.WinUIAccessibilityProvider
 import org.jetbrains.skiko.winui.WinUIAccessibilitySnapshot
 import org.jetbrains.skiko.winui.WinUIAccessibilityState
+import org.jetbrains.skiko.winui.WinUIIndirectPointerChange
+import org.jetbrains.skiko.winui.WinUIIndirectPointerEvent
+import org.jetbrains.skiko.winui.WinUIIndirectPointerEventType
+import org.jetbrains.skiko.winui.WinUIIndirectPointerPrimaryDirectionalMotionAxis
+import org.jetbrains.skiko.winui.WinUIInputHandler
 import org.jetbrains.skiko.winui.WinUIRect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -149,6 +158,88 @@ class WinUISkikoRenderHostTest {
 
         assertSame(provider, layer.installedAccessibilityProvider)
         assertEquals(listOf(change), layer.accessibilityChanges)
+        assertEquals(1, host.accessibilityUpdateCountForTest)
+    }
+
+    @Test
+    fun indirectPointerBindingForwardsConsumptionAndCancellation() {
+        val layer = FakeWinUISkikoLayerAdapter()
+        val host = WinUISkikoRenderHost(layer)
+        val window = FakeWindow()
+        val event = indirectPointerEvent()
+        var receivedEvent: WinUIIndirectPointerEvent? = null
+        var consume = false
+        var cancellationCount = 0
+
+        assertNull(layer.inputHandler)
+        assertEquals(0, layer.bindIndirectPointerInputCount)
+
+        host.bindIndirectPointerInput(
+            window = window,
+            onEvent = { nativeEvent ->
+                receivedEvent = nativeEvent
+                consume
+            },
+            onCancel = { cancellationCount += 1 },
+        )
+
+        val handler = assertNotNull(layer.inputHandler)
+        assertEquals(1, layer.bindIndirectPointerInputCount)
+        assertSame(window, layer.boundWindows.single())
+        assertFalse(handler.onIndirectPointerEvent(event))
+        assertSame(event, receivedEvent)
+
+        consume = true
+        assertTrue(handler.onIndirectPointerEvent(event))
+        handler.onIndirectPointerCancel()
+        assertEquals(1, cancellationCount)
+    }
+
+    @Test
+    fun replacingIndirectPointerBindingClosesPreviousBinding() {
+        val layer = FakeWinUISkikoLayerAdapter()
+        val host = WinUISkikoRenderHost(layer)
+
+        host.bindIndirectPointerInput(FakeWindow(), onEvent = { false }, onCancel = {})
+        val firstHandler = layer.inputHandler
+        val firstBinding = layer.indirectPointerBindings.single()
+        host.bindIndirectPointerInput(FakeWindow(), onEvent = { true }, onCancel = {})
+
+        assertEquals(1, firstBinding.closeCount)
+        assertEquals(2, layer.bindIndirectPointerInputCount)
+        assertTrue(firstHandler !== layer.inputHandler)
+        assertEquals(
+            listOf(
+                "bindIndirectPointerInput",
+                "closeIndirectPointerInput",
+                "bindIndirectPointerInput",
+            ),
+            layer.events,
+        )
+    }
+
+    @Test
+    fun closesIndirectPointerBindingBeforeFrameSchedulerAndLayer() {
+        val layer = FakeWinUISkikoLayerAdapter()
+        val host = WinUISkikoRenderHost(layer)
+
+        host.bindIndirectPointerInput(FakeWindow(), onEvent = { false }, onCancel = {})
+        host.startFrameScheduler()
+        host.close()
+        host.close()
+
+        assertNull(layer.inputHandler)
+        assertEquals(1, layer.indirectPointerBindings.single().closeCount)
+        assertEquals(
+            listOf(
+                "bindIndirectPointerInput",
+                "startFrameScheduler",
+                "closeIndirectPointerInput",
+                "closeFrameScheduler",
+                "closeLayer",
+            ),
+            layer.events,
+        )
     }
 
     @Test
@@ -267,6 +358,7 @@ class WinUISkikoRenderHostTest {
 
         assertEquals(null, layer.installedAccessibilityProvider)
         assertEquals(emptyList(), layer.accessibilityChanges)
+        assertEquals(0, host.accessibilityUpdateCountForTest)
         assertEquals(1, layer.closeCount)
     }
 
@@ -426,11 +518,15 @@ private class FakeWinUISkikoLayerAdapter : WinUISkikoLayerAdapter {
     val renderRequests = mutableListOf<Boolean>()
     val sizes = mutableListOf<IntSize>()
     val surfaceSizes = mutableListOf<WinUISkikoSurfaceSize>()
+    val boundWindows = mutableListOf<Window>()
+    val indirectPointerBindings = mutableListOf<FakeIndirectPointerInputBinding>()
     val scheduler = FakeFrameScheduler(events)
     var startFrameSchedulerCount = 0
     var startFrameSchedulerFailure: Throwable? = null
+    var bindIndirectPointerInputCount = 0
     var closeCount = 0
     var closeFailure: Throwable? = null
+    override var inputHandler: WinUIInputHandler? = null
     override var renderVersion: Long = 0L
     override var renderApi: GraphicsApi = GraphicsApi.DIRECT3D
     override var lastRenderSize: IntSize? = null
@@ -460,6 +556,15 @@ private class FakeWinUISkikoLayerAdapter : WinUISkikoLayerAdapter {
         accessibilityChanges += update.change
     }
 
+    override fun bindIndirectPointerInput(window: Window): AutoCloseable {
+        bindIndirectPointerInputCount += 1
+        boundWindows += window
+        events += "bindIndirectPointerInput"
+        return FakeIndirectPointerInputBinding(events).also {
+            indirectPointerBindings += it
+        }
+    }
+
     override fun startFrameScheduler(): AutoCloseable {
         startFrameSchedulerCount += 1
         events += "startFrameScheduler"
@@ -473,6 +578,44 @@ private class FakeWinUISkikoLayerAdapter : WinUISkikoLayerAdapter {
         closeFailure?.let { throw it }
     }
 }
+
+private class FakeIndirectPointerInputBinding(
+    private val events: MutableList<String>,
+) : AutoCloseable {
+    var closeCount = 0
+
+    override fun close() {
+        closeCount += 1
+        events += "closeIndirectPointerInput"
+    }
+}
+
+private class FakeWindow : Window(DerivedComposed.Instance)
+
+private fun indirectPointerEvent() =
+    WinUIIndirectPointerEvent(
+        type = WinUIIndirectPointerEventType.MOVE,
+        changes =
+            listOf(
+                WinUIIndirectPointerChange(
+                    pointerId = 9,
+                    timestampMillis = 30,
+                    x = 8125f,
+                    y = 4030f,
+                    pressed = true,
+                    pressure = 0.75f,
+                    previousTimestampMillis = 20,
+                    previousX = 8000f,
+                    previousY = 4000f,
+                    previousPressed = true,
+                )
+            ),
+        primaryDirectionalMotionAxis =
+            WinUIIndirectPointerPrimaryDirectionalMotionAxis.NONE,
+        deviceId = 44,
+        deviceRect = null,
+        frameId = 71,
+    )
 
 private class FakeWinUIAccessibilityProvider : WinUIAccessibilityProvider {
     override fun snapshot(): WinUIAccessibilitySnapshot =

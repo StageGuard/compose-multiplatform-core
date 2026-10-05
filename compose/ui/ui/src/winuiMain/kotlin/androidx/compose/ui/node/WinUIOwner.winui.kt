@@ -29,11 +29,14 @@ import androidx.compose.ui.SessionMutex
 import androidx.compose.ui.autofill.Autofill
 import androidx.compose.ui.autofill.AutofillManager
 import androidx.compose.ui.autofill.AutofillTree
+import androidx.compose.ui.autofill.WinUIAutofill
+import androidx.compose.ui.autofill.WinUIAutofillState
 import androidx.compose.ui.draganddrop.DragAndDropManager
 import androidx.compose.ui.draganddrop.WinUIDragAndDropManager
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusOwner
 import androidx.compose.ui.focus.FocusOwnerImpl
+import androidx.compose.ui.focus.IndirectPointerInputFocusListener
 import androidx.compose.ui.focus.PlatformFocusOwner
 import androidx.compose.ui.focus.WinUIEmbeddedViewPlatformFocusOwner
 import androidx.compose.ui.geometry.Offset
@@ -49,6 +52,7 @@ import androidx.compose.ui.hapticfeedback.WinUIHapticFeedback
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.WinUIInputModeManager
+import androidx.compose.ui.input.indirect.IndirectPointerEvent
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -86,6 +90,7 @@ import androidx.compose.ui.platform.WinUIAccessibilityManager
 import androidx.compose.ui.platform.WinUIClipboard
 import androidx.compose.ui.platform.WinUIClipboardManager
 import androidx.compose.ui.platform.WinUIPointerEvent
+import androidx.compose.ui.platform.WinUIPointerSample
 import androidx.compose.ui.platform.WinUIPlatformTextInputSession
 import androidx.compose.ui.platform.WinUIPlatformTextInputService
 import androidx.compose.ui.platform.WinUISoftwareKeyboardController
@@ -185,21 +190,31 @@ internal class WinUIOwner(
     override val clipboardManager: ClipboardManager = WinUIClipboardManager(winUIClipboard)
     override val clipboard: Clipboard = winUIClipboard
     override val accessibilityManager: AccessibilityManager = WinUIAccessibilityManager()
+    override val semanticsOwner: SemanticsOwner =
+        SemanticsOwner(root, EmptySemanticsModifier(), layoutNodes)
     internal val accessibilityProvider: WinUIAccessibilityProvider
         get() = accessibilityBridge
+
+    internal fun onAccessibilityProviderAttached() {
+        accessibilityBridge.onAccessibilityProviderAttached()
+    }
+
+    internal fun onAccessibilityProviderDetached() {
+        accessibilityBridge.onAccessibilityProviderDetached()
+    }
+
     override val graphicsContext: GraphicsContext = WinUIGraphicsContext
     @Suppress("DEPRECATION")
     override val autofillTree: AutofillTree = AutofillTree()
+    private val winUIAutofill = WinUIAutofill(autofillTree, semanticsOwner)
     @Suppress("DEPRECATION")
-    override val autofill: Autofill? = null
-    override val autofillManager: AutofillManager? = null
+    override val autofill: Autofill = winUIAutofill
+    override val autofillManager: AutofillManager = winUIAutofill.manager
     override var density: Density by mutableStateOf(Density(1f))
         private set
     @Suppress("DEPRECATION")
     override val textInputService: TextInputService = TextInputService(WinUIPlatformTextInputService)
     override val softwareKeyboardController: SoftwareKeyboardController = WinUISoftwareKeyboardController
-    override val semanticsOwner: SemanticsOwner =
-        SemanticsOwner(root, EmptySemanticsModifier(), layoutNodes)
     private var interopViewFocusRect: Rect? = null
     override val focusOwner: FocusOwner = FocusOwnerImpl(
         WinUIEmbeddedViewPlatformFocusOwner(
@@ -220,10 +235,8 @@ internal class WinUIOwner(
     // The same loader as on the Skiko targets: it loads Skia typefaces.
     override val fontLoader: Font.ResourceLoader = androidx.compose.ui.text.platform.FontLoader()
     override val fontFamilyResolver: FontFamily.Resolver = createFontFamilyResolver()
-    // As on desktop, where a window takes the orientation of the default locale.
-    @OptIn(InternalComposeUiApi::class)
-    override val layoutDirection: LayoutDirection =
-        if (Locale.current.isRtl()) LayoutDirection.Rtl else LayoutDirection.Ltr
+    override var layoutDirection: LayoutDirection by mutableStateOf(LayoutDirection.Ltr)
+        private set
     override val localeList: LocaleList = LocaleList.current
     override val snapshotObserver = snapshotInvalidationTracker.snapshotObserver()
     override val modifierLocalManager: ModifierLocalManager = ModifierLocalManager(this)
@@ -256,17 +269,25 @@ internal class WinUIOwner(
         root.modifier = focusOwner.modifier.then(dragAndDropManager.modifier)
         snapshotObserver.startObserving()
         root.attach(this)
+        semanticsOwner.listeners += winUIAutofill
+        focusOwner.listeners += winUIAutofill
+        focusOwner.listeners += IndirectPointerInputFocusListener
         measureAndLayoutDelegate.updateRootConstraints(Constraints())
     }
 
     fun dispose() {
         if (isShuttingDown) return
         isDisposing = true
+        (textToolbar as? WinUITextToolbar)?.close()
         outOfFrameQueue.clear()
         if (root.isAttached) {
             root.detach()
         }
+        semanticsOwner.listeners -= winUIAutofill
+        focusOwner.listeners -= winUIAutofill
+        focusOwner.listeners -= IndirectPointerInputFocusListener
         releaseActivePlatformState()
+        winUIAutofill.dispose()
         cancelPointerInput()
         accessibilityBridge.dispose()
         snapshotObserver.stopObserving()
@@ -322,6 +343,13 @@ internal class WinUIOwner(
         }
     }
 
+    fun updateLayoutDirection(layoutDirection: LayoutDirection) {
+        if (isShuttingDown || this.layoutDirection == layoutDirection) return
+        this.layoutDirection = layoutDirection
+        root.layoutDirection = layoutDirection
+        onMeasureAndLayoutRequested()
+    }
+
     private fun updateWindowContainerSize(size: IntSize) {
         mutableWindowInfo.containerSize = size
         mutableWindowInfo.containerDpSize = with(density) {
@@ -330,11 +358,6 @@ internal class WinUIOwner(
         if (size.width > 0 && size.height > 0) {
             WinUIGraphicsContext.setLightingInfo(density, size)
         }
-    }
-
-    internal fun setKeyboardModifiers(modifiers: PointerKeyboardModifiers) {
-        if (isShuttingDown) return
-        mutableWindowInfo.keyboardModifiers = modifiers
     }
 
     override fun onRequestMeasure(
@@ -386,7 +409,9 @@ internal class WinUIOwner(
         layoutNodes[node.semanticsId] = node
     }
 
-    override fun onPostAttach(node: LayoutNode) = Unit
+    override fun onPostAttach(node: LayoutNode) {
+        winUIAutofill.onPostAttach(node)
+    }
 
     override fun onDetach(node: LayoutNode) {
         checkNotNull(layoutNodes.remove(node.semanticsId)) {
@@ -394,6 +419,7 @@ internal class WinUIOwner(
         }
         measureAndLayoutDelegate.onNodeDetached(node)
         snapshotObserver.clear(node)
+        winUIAutofill.onDetach(node)
         rectManager.remove(node)
     }
 
@@ -403,7 +429,10 @@ internal class WinUIOwner(
     override fun calculateLocalPosition(positionInWindow: Offset): Offset =
         coordinateMapper.calculateLocalPosition(positionInWindow)
 
-    override fun requestAutofill(node: LayoutNode) = Unit
+    override fun requestAutofill(node: LayoutNode) {
+        if (isShuttingDown) return
+        winUIAutofill.requestAutofill(node)
+    }
 
     override fun measureAndLayout(sendPointerUpdate: Boolean) {
         if (isShuttingDown) return
@@ -612,6 +641,7 @@ internal class WinUIOwner(
     }
 
     override fun onLayoutNodeDeactivated(layoutNode: LayoutNode) {
+        winUIAutofill.onLayoutNodeDeactivated(layoutNode)
         rectManager.remove(layoutNode)
         if (!isShuttingDown) {
             notifyInteropTreeChanged()
@@ -625,6 +655,7 @@ internal class WinUIOwner(
 
     override fun onPostLayoutNodeReused(layoutNode: LayoutNode, oldSemanticsId: Int) {
         if (isShuttingDown) return
+        winUIAutofill.onPostLayoutNodeReused(layoutNode, oldSemanticsId)
         notifyInteropTreeChanged()
     }
 
@@ -676,10 +707,18 @@ internal class WinUIOwner(
                 val listener = onEndApplyChangesListeners[i]
                 onEndApplyChangesListeners[i] = null
                 listener?.invoke()
+                // A listener may dispose this owner and clear the remaining listeners.
+                if (isShuttingDown) return
             }
             onEndApplyChangesListeners.subList(0, size).clear()
         }
+        winUIAutofill.onEndApplyChanges()
     }
+
+    internal fun winUIAutofillForTest(): WinUIAutofill = winUIAutofill
+
+    internal fun winUIAutofillStateForTest(): WinUIAutofillState =
+        winUIAutofill.stateForTest()
 
     override fun registerOnLayoutCompletedListener(listener: Owner.OnLayoutCompletedListener) {
         if (isShuttingDown) return
@@ -811,7 +850,6 @@ internal class WinUIOwner(
         button: PointerButton?,
         scrollDelta: Offset = Offset.Zero,
         isInBounds: Boolean = eventType != PointerEventType.Exit,
-        pressure: Float = 1f,
     ): Boolean {
         return sendPointerEvent(
             eventType = eventType,
@@ -826,7 +864,35 @@ internal class WinUIOwner(
             scrollDelta = scrollDelta,
             isInBounds = isInBounds,
             nativeEvent = null,
-            pressure = pressure,
+        )
+    }
+
+    internal fun sendPointerEventForTest(
+        eventType: PointerEventType,
+        changedPointerId: Long,
+        pointers: List<WinUIPointerSample>,
+        buttons: PointerButtons,
+        keyboardModifiers: PointerKeyboardModifiers,
+        button: PointerButton?,
+        scrollDelta: Offset = Offset.Zero,
+        isInBounds: Boolean = eventType != PointerEventType.Exit,
+    ): Boolean {
+        val changedPointer = pointers.firstOrNull { it.id == changedPointerId }
+            ?: error("Missing changed pointer $changedPointerId")
+        return sendPointerEvent(
+            eventType = eventType,
+            position = changedPointer.position,
+            uptimeMillis = changedPointer.uptimeMillis,
+            pointerId = changedPointer.id,
+            down = changedPointer.down,
+            type = changedPointer.type,
+            buttons = buttons,
+            keyboardModifiers = keyboardModifiers,
+            button = button,
+            scrollDelta = scrollDelta,
+            isInBounds = isInBounds,
+            nativeEvent = null,
+            pointerSamples = pointers,
         )
     }
 
@@ -844,13 +910,12 @@ internal class WinUIOwner(
         isInBounds: Boolean = eventType != PointerEventType.Exit,
         nativeEvent: Any?,
         updateLastPointerEvent: Boolean = true,
-        pressure: Float = 1f,
+        pointerSamples: List<WinUIPointerSample> = emptyList(),
     ): Boolean {
         if (isShuttingDown) return false
-        if (button != null) {
+        if (winUIShouldRequestTouchInputMode(down, type, button)) {
             inputModeManager.requestInputMode(InputMode.Touch)
         }
-        mutableWindowInfo.keyboardModifiers = keyboardModifiers
         if (updateLastPointerEvent) {
             updateLastMousePointerEvent(
                 WinUIPointerEvent(
@@ -869,27 +934,32 @@ internal class WinUIOwner(
                 )
             )
         }
+        updateKeyboardModifiers(keyboardModifiers)
         if (eventType != PointerEventType.Exit && isInInteropViewBounds(position)) {
             return false
         }
-        val pointer = PointerInputEventData(
-            id = PointerId(pointerId),
-            uptime = uptimeMillis,
-            positionOnScreen = position,
-            position = position,
-            down = down,
-            pressure = pressure,
-            type = type,
-            activeHover = type == PointerType.Mouse,
-            scrollDelta = scrollDelta,
-            scaleGestureFactor = 1f,
-            panGestureOffset = Offset.Zero,
-            originalEventPosition = position,
-        )
+        val samples = pointerSamples.ifEmpty {
+            listOf(
+                WinUIPointerSample(
+                    id = pointerId,
+                    uptimeMillis = uptimeMillis,
+                    position = position,
+                    down = down,
+                    type = type,
+                    pressure = if (down) 1f else 0f,
+                    activeHover = type == PointerType.Mouse && !down,
+                    historical = emptyList(),
+                )
+            )
+        }
         val event = PointerInputEvent(
             eventType = eventType,
             uptime = uptimeMillis,
-            pointers = if (type == PointerType.Mouse) listOf(pointer) else withOtherContacts(pointer),
+            pointers = winUIPointerSamplesToEventData(
+                samples = samples,
+                changedPointerId = pointerId,
+                scrollDelta = scrollDelta,
+            ),
             buttons = buttons,
             keyboardModifiers = keyboardModifiers,
             button = button,
@@ -932,39 +1002,32 @@ internal class WinUIOwner(
                 position.y < bounds.bottom
         }
 
-    // The touch and pen contacts that are down. WinUI reports one pointer per event, but
-    // Compose needs all of them in every event: a pointer missing from an event counts as
-    // released, which breaks multi-touch gestures such as pinch to zoom.
-    private val activeContacts = linkedMapOf<PointerId, PointerInputEventData>()
-
-    private fun withOtherContacts(pointer: PointerInputEventData): List<PointerInputEventData> {
-        val others = activeContacts.values
-            .filter { it.id != pointer.id }
-            .map { contact ->
-                contact.copy(
-                    uptime = pointer.uptime,
-                    historical = emptyList(),
-                    scrollDelta = Offset.Zero,
-                )
-            }
-        if (pointer.down) {
-            activeContacts[pointer.id] = pointer
-        } else {
-            activeContacts.remove(pointer.id)
-        }
-        return others + pointer
-    }
-
     internal fun cancelPointerInput() {
-        activeContacts.clear()
         lastMousePointerEvent = null
         pointerEventSender.reset()
         pointerInputEventProcessor.processCancel()
     }
 
+    internal fun sendIndirectPointerEvent(event: IndirectPointerEvent): Boolean {
+        if (isShuttingDown) return false
+        return focusOwner.dispatchIndirectPointerEvent(event)
+    }
+
+    internal fun cancelIndirectPointerInput() {
+        if (!isShuttingDown) {
+            focusOwner.dispatchIndirectPointerCancel()
+        }
+    }
+
     internal fun sendKeyEvent(keyEvent: KeyEvent): Boolean {
         if (isShuttingDown) return false
         return focusOwner.dispatchKeyEvent(keyEvent) || handleFocusKeys(keyEvent)
+    }
+
+    internal fun updateKeyboardModifiers(keyboardModifiers: PointerKeyboardModifiers) {
+        if (!isShuttingDown) {
+            mutableWindowInfo.keyboardModifiers = keyboardModifiers
+        }
     }
 
     private fun handleFocusKeys(keyEvent: KeyEvent): Boolean {
@@ -978,6 +1041,35 @@ internal class WinUIOwner(
         inputModeManager.requestInputMode(InputMode.Keyboard)
         return focusOwner.moveFocus(focusDirection)
     }
+}
+
+internal fun winUIShouldRequestTouchInputMode(
+    down: Boolean,
+    type: PointerType,
+    button: PointerButton?,
+): Boolean = button != null ||
+    (down && (type == PointerType.Touch || type == PointerType.Stylus || type == PointerType.Eraser))
+
+internal fun winUIPointerSamplesToEventData(
+    samples: List<WinUIPointerSample>,
+    changedPointerId: Long,
+    scrollDelta: Offset,
+): List<PointerInputEventData> = samples.map { sample ->
+    PointerInputEventData(
+        id = PointerId(sample.id),
+        uptime = sample.uptimeMillis,
+        positionOnScreen = sample.position,
+        position = sample.position,
+        down = sample.down,
+        pressure = sample.pressure,
+        type = sample.type,
+        activeHover = sample.activeHover,
+        historical = if (sample.id == changedPointerId) sample.historical else emptyList(),
+        scrollDelta = if (sample.id == changedPointerId) scrollDelta else Offset.Zero,
+        scaleGestureFactor = 1f,
+        panGestureOffset = Offset.Zero,
+        originalEventPosition = sample.position,
+    )
 }
 
 private object IdentityPositionCalculator : PositionCalculator {
@@ -1194,7 +1286,6 @@ private class WinUIPointerEventSender(
 private class WinUISnapshotInvalidationTracker(
     private val invalidate: () -> Unit,
 ) {
-    private val lock = Any()
     private val commands = mutableListOf<() -> Unit>()
     private val commandsToRun = mutableListOf<() -> Unit>()
     private var isPerforming = false
@@ -1203,9 +1294,7 @@ private class WinUISnapshotInvalidationTracker(
         if (isPerforming) {
             command()
         } else {
-            synchronized(lock) {
-                commands += command
-            }
+            commands += command
             invalidate()
         }
     }
@@ -1213,11 +1302,9 @@ private class WinUISnapshotInvalidationTracker(
     fun sendAndPerformSnapshotChanges() {
         Snapshot.sendApplyNotifications()
         while (true) {
-            synchronized(lock) {
-                if (commands.isEmpty()) return
-                commandsToRun += commands
-                commands.clear()
-            }
+            if (commands.isEmpty()) return
+            commandsToRun += commands
+            commands.clear()
             isPerforming = true
             try {
                 commandsToRun.forEach { command -> command() }

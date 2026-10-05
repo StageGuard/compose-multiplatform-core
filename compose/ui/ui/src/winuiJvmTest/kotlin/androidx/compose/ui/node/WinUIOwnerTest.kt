@@ -46,7 +46,9 @@ import androidx.compose.ui.layout.RootMeasurePolicy
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.TextToolbarStatus
+import androidx.compose.ui.platform.WinUITestRuntime
 import androidx.compose.ui.platform.WinUITextToolbar
+import androidx.compose.ui.platform.WinUIPointerSample
 import androidx.compose.ui.platform.toXamlPoint
 import androidx.compose.ui.sensitiveContent
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -85,6 +87,12 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.WinUIComposeLayerHost
+import java.nio.file.Path
+import java.nio.file.Paths
+import kotlin.io.path.exists
+import kotlin.io.path.name
+import kotlin.io.path.readText
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
@@ -104,6 +112,53 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WinUIOwnerTest : WinUISkikoTestBase() {
+    @Test
+    fun indirectPointerFocusListenerIsRegisteredOnlyDuringOwnerLifetime() {
+        val source = winUIOwnerSource()
+        val registration = "focusOwner.listeners += IndirectPointerInputFocusListener"
+        val removal = "focusOwner.listeners -= IndirectPointerInputFocusListener"
+
+        assertTrue(source.contains(registration))
+        assertTrue(source.contains(removal))
+        assertTrue(source.indexOf(registration) < source.indexOf(removal))
+    }
+
+    @Test
+    fun indirectPointerDispatchDelegatesToFocusOwner() {
+        val source = winUIOwnerSource()
+
+        assertTrue(
+            source.contains(
+                "internal fun sendIndirectPointerEvent(event: IndirectPointerEvent): Boolean"
+            )
+        )
+        assertTrue(source.contains("return focusOwner.dispatchIndirectPointerEvent(event)"))
+        assertTrue(source.contains("internal fun cancelIndirectPointerInput()"))
+        assertTrue(source.contains("focusOwner.dispatchIndirectPointerCancel()"))
+    }
+
+    @Test
+    fun composeViewBindsOnlyOwningWindowAndClosesInputBeforeOwner() {
+        val source = findUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt")
+            .readText()
+        val ownerIndex = source.indexOf("internal val owner = WinUIOwner(")
+        val conditionalBindingIndex = source.indexOf("window?.let { owningWindow ->")
+        val closeBindingIndex = source.indexOf("{ renderHost.closeIndirectPointerInput() }")
+        val ownerDisposeIndex = source.indexOf("{ owner.dispose() }")
+
+        assertTrue(conditionalBindingIndex > ownerIndex)
+        assertTrue(source.contains("renderHost.bindIndirectPointerInput("))
+        assertTrue(
+            source.contains(
+                "owner.sendIndirectPointerEvent(native.toComposeIndirectPointerEvent())"
+            )
+        )
+        assertTrue(source.contains("onCancel = owner::cancelIndirectPointerInput"))
+        assertTrue(closeBindingIndex >= 0)
+        assertTrue(closeBindingIndex < ownerDisposeIndex)
+    }
+
     @Test
     fun ownerRecordsPlatformStateHooks() {
         val events = OwnerEvents()
@@ -198,6 +253,19 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
             WinUIHapticFeedback.resetForTest()
             owner.dispose()
         }
+    }
+
+    @Test
+    fun ownerLayoutDirectionIsMutableAndSchedulesLayout() {
+        val source = winUIOwnerSource()
+        assertTrue(
+            source.contains(
+                "override var layoutDirection: LayoutDirection by mutableStateOf(LayoutDirection.Ltr)"
+            )
+        )
+        assertTrue(source.contains("fun updateLayoutDirection(layoutDirection: LayoutDirection)"))
+        assertTrue(source.contains("root.layoutDirection = layoutDirection"))
+        assertTrue(source.contains("onMeasureAndLayoutRequested()"))
     }
 
     @Test
@@ -772,6 +840,21 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
     }
 
     @Test
+    fun disposeDuringEndApplyChangesStopsRemainingListeners() {
+        val owner = createOwner()
+        var remainingListenerCalled = false
+
+        owner.registerOnEndApplyChangesListener(owner::dispose)
+        owner.registerOnEndApplyChangesListener {
+            remainingListenerCalled = true
+        }
+
+        owner.onEndApplyChanges()
+
+        assertFalse(remainingListenerCalled)
+    }
+
+    @Test
     fun disposeSuppressesPendingAndFutureOwnerCallbacks() {
         val events = OwnerEvents()
         var measureRequests = 0
@@ -1068,7 +1151,6 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
 
             assertEquals(
                 listOf(
-                    PointerEventType.Enter,
                     PointerEventType.Press,
                 ),
                 events,
@@ -1088,7 +1170,6 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
 
             assertEquals(
                 listOf(
-                    PointerEventType.Enter,
                     PointerEventType.Press,
                     PointerEventType.Release,
                 ),
@@ -1110,10 +1191,8 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
 
             assertEquals(
                 listOf(
-                    PointerEventType.Enter,
                     PointerEventType.Press,
                     PointerEventType.Release,
-                    PointerEventType.Exit,
                 ),
                 events,
             )
@@ -1311,12 +1390,46 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
         }
     }
 
+    @Test
+    fun layerAttachedWhileTheRootIsMeasuredIsMeasuredAfterwards() {
+        // A popup in a Scaffold is composed, and its layer attached, while the root measures
+        // its content.
+        var measureRequests = 0
+        val owner = createOwner(onMeasureAndLayoutRequested = { measureRequests += 1 })
+        try {
+            val host = WinUIComposeLayerHost(root = owner.root, focusOwner = { owner.focusOwner })
+            val layer = host.createLayer(focusable = false, consumePointerInputOutside = false)
+            val content = LayoutNode().also {
+                it.measurePolicy = MeasurePolicy { _, constraints ->
+                    host.attach(layer)
+                    layout(constraints.maxWidth, constraints.maxHeight) {}
+                }
+            }
+            owner.root.insertAt(0, content)
+            owner.setWindowContainerSize(IntSize(100, 80))
+            owner.measureAndLayout()
+            assertFalse(layer.node.isPlaced)
+
+            // The host asked for the pass that measures the layer.
+            val requestsBefore = measureRequests
+            owner.measureAndLayout()
+
+            assertTrue(requestsBefore > 0)
+            assertTrue(layer.node.isPlaced)
+            assertEquals(100, layer.node.width)
+            assertEquals(80, layer.node.height)
+        } finally {
+            owner.dispose()
+        }
+    }
+
     private fun createOwner(
         events: OwnerEvents = OwnerEvents(),
         onMeasureAndLayoutRequested: () -> Unit = {},
         scheduleOutOfFrame: (() -> Unit) -> Unit = { it() },
         coordinateMapper: WinUICoordinateMapper = WinUICoordinateMapper(),
     ): WinUIOwner {
+        WinUITestRuntime.ensureInitialized()
         val root = LayoutNode().also {
             it.measurePolicy = RootMeasurePolicy
         }
@@ -1420,169 +1533,117 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
         }
     }
 
-    @Test
-    fun touchEventsCarryEveryContactThatIsDown() {
-        // WinUI reports one contact per event; Compose needs all of them in each event, or a
-        // missing contact counts as released and pinch gestures break.
-        val owner = createOwner()
-        val events = mutableListOf<List<RecordedChange>>()
-        try {
-            val pointerNode = LayoutNode().also {
-                it.modifier = PointerChangeRecorderElement(events)
-                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
-            }
-            owner.root.insertAt(0, pointerNode)
-            owner.setWindowContainerSize(IntSize(100, 100))
-            owner.measureAndLayout()
+    private fun findUiModuleRoot(): Path {
+        val start = Paths.get("").toAbsolutePath()
+        generateSequence(start) { it.parent }.forEach { candidate ->
+            val direct = candidate.resolve("src/winuiMain/kotlin")
+            if (direct.exists() && candidate.name == "ui") return candidate
 
-            owner.sendTouchForTest(PointerEventType.Press, Offset(10f, 10f), 1L, 1L, down = true)
-            owner.sendTouchForTest(PointerEventType.Press, Offset(50f, 50f), 2L, 2L, down = true)
-            owner.sendTouchForTest(PointerEventType.Move, Offset(60f, 60f), 3L, 2L, down = true)
-            owner.sendTouchForTest(PointerEventType.Release, Offset(10f, 10f), 4L, 1L, down = false)
-            owner.sendTouchForTest(PointerEventType.Move, Offset(70f, 70f), 5L, 2L, down = true)
-
-            assertEquals(
-                listOf(
-                    listOf(RecordedChange(1L, true, Offset(10f, 10f))),
-                    listOf(
-                        RecordedChange(1L, true, Offset(10f, 10f)),
-                        RecordedChange(2L, true, Offset(50f, 50f)),
-                    ),
-                    listOf(
-                        RecordedChange(1L, true, Offset(10f, 10f)),
-                        RecordedChange(2L, true, Offset(60f, 60f)),
-                    ),
-                    listOf(
-                        RecordedChange(1L, false, Offset(10f, 10f)),
-                        RecordedChange(2L, true, Offset(60f, 60f)),
-                    ),
-                    listOf(RecordedChange(2L, true, Offset(70f, 70f))),
-                ),
-                events,
-            )
-        } finally {
-            owner.dispose()
+            val fromRepoRoot = candidate.resolve("compose/ui/ui/src/winuiMain/kotlin")
+            if (fromRepoRoot.exists()) return candidate.resolve("compose/ui/ui")
         }
+        error("Could not find compose/ui/ui module root from $start.")
     }
 
     @Test
-    fun cancelledPointerInputForgetsTheContactsThatWereDown() {
-        val owner = createOwner()
-        val events = mutableListOf<List<RecordedChange>>()
-        try {
-            val pointerNode = LayoutNode().also {
-                it.modifier = PointerChangeRecorderElement(events)
-                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
-            }
-            owner.root.insertAt(0, pointerNode)
-            owner.setWindowContainerSize(IntSize(100, 100))
-            owner.measureAndLayout()
-
-            owner.sendTouchForTest(PointerEventType.Press, Offset(10f, 10f), 1L, 1L, down = true)
-            owner.cancelPointerInput()
-            events.clear()
-            owner.sendTouchForTest(PointerEventType.Press, Offset(50f, 50f), 2L, 2L, down = true)
-
-            assertEquals(listOf(listOf(RecordedChange(2L, true, Offset(50f, 50f)))), events)
-        } finally {
-            owner.dispose()
-        }
-    }
-
-    @Test
-    fun penPressureReachesCompose() {
-        val owner = createOwner()
-        val pressures = mutableListOf<Float>()
-        try {
-            val pointerNode = LayoutNode().also {
-                it.modifier = PointerChangeRecorderElement(mutableListOf(), pressures)
-                it.measurePolicy = fillMaxConstraintsMeasurePolicy()
-            }
-            owner.root.insertAt(0, pointerNode)
-            owner.setWindowContainerSize(IntSize(100, 100))
-            owner.measureAndLayout()
-
-            owner.sendPointerEventForTest(
-                eventType = PointerEventType.Press,
-                position = Offset(10f, 10f),
-                uptimeMillis = 1L,
-                pointerId = 1L,
+    fun pointerEventDispatchesAllActiveContactsWithPressureHistoryAndHover() {
+        val history = androidx.compose.ui.input.pointer.HistoricalChange(
+            uptimeMillis = 8L,
+            position = Offset(4f, 5f),
+        )
+        val pointers = listOf(
+            WinUIPointerSample(
+                id = 11L,
+                uptimeMillis = 10L,
+                position = Offset(1f, 2f),
                 down = true,
-                type = PointerType.Stylus,
-                buttons = PointerButtons(isPrimaryPressed = true),
-                keyboardModifiers = PointerKeyboardModifiers(),
-                button = PointerButton.Primary,
+                type = PointerType.Touch,
                 pressure = 0.25f,
-            )
+                activeHover = false,
+                historical = emptyList(),
+            ),
+            WinUIPointerSample(
+                id = 22L,
+                uptimeMillis = 11L,
+                position = Offset(3f, 4f),
+                down = false,
+                type = PointerType.Stylus,
+                pressure = 0.75f,
+                activeHover = true,
+                historical = listOf(history),
+            ),
+        )
 
-            assertEquals(listOf(0.25f), pressures)
-        } finally {
-            owner.dispose()
-        }
-    }
+        val eventData = winUIPointerSamplesToEventData(
+            samples = pointers,
+            changedPointerId = 22L,
+            scrollDelta = Offset.Zero,
+        )
 
-    private fun WinUIOwner.sendTouchForTest(
-        eventType: PointerEventType,
-        position: Offset,
-        uptimeMillis: Long,
-        pointerId: Long,
-        down: Boolean,
-    ) {
-        sendPointerEventForTest(
-            eventType = eventType,
-            position = position,
-            uptimeMillis = uptimeMillis,
-            pointerId = pointerId,
-            down = down,
-            type = PointerType.Touch,
-            buttons = PointerButtons(isPrimaryPressed = down),
-            keyboardModifiers = PointerKeyboardModifiers(),
-            button = PointerButton.Primary,
+        assertEquals(
+            listOf(
+                PointerSnapshot(
+                    id = 11L,
+                    pressure = 0.25f,
+                    activeHover = false,
+                    historicalCount = 0,
+                ),
+                PointerSnapshot(
+                    id = 22L,
+                    pressure = 0.75f,
+                    activeHover = true,
+                    historicalCount = 1,
+                ),
+            ),
+            eventData.map { data ->
+                PointerSnapshot(
+                    id = data.id.value,
+                    pressure = data.pressure,
+                    activeHover = data.activeHover,
+                    historicalCount = data.historical.size,
+                )
+            },
         )
     }
-}
 
-private data class RecordedChange(val id: Long, val pressed: Boolean, val position: Offset)
-
-private class PointerChangeRecorderElement(
-    private val events: MutableList<List<RecordedChange>>,
-    private val pressures: MutableList<Float> = mutableListOf(),
-) : ModifierNodeElement<PointerChangeRecorderNode>() {
-    override fun create(): PointerChangeRecorderNode = PointerChangeRecorderNode(events, pressures)
-
-    override fun update(node: PointerChangeRecorderNode) {
-        node.events = events
-        node.pressures = pressures
-    }
-
-    override fun equals(other: Any?): Boolean =
-        other is PointerChangeRecorderElement && other.events === events
-
-    override fun hashCode(): Int = System.identityHashCode(events)
-
-    override fun InspectorInfo.inspectableProperties() {
-        name = "pointerChangeRecorder"
-    }
-}
-
-private class PointerChangeRecorderNode(
-    var events: MutableList<List<RecordedChange>>,
-    var pressures: MutableList<Float>,
-) : Modifier.Node(), PointerInputModifierNode {
-    override fun onPointerEvent(
-        pointerEvent: PointerEvent,
-        pass: PointerEventPass,
-        bounds: IntSize,
-    ) {
-        if (pass == PointerEventPass.Main) {
-            events += pointerEvent.changes.map {
-                RecordedChange(it.id.value, it.pressed, it.position)
-            }
-            pressures += pointerEvent.changes.map { it.pressure }
+    @Test
+    fun pointerContactInputModeDecisionDistinguishesHoverFromContact() {
+        listOf(PointerType.Touch, PointerType.Stylus, PointerType.Eraser).forEach { pointerType ->
+            assertTrue(
+                winUIShouldRequestTouchInputMode(
+                    down = true,
+                    type = pointerType,
+                    button = null,
+                ),
+            )
         }
+        assertFalse(
+            winUIShouldRequestTouchInputMode(
+                down = false,
+                type = PointerType.Mouse,
+                button = null,
+            ),
+        )
+        assertFalse(
+            winUIShouldRequestTouchInputMode(
+                down = false,
+                type = PointerType.Stylus,
+                button = null,
+            ),
+        )
+        assertTrue(
+            winUIShouldRequestTouchInputMode(
+                down = true,
+                type = PointerType.Mouse,
+                button = PointerButton.Primary,
+            ),
+        )
     }
 
-    override fun onCancelPointerInput() = Unit
+    private fun winUIOwnerSource(): String =
+        findUiModuleRoot()
+            .resolve("src/winuiMain/kotlin/androidx/compose/ui/node/WinUIOwner.winui.kt")
+            .readText()
 }
 
 private class OwnerEvents {
@@ -1623,6 +1684,13 @@ private data class PointerRecorderElement(
         name = "pointerRecorder"
     }
 }
+
+private data class PointerSnapshot(
+    val id: Long,
+    val pressure: Float,
+    val activeHover: Boolean,
+    val historicalCount: Int,
+)
 
 private class PointerRecorderNode(
     var events: MutableList<PointerEventType>,
