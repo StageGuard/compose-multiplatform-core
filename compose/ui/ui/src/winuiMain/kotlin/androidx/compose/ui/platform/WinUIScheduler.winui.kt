@@ -16,6 +16,7 @@
 
 package androidx.compose.ui.platform
 
+import kotlin.concurrent.Volatile
 import microsoft.ui.dispatching.DispatcherQueue
 
 internal object WinUIScheduler {

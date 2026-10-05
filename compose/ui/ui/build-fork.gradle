@@ -64,6 +64,12 @@ if (composeWinUiJvmTargetEnabled && !composeWinUiGradlePluginRuntimeAvailable) {
     throw new GradleException("compose-winui JVM target requires running Gradle on JDK 22 or newer.")
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     redirect("androidx.compose.ui") {
         androidLibrary {
@@ -178,7 +184,9 @@ androidXMultiplatform {
         }
 
         nonJvmMain {
-            dependsOn(skikoMain)
+            if (!composeWinUiMingwTargetEnabled) {
+                dependsOn(skikoMain)
+            }
             dependencies {
                 // To comply with Klib resolver until https://youtrack.jetbrains.com/issue/KT-61096 is fixed
                 implementation("org.jetbrains.compose.annotation-internal:annotation:1.10.0")
@@ -549,8 +557,10 @@ kotlin {
         }
 
         // The Skiko actuals of the non-JVM and native targets. They are kept apart from
-        // nonJvmMain and nativeMain for a WinUI native target, which shares those two but not
-        // skikoMain; the fork build has no such target yet.
+        // nonJvmMain and nativeMain for the WinUI native target, which shares those two but not
+        // skikoMain. One source set cannot be both, so a build with the WinUI native target
+        // (composeWinUi.enableMingwTarget) leaves the Skiko actuals out of the two, as on
+        // winui_dev: the Darwin and web targets do not compile in that build.
         skikoNonJvmMain {
             dependsOn(skikoMain)
         }
@@ -559,18 +569,22 @@ kotlin {
             dependsOn(skikoMain)
         }
 
-        nonJvmMain {
-            dependsOn(skikoNonJvmMain)
-        }
+        if (!composeWinUiMingwTargetEnabled) {
+            nonJvmMain {
+                dependsOn(skikoNonJvmMain)
+            }
 
-        nativeMain {
-            dependsOn(skikoNativeMain)
+            nativeMain {
+                dependsOn(skikoNativeMain)
+            }
         }
     }
 
     if (composeWinUiGradlePluginAvailable) {
         jvm("winuiJvm")
-        // Enable a WinUI mingw target after kotlin-winrt provides its mingw runtime actuals.
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
             winuiMain {
@@ -601,6 +615,16 @@ kotlin {
 
             winuiJvmTest {
                 dependsOn(winuiTest)
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                    dependsOn(nativeMain)
+                    dependencies {
+                        implementation(libs.atomicFu)
+                    }
+                }
             }
         }
     }
@@ -646,10 +670,12 @@ if (composeWinUiGradlePluginAvailable) {
     configurations.configureEach { configuration ->
         def lowerName = configuration.name.toLowerCase(Locale.ROOT)
         if (lowerName.contains("winui")) {
-            configuration.attributes.attribute(
-                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                    25
-            )
+            if (!lowerName.contains("mingw")) {
+                configuration.attributes.attribute(
+                        org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                        25
+                )
+            }
             configuration.resolutionStrategy.dependencySubstitution {
                 substitute(module("org.jetbrains.skiko:skiko"))
                         .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))

@@ -48,6 +48,7 @@ class JetBrainsAndroidXImplPlugin @Inject constructor(
         project.configureForkDependenciesTasks()
         project.configureDependencyVerification()
         project.registerRedirectVersionsExtension()
+        project.configureWinUiMingwDependencies()
         project.plugins.all { plugin ->
             if (plugin is KotlinMultiplatformPluginWrapper) {
                 onKotlinMultiplatformPluginApplied(project)
