@@ -36,6 +36,7 @@ internal class WinUIKeyInputAdapter(
     private val owner: WinUIOwner,
     private val composeEventSources: () -> List<Any?> = { listOf(root) },
     private val composeEventSubtreeSources: () -> List<Any?> = { emptyList() },
+    private val sendKeyEvent: (KeyEvent) -> Boolean = owner::sendKeyEvent,
 ) {
     private var isDisposed = false
     private val keyEventProcessor = WinUIKeyEventProcessor()
@@ -52,6 +53,14 @@ internal class WinUIKeyInputAdapter(
         registrations.forEach { registration ->
             runCatching { registration.remove() }
         }
+    }
+
+    /**
+     * Forgets the pressed modifier keys. Called when the window loses focus, because the key up of
+     * a modifier released in another window never reaches this one.
+     */
+    fun resetModifiers() {
+        keyEventProcessor.resetModifiers()
     }
 
     @OptIn(InternalComposeUiApi::class)
@@ -88,6 +97,14 @@ internal class WinUIKeyInputAdapter(
                             "composeSubtreeSources=${composeSubtreeSources.debugClassNames()} " +
                             "shouldDispatch=$shouldDispatch"
                     }
+                    val isExtendedKey = readKeyInputProperty(eventType, "keyStatus.isExtendedKey") {
+                        keyStatus.isExtendedKey
+                    }
+                    // The character of the key in the current keyboard layout, as AWT reports it
+                    // in KeyEvent.keyChar on desktop.
+                    val codePoint = readKeyInputProperty(eventType, "codePoint") {
+                        winUIKeyCodePoint(key.abiValue, keyStatus.scanCode.toInt())
+                    }
                     val handled = keyEventProcessor.process(
                         eventType = eventType,
                         key = key,
@@ -96,7 +113,9 @@ internal class WinUIKeyInputAdapter(
                         shouldDispatchEvent = {
                             shouldDispatch
                         },
-                        sendKeyEvent = owner::sendKeyEvent,
+                        isExtendedKey = isExtendedKey,
+                        codePoint = codePoint,
+                        sendKeyEvent = sendKeyEvent,
                     ).also { handled ->
                         debugKeyInput {
                             "compose event=$eventType key=$key handled=$handled"
@@ -104,7 +123,7 @@ internal class WinUIKeyInputAdapter(
                     }
                     if (eventType == KeyEventType.KeyDown) {
                         characterInputProcessor.onKeyDownProcessed(
-                            keyCodePoint = 0,
+                            keyCodePoint = codePoint,
                             wasHandled = handled == true,
                         )
                     }
@@ -203,6 +222,8 @@ internal class WinUIKeyEventProcessor {
         isHandled: Boolean,
         nativeEvent: Any?,
         shouldDispatchEvent: () -> Boolean = { true },
+        isExtendedKey: Boolean = false,
+        codePoint: Int = 0,
         sendKeyEvent: (KeyEvent) -> Boolean,
     ): Boolean? {
         if (isHandled) return null
@@ -210,11 +231,17 @@ internal class WinUIKeyEventProcessor {
         if (eventType == KeyEventType.KeyDown) {
             modifierState.update(key, isPressed = true)
         }
-        val handled = sendKeyEvent(key.toComposeKeyEvent(eventType, modifierState, nativeEvent))
+        val handled = sendKeyEvent(
+            key.toComposeKeyEvent(eventType, modifierState, nativeEvent, isExtendedKey, codePoint)
+        )
         if (eventType == KeyEventType.KeyUp) {
             modifierState.update(key, isPressed = false)
         }
         return handled
+    }
+
+    fun resetModifiers() {
+        modifierState.reset()
     }
 }
 
@@ -372,6 +399,11 @@ private data class WinUIInputEventRegistration<T : Any>(
     }
 }
 
+/**
+ * The UTF-16 code unit that [virtualKey] types in the current keyboard layout, or 0.
+ */
+internal expect fun winUIKeyCodePoint(virtualKey: Int, scanCode: Int): Int
+
 private fun Int.toCommittedTextOrNull(): String? {
     if (this <= 0 || this > Char.MAX_VALUE.code) return null
     val char = toChar()
@@ -388,6 +420,13 @@ private class WinUIKeyModifierState {
         private set
     var isShiftPressed = false
         private set
+
+    fun reset() {
+        isCtrlPressed = false
+        isMetaPressed = false
+        isAltPressed = false
+        isShiftPressed = false
+    }
 
     fun update(key: VirtualKey, isPressed: Boolean) {
         when (key) {
@@ -412,10 +451,12 @@ private fun VirtualKey.toComposeKeyEvent(
     eventType: KeyEventType,
     modifierState: WinUIKeyModifierState,
     nativeEvent: Any?,
+    isExtendedKey: Boolean,
+    codePoint: Int,
 ) = KeyEvent(
-    key = toComposeKey(),
+    key = if (this == VirtualKey.Enter && isExtendedKey) Key.NumPadEnter else toComposeKey(),
     type = eventType,
-    codePoint = 0,
+    codePoint = codePoint,
     isCtrlPressed = modifierState.isCtrlPressed,
     isMetaPressed = modifierState.isMetaPressed,
     isAltPressed = modifierState.isAltPressed,
@@ -544,5 +585,24 @@ private fun VirtualKey.toComposeKey(): Key =
         VirtualKey.GamepadView -> Key.ButtonSelect
         VirtualKey.GamepadLeftThumbstickButton -> Key.ButtonThumbLeft
         VirtualKey.GamepadRightThumbstickButton -> Key.ButtonThumbRight
-        else -> Key.Unknown
+        else -> abiValue.oemKeyToComposeKey()
 }
+
+// The punctuation keys have no named VirtualKey values (VK_OEM_*). Their meaning depends on the
+// keyboard layout; these are the US layout keys, as on the desktop target.
+private fun Int.oemKeyToComposeKey(): Key =
+    when (this) {
+        0xBA -> Key.Semicolon
+        0xBB -> Key.Equals
+        0xBC -> Key.Comma
+        0xBD -> Key.Minus
+        0xBE -> Key.Period
+        0xBF -> Key.Slash
+        0xC0 -> Key.Grave
+        0xDB -> Key.LeftBracket
+        0xDC,
+        0xE2 -> Key.Backslash
+        0xDD -> Key.RightBracket
+        0xDE -> Key.Apostrophe
+        else -> Key.Unknown
+    }

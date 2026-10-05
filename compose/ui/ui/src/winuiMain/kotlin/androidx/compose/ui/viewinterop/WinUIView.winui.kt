@@ -300,8 +300,12 @@ private class WinUIViewHolder<T : UIElement>(
             )
             .then(positionModifier)
 
+    // Compose works in pixels and XAML in device independent pixels.
+    private val scale: Float
+        get() = density.density.takeIf { it.isFinite() && it > 0f } ?: 1f
+
     private val measurePolicy = MeasurePolicy { _, constraints ->
-        val desiredSize = view.measureUnclippedDesiredSize()
+        val desiredSize = view.measureUnclippedDesiredSize(scale)
         val width = constraints.constrainWidth(desiredSize.width)
         val height = constraints.constrainHeight(desiredSize.height)
         layout(width, height) {
@@ -359,12 +363,13 @@ private class WinUIViewHolder<T : UIElement>(
         this.height = height
         this.nativeWidth = nativeWidth
         this.nativeHeight = nativeHeight
+        val scale = scale
         scheduleNativeUpdate {
-            group.uiElement.width = width.toWinUISize()
-            group.uiElement.height = height.toWinUISize()
+            group.uiElement.width = width.toWinUISize(scale)
+            group.uiElement.height = height.toWinUISize(scale)
             viewFrameworkElement?.let {
-                it.width = nativeWidth.toWinUISize()
-                it.height = nativeHeight.toWinUISize()
+                it.width = nativeWidth.toWinUISize(scale)
+                it.height = nativeHeight.toWinUISize(scale)
                 it.horizontalAlignment = HorizontalAlignment.Left
                 it.verticalAlignment = VerticalAlignment.Top
             }
@@ -381,9 +386,10 @@ private class WinUIViewHolder<T : UIElement>(
         val changed = positionX != x || positionY != y
         positionX = x
         positionY = y
+        val scale = scale
         scheduleNativeUpdate {
-            Canvas.setLeft(group.uiElement, x.toDouble())
-            Canvas.setTop(group.uiElement, y.toDouble())
+            Canvas.setLeft(group.uiElement, (x / scale).toDouble())
+            Canvas.setTop(group.uiElement, (y / scale).toDouble())
         }
         updateOwnerInteropBoundsIfActive()
         updateOwnerInteropFocusRectIfFocused()
@@ -590,7 +596,7 @@ private class WinUIViewHolder<T : UIElement>(
             checkNotNull(RectangleGeometry.rectProperty) {
                 "WinUI RectangleGeometry.RectProperty is not available."
             },
-            Rect(0f, 0f, width.toFloat(), height.toFloat()),
+            Rect(0f, 0f, width / scale, height / scale),
         )
         scheduleNativeUpdate {
             setClip(group.uiElement, clip)
@@ -783,7 +789,10 @@ private class WinUIFocusTargetInteropNode(
     }
 }
 
-private fun UIElement.measureUnclippedDesiredSize(): IntSize {
+/**
+ * The size the element wants, in Compose pixels: XAML measures in DIPs, which [scale] converts.
+ */
+private fun UIElement.measureUnclippedDesiredSize(scale: Float): IntSize {
     val measuredSize = runCatching {
         measure(
             Size(
@@ -792,16 +801,16 @@ private fun UIElement.measureUnclippedDesiredSize(): IntSize {
             )
         )
         IntSize(
-            width = desiredSize.width.toComposeLayoutSize(),
-            height = desiredSize.height.toComposeLayoutSize(),
+            width = (desiredSize.width * scale).toComposeLayoutSize(),
+            height = (desiredSize.height * scale).toComposeLayoutSize(),
         )
     }.getOrElse {
         IntSize.Zero
     }
     val explicitSize = asWinRTFrameworkElement()?.let {
         IntSize(
-            width = it.width.toComposeLayoutSize(),
-            height = it.height.toComposeLayoutSize(),
+            width = (it.width * scale).toComposeLayoutSize(),
+            height = (it.height * scale).toComposeLayoutSize(),
         )
     } ?: IntSize.Zero
     return IntSize(
@@ -810,8 +819,8 @@ private fun UIElement.measureUnclippedDesiredSize(): IntSize {
     )
 }
 
-private fun Int.toWinUISize(): Double =
-    if (this > 0) toDouble() else Double.NaN
+private fun Int.toWinUISize(scale: Float): Double =
+    if (this > 0) toDouble() / scale else Double.NaN
 
 private val requiredAccessibilityViewProperty
     get() = checkNotNull(AutomationProperties.accessibilityViewProperty) {

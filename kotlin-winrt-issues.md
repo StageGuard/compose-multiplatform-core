@@ -9,11 +9,12 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **kotlin-winrt build in use:** `xaml-support` `3d7855783`: `fa4508d7c` plus
-  the fixes of kotlin-winrt PR #15 (`KWINRT-062`) and PR #16 (`KWINRT-053`,
-  `KWINRT-054`, `KWINRT-057`, `KWINRT-058`, `KWINRT-060`), both open. Published
-  to Maven Local from the local checkout (since 2026-10-04; before that the
-  `0.1.0-SNAPSHOT` published from `master`).
+- **kotlin-winrt build in use:** `xaml-support` `c4bf4e53a`: `a4a84ff38`, which
+  merged kotlin-winrt PR #15 (`KWINRT-062`) and PR #16 (`KWINRT-053`,
+  `KWINRT-054`, `KWINRT-057`, `KWINRT-058`, `KWINRT-060`), plus the fix of PR
+  #17 (`KWINRT-063`), open. Published to Maven Local from the local checkout
+  (since 2026-10-04; before that the `0.1.0-SNAPSHOT` published from
+  `master`).
 - **Open upstream/plugin/runtime:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
   `KWINRT-052`, `KWINRT-059`, and `KWINRT-061`.
 - **Open compose-side workarounds:** `KWINRT-040`, `KWINRT-049`, `KWINRT-051`,
@@ -30,7 +31,8 @@ baseline, not every retest attempt.
   `KWINRT-030`, `KWINRT-031`, `KWINRT-032`, `KWINRT-038`, `KWINRT-043`,
   `KWINRT-044`, `KWINRT-045`, `KWINRT-046`, `KWINRT-047`, `KWINRT-041`,
   `KWINRT-048`, `KWINRT-050`, `KWINRT-053`, `KWINRT-054`, `KWINRT-055`,
-  `KWINRT-056`, `KWINRT-057`, `KWINRT-058`, `KWINRT-060`, and `KWINRT-062`.
+  `KWINRT-056`, `KWINRT-057`, `KWINRT-058`, `KWINRT-060`, `KWINRT-062`, and
+  `KWINRT-063`.
 
 ## KWINRT-052: Compiler plugin only runs on the Kotlin compiler it was built with
 
@@ -219,8 +221,8 @@ baseline, not every retest attempt.
 
 - **Status:** Closed. Fixed on kotlin-winrt `xaml-support` by `a2df61585`,
   `34003c521` and `4c1a850f4`
-  (https://github.com/compose-fluent/kotlin-winrt/pull/15, open). `master` has
-  no XAML pipeline.
+  (https://github.com/compose-fluent/kotlin-winrt/pull/15, merged). `master`
+  has no XAML pipeline.
 - **Observed in:** `:compose:ui:ui` and the skiko-winui build, with
   kotlin-winrt `xaml-support` `fa4508d7c`.
 - **Symptom:** in a project without `windows.application` and without XAML
@@ -256,6 +258,32 @@ baseline, not every retest attempt.
   `compileKotlinWinuiJvm`: the generated registrar names
   `org.jetbrains.skia.paragraph.FontRastrSettings`, which skiko deprecates
   with `DeprecationLevel.ERROR`. Compose UI was not tried with the export on.
+
+## KWINRT-063: Interface projections call IClosable.Close on the wrong interface
+
+- **Status:** Closed. Fixed on kotlin-winrt `xaml-support` by `c4bf4e53a`
+  (https://github.com/compose-fluent/kotlin-winrt/pull/17, open).
+- **Observed in:** the drag image of `Modifier.dragAndDropSource` on WinUI
+  (`WinUISoftwareBitmap.winuiJvm.kt`), with kotlin-winrt `xaml-support`
+  `3d7855783` in Maven Local.
+- **Symptom:** `IMemoryBufferReference.close()` on the object that
+  `BitmapBuffer.createReference()` returns crashes the JVM with
+  `EXCEPTION_ACCESS_VIOLATION` in `RTMediaFrame.dll`.
+  `IMemoryBufferReference$NativeProjection.close()` calls vtable slot 6 of the
+  `IMemoryBufferReference` pointer, which is `get_Capacity`, without its out
+  parameter, instead of querying `IClosable` and calling its slot 6 (`Close`).
+  Runtime class projections (`BitmapBuffer.close()`,
+  `SoftwareBitmap.close()`) are right: they go through `WinRTClosableObject`.
+  The other required interfaces of an interface projection probably have the
+  same problem.
+- **Fix:** the native projection of such an interface caches the `IClosable`
+  reference of the object (`acquireInterfaceReference(nativeObject,
+  IID.IDisposable)`, qualified because the interface's own `Metadata.IID`
+  shadows the runtime `IID` there) and calls `Close` on it, as CsWinRT's
+  `ABI.System.IDisposable.Dispose` does.
+- **Resolution:** `WinUISoftwareBitmap.winuiJvm.kt` closes the buffer
+  reference with the projected `close()` again. `WinUISoftwareBitmapTest`
+  crashed the test JVM before the fix and passes with it.
 
 ## KWINRT-049: WinRT async cancellation upcall can crash clipboard text retrieval
 

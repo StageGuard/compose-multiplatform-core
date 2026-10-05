@@ -17,7 +17,11 @@
 package androidx.compose.ui.graphics
 
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.node.setLightingInfo
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 
 @OptIn(InternalComposeUiApi::class)
 internal object WinUIGraphicsContext : GraphicsContext {
@@ -32,8 +36,20 @@ internal object WinUIGraphicsContext : GraphicsContext {
     override fun releaseGraphicsLayer(layer: GraphicsLayer) =
         skiaGraphicsContext.releaseGraphicsLayer(layer)
 
+    /**
+     * Places the light that elevation shadows are cast from, as the Skiko RootNodeOwner does. The
+     * root is the window content, so it has no offset in the window.
+     */
+    fun setLightingInfo(density: Density, containerSize: IntSize) =
+        skiaGraphicsContext.setLightingInfo(
+            canvasOffset = Offset.Zero,
+            density = density,
+            containerSize = containerSize,
+        )
+
     internal fun resetForTest() {
         skiaGraphicsContext.close()
         skiaGraphicsContext = SkiaGraphicsContext()
     }
 }
+

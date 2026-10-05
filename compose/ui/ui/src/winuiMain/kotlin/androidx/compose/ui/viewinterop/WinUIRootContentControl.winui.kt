@@ -31,4 +31,14 @@ internal class WinUIRootContentControl : ContentControl() {
             brush.color = Color(a = 0u, r = 0u, g = 0u, b = 0u)
         }
     }
+
+    fun setOpaqueBackground(red: UByte, green: UByte, blue: UByte) {
+        background = SolidColorBrush().also { brush ->
+            brush.color = Color(a = 255u, r = red, g = green, b = blue)
+        }
+    }
+
+    fun clearBackground() {
+        background = null
+    }
 }

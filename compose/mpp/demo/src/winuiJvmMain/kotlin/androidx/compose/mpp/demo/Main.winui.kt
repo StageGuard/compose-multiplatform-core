@@ -28,10 +28,12 @@ import androidx.compose.ui.platform.WinUIComposeView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Application
 import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.currentComposeViewForTest
+import androidx.compose.ui.window.rememberWindowState
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import windows.foundation.EventRegistrationToken
@@ -52,6 +54,7 @@ fun main(args: Array<String>) {
         val applicationScope = this
         Window(
             title = "Compose MPP demo",
+            state = rememberWindowState(width = 1024.dp, height = 850.dp),
             onCloseRequest = { exitApplication() },
         ) {
             DisposableEffect(Unit) {

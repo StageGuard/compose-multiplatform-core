@@ -37,17 +37,37 @@ internal object WindowsWinUIConfig : ScrollConfig {
 
     override fun isPreciseWheelScroll(event: PointerEvent): Boolean = false
 
+    // The formula is the one of the desktop target on Windows, which multiplies by the number of
+    // lines a wheel notch scrolls in the system settings (MouseWheelEvent.scrollAmount).
     override fun Density.calculateMouseWheelScroll(event: PointerEvent, bounds: IntSize): Offset {
         if (event.type == PointerEventType.PanMove) {
             return event.totalPanGestureOffset
         }
 
-        return Offset(
-            x = event.totalScrollDelta.x * (bounds.width / 20f),
-            y = event.totalScrollDelta.y * (bounds.height / 20f)
-        ) * -1f
+        val wheelScrollLines = systemWheelScrollLines()
+        return if (wheelScrollLines == WheelPageScroll) {
+            Offset(
+                x = event.totalScrollDelta.x * bounds.width,
+                y = event.totalScrollDelta.y * bounds.height
+            ) * -1f
+        } else {
+            Offset(
+                x = event.totalScrollDelta.x * (bounds.width / 20f),
+                y = event.totalScrollDelta.y * (bounds.height / 20f)
+            ) * -wheelScrollLines.toFloat()
+        }
     }
 }
+
+/**
+ * [systemWheelScrollLines] when the system scrolls one page per wheel notch.
+ */
+internal const val WheelPageScroll = -1
+
+/**
+ * The number of lines one wheel notch scrolls (`SPI_GETWHEELSCROLLLINES`), or [WheelPageScroll].
+ */
+internal expect fun systemWheelScrollLines(): Int
 
 private val PointerEvent.totalScrollDelta
     get() = changes.fastFold(Offset.Zero) { acc, c -> acc + c.scrollDelta }

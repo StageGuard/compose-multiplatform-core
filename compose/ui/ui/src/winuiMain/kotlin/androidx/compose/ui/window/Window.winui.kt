@@ -22,13 +22,25 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.platform.WinUIComposeView
 import androidx.compose.ui.platform.debugRender
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
+import kotlin.math.roundToInt
 import windows.foundation.EventRegistrationToken
 import microsoft.ui.composition.Compositor
 import microsoft.ui.dispatching.DispatcherQueue
 import microsoft.ui.windowing.AppWindow
 import microsoft.ui.windowing.AppWindowChangedEventArgs
 import microsoft.ui.windowing.AppWindowClosingEventArgs
+import microsoft.ui.windowing.AppWindowPresenterKind
+import microsoft.ui.windowing.DisplayArea
+import microsoft.ui.windowing.DisplayAreaFallback
+import microsoft.ui.windowing.OverlappedPresenter
+import microsoft.ui.windowing.OverlappedPresenterState
+import windows.graphics.PointInt32
+import windows.graphics.SizeInt32
 import microsoft.ui.xaml.WindowActivatedEventArgs
 import microsoft.ui.xaml.WindowActivationState
 import microsoft.ui.xaml.media.DesktopAcrylicBackdrop
@@ -75,9 +87,19 @@ private interface WinUIWindowScopeTestAccess {
     val composeViewForTest: WinUIComposeView?
 }
 
+/**
+ * Composes a WinUI window.
+ *
+ * @param onCloseRequest called when the user closes the window.
+ * @param state the state of the window: its size, position, placement and whether it is
+ * minimized, as on desktop. The window applies changes of the state and writes back the changes
+ * the user makes, such as moving, resizing or maximizing it. [WindowState.size] is the outer size
+ * of the window; an unspecified width or height keeps the size Windows gives the window.
+ */
 @Composable
 fun ApplicationScope.Window(
     onCloseRequest: () -> Unit = { exitApplication() },
+    state: WindowState = rememberWindowState(),
     title: String = "Untitled",
     extendsContentIntoTitleBar: Boolean = false,
     backdrop: WindowBackdrop = WindowBackdrop.None,
@@ -90,6 +112,12 @@ fun ApplicationScope.Window(
         },
         update = {
             set(onCloseRequest) { this.onCloseRequest = it }
+            set(state) { this.state = it }
+            // Reading the state here recomposes the node when it changes.
+            set(state.size) { applySize(it) }
+            set(state.position) { applyPosition(it) }
+            set(state.placement) { applyPlacement(it) }
+            set(state.isMinimized) { applyMinimized(it) }
             set(title) { this.title = it }
             set(extendsContentIntoTitleBar) { this.extendsContentIntoTitleBar = it }
             set(backdrop) { this.backdrop = it }
@@ -132,8 +160,130 @@ private class WinUIWindowNode(
 
     var onCloseRequest: () -> Unit = {}
 
+    var state: WindowState = WindowState()
+
+    // Our own presenter, so that it can be maximized, minimized and restored.
+    private val overlappedPresenter: OverlappedPresenter = OverlappedPresenter.create()
+    private var isUpdatingFromWindow = false
+
     init {
         applicationContext?.attachWindow(dispatcherQueue)
+        appWindow.setPresenter(overlappedPresenter)
+    }
+
+    private val scale: Float
+        get() = windowDpiScale(window).takeIf { it.isFinite() && it > 0f } ?: 1f
+
+    fun applySize(size: DpSize) {
+        if (isUpdatingFromWindow || isReleased) return
+        val current = appWindow.size
+        val scale = scale
+        val width = if (size.width.isSpecified) (size.width.value * scale).roundToInt() else current.width
+        val height = if (size.height.isSpecified) (size.height.value * scale).roundToInt() else current.height
+        if (width != current.width || height != current.height) {
+            appWindow.resize(SizeInt32(width.coerceAtLeast(1), height.coerceAtLeast(1)))
+        }
+    }
+
+    fun applyPosition(position: WindowPosition) {
+        if (isUpdatingFromWindow || isReleased) return
+        val scale = scale
+        when (position) {
+            is WindowPosition.Absolute -> {
+                val x = (position.x.value * scale).roundToInt()
+                val y = (position.y.value * scale).roundToInt()
+                val current = appWindow.position
+                if (x != current.x || y != current.y) {
+                    appWindow.move(PointInt32(x, y))
+                }
+            }
+            is WindowPosition.Aligned -> {
+                val workArea = DisplayArea.getFromWindowId(appWindow.id, DisplayAreaFallback.Nearest)
+                    ?.workArea ?: return
+                val size = appWindow.size
+                val offset = position.alignment.align(
+                    IntSize(size.width, size.height),
+                    IntSize(workArea.width, workArea.height),
+                    LayoutDirection.Ltr,
+                )
+                appWindow.move(PointInt32(workArea.x + offset.x, workArea.y + offset.y))
+            }
+            WindowPosition.PlatformDefault -> Unit
+        }
+    }
+
+    fun applyPlacement(placement: WindowPlacement) {
+        if (isUpdatingFromWindow || isReleased) return
+        when (placement) {
+            WindowPlacement.Floating -> {
+                ensureOverlappedPresenter()
+                if (overlappedPresenter.state == OverlappedPresenterState.Maximized) {
+                    overlappedPresenter.restore()
+                }
+            }
+            WindowPlacement.Maximized -> {
+                ensureOverlappedPresenter()
+                if (overlappedPresenter.state != OverlappedPresenterState.Maximized) {
+                    overlappedPresenter.maximize()
+                }
+            }
+            WindowPlacement.Fullscreen -> {
+                if (appWindow.presenter?.kind != AppWindowPresenterKind.FullScreen) {
+                    appWindow.setPresenter(AppWindowPresenterKind.FullScreen)
+                }
+            }
+        }
+    }
+
+    fun applyMinimized(isMinimized: Boolean) {
+        if (isUpdatingFromWindow || isReleased || !hasActivated) return
+        val isWindowMinimized = isWindowMinimized(window)
+        if (isMinimized && !isWindowMinimized) {
+            ensureOverlappedPresenter()
+            overlappedPresenter.minimize()
+        } else if (!isMinimized && isWindowMinimized) {
+            ensureOverlappedPresenter()
+            overlappedPresenter.restore()
+            applyPlacement(state.placement)
+        }
+    }
+
+    private fun ensureOverlappedPresenter() {
+        if (appWindow.presenter?.kind != AppWindowPresenterKind.Overlapped) {
+            appWindow.setPresenter(overlappedPresenter)
+        }
+    }
+
+    /**
+     * Writes what the user did to the window back into [state], as desktop does: the position and
+     * the size of a floating window, the placement, and whether the window is minimized.
+     */
+    private fun updateStateFromWindow() {
+        if (isReleased || !hasActivated) return
+        val state = state
+        val scale = scale
+        val isMinimized = isWindowMinimized(window)
+        val placement = when {
+            appWindow.presenter?.kind == AppWindowPresenterKind.FullScreen ->
+                WindowPlacement.Fullscreen
+            overlappedPresenter.state == OverlappedPresenterState.Maximized ->
+                WindowPlacement.Maximized
+            isMinimized -> state.placement
+            else -> WindowPlacement.Floating
+        }
+        isUpdatingFromWindow = true
+        try {
+            state.isMinimized = isMinimized
+            state.placement = placement
+            if (!isMinimized && placement == WindowPlacement.Floating) {
+                val position = appWindow.position
+                state.position = WindowPosition((position.x / scale).dp, (position.y / scale).dp)
+                val size = appWindow.size
+                state.size = DpSize((size.width / scale).dp, (size.height / scale).dp)
+            }
+        } finally {
+            isUpdatingFromWindow = false
+        }
     }
 
     var title: String
@@ -159,14 +309,17 @@ private class WinUIWindowNode(
             } else {
                 clearWindowSystemBackdrop(window)
             }
+            composeView?.setWindowBackground(isOpaque = value == WindowBackdrop.None)
         }
 
     var content: @Composable WindowScope.() -> Unit = {}
         set(value) {
             field = value
             if (isReleased) return
+            val isFirstActivation = !hasActivated
             val view = composeView ?: WinUIComposeView(window, ::updateCaptureProtection).also {
                 composeView = it
+                it.setWindowBackground(isOpaque = backdrop == WindowBackdrop.None)
                 setWindowContent(window, it.root)
                 registerAppWindowChangedHandler()
                 registerAppWindowClosingHandler()
@@ -178,6 +331,12 @@ private class WinUIWindowNode(
             }
             view.setWindowFocused(isWindowFocused)
             updateWindowInfo()
+            if (isFirstActivation) {
+                // The window has its real position and size now, which an unspecified position
+                // or size of the state takes, as on desktop.
+                applyMinimized(state.isMinimized)
+                updateStateFromWindow()
+            }
             view.setContent {
                 this@WinUIWindowNode.field()
             }
@@ -238,18 +397,26 @@ private class WinUIWindowNode(
     }
 
     private fun updateWindowInfo() {
+        updateStateFromWindow()
         val view = composeView ?: return
-        val appWindowSize = appWindow.size
+        // The content gets the client area, as on desktop: AppWindow.Size includes the title bar
+        // and the resize borders.
+        val clientSize = appWindow.clientSize
         debugRender {
-            "window info size=${appWindowSize.width}x${appWindowSize.height} " +
+            "window info clientSize=${clientSize.width}x${clientSize.height} " +
                 "extendsTitleBar=${window.extendsContentIntoTitleBar}"
         }
-        view.setWindowContainerSize(
-            IntSize(
-                width = appWindowSize.width,
-                height = appWindowSize.height,
+        // A minimized window has an empty client area; keep the last size, as desktop does.
+        if (clientSize.width > 0 && clientSize.height > 0) {
+            view.setWindowContainerSize(
+                IntSize(
+                    width = clientSize.width,
+                    height = clientSize.height,
+                )
             )
-        )
+        }
+        view.setWindowMinimized(isWindowMinimized(window))
+        view.invalidatePositionOnScreen()
         val titleBar = appWindow.titleBar
         if (window.extendsContentIntoTitleBar && titleBar != null) {
             view.setWindowTitleBarInsets(
@@ -323,6 +490,13 @@ private fun XamlWindow.requiredAppWindow(): AppWindow =
     }
 
 internal expect fun setWindowCaptureProtection(window: XamlWindow, isProtected: Boolean): Boolean
+
+internal expect fun isWindowMinimized(window: XamlWindow): Boolean
+
+/**
+ * The scale of the monitor the window is on: its DPI divided by 96.
+ */
+internal expect fun windowDpiScale(window: XamlWindow): Float
 
 private fun setWindowContent(window: XamlWindow, content: microsoft.ui.xaml.UIElement) {
     window.content = content

@@ -39,22 +39,24 @@ import kotlin.test.assertTrue
 
 class WinUISkikoRenderHostTest {
     @Test
-    fun coalescesRenderRequestsAndDelegatesResizeToLayer() {
+    fun forwardsRenderRequestsAndDelegatesResizeToLayer() {
         val layer = FakeWinUISkikoLayerAdapter()
         val host = WinUISkikoRenderHost(layer)
 
+        // The layer coalesces the requests. A request it does not draw for must not keep the
+        // next ones from reaching it.
         host.requestRender()
         host.requestRender(throttledToVsync = false)
         host.setSize(IntSize(30, 40))
 
-        assertEquals(listOf(true), layer.renderRequests)
+        assertEquals(listOf(true, false), layer.renderRequests)
         assertEquals(listOf(IntSize(30, 40)), layer.sizes)
         assertEquals(
             2,
             host.diagnosticsForTest.renderInvalidationCount,
         )
         assertEquals(
-            1,
+            2,
             host.diagnosticsForTest.delegatedRenderInvalidationCount,
         )
         assertTrue(host.diagnosticsForTest.pendingRenderInvalidation)
@@ -78,7 +80,7 @@ class WinUISkikoRenderHostTest {
         host.requestRender(throttledToVsync = false)
 
         assertEquals(listOf("drainInterop", "draw"), events)
-        assertEquals(listOf(true, false), layer.renderRequests)
+        assertEquals(listOf(true, true, false), layer.renderRequests)
         assertEquals(1, host.diagnosticsForTest.drawSubmissionCount)
         assertEquals(1, host.diagnosticsForTest.interopTransactionDrainCount)
         assertTrue(host.diagnosticsForTest.pendingRenderInvalidation)

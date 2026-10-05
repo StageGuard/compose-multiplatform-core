@@ -57,6 +57,12 @@ kotlin {
         named("winuiJvmMain") {
             kotlin.srcDir("../navigation-compose/src/nonAndroidMain/kotlin")
             kotlin.srcDir("../navigation-compose/src/desktopMain/kotlin")
+            dependencies {
+                // Compile against the WinUI Compose UI that the application runs with. The
+                // published one is the desktop variant, whose actuals (Dialog_skikoKt) are not in
+                // the WinUI one.
+                implementation(project(":compose:ui:ui"))
+            }
         }
     }
 }

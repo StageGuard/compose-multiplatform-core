@@ -54,6 +54,13 @@ internal class WinUISkikoRenderHost(
     val component: FrameworkElement
         get() = layer.component
 
+    /**
+     * The elements whose key events are Compose key events: the host and the swap chain panel in
+     * it, which has the XAML focus after a click into the content.
+     */
+    val keyEventSources: List<FrameworkElement>
+        get() = layer.keyEventSources
+
     val renderApiForTest: GraphicsApi
         get() = layer.renderApi
 
@@ -93,20 +100,17 @@ internal class WinUISkikoRenderHost(
     fun requestRender(throttledToVsync: Boolean = true) {
         if (!isClosed) {
             renderInvalidationCount += 1
-            if (!pendingRenderInvalidation) {
-                pendingRenderInvalidation = true
-                delegatedRenderInvalidationCount += 1
-                debugRender {
-                    "layer.requestRender throttled=$throttledToVsync " +
-                        "invalidations=$renderInvalidationCount delegated=$delegatedRenderInvalidationCount"
-                }
-                layer.requestRender(throttledToVsync)
-            } else {
-                debugRender {
-                    "layer.requestRender coalesced throttled=$throttledToVsync " +
-                        "invalidations=$renderInvalidationCount delegated=$delegatedRenderInvalidationCount"
-                }
+            // Every request goes to the layer, whose render dispatcher coalesces them. Holding
+            // requests back here until the next draw lost them when the layer did not draw for a
+            // request, for example before its surface had a size: nothing was drawn again until
+            // an input event, with no continuous frame scheduler running.
+            pendingRenderInvalidation = true
+            delegatedRenderInvalidationCount += 1
+            debugRender {
+                "layer.requestRender throttled=$throttledToVsync " +
+                    "invalidations=$renderInvalidationCount delegated=$delegatedRenderInvalidationCount"
             }
+            layer.requestRender(throttledToVsync)
         }
     }
 
@@ -260,6 +264,9 @@ internal data class WinUISkikoRenderHostDiagnostics(
 internal interface WinUISkikoLayerAdapter : AutoCloseable {
     val component: FrameworkElement
 
+    val keyEventSources: List<FrameworkElement>
+        get() = listOf(component)
+
     val renderApi: GraphicsApi
 
     val renderVersion: Long
@@ -305,6 +312,9 @@ private class DefaultWinUISkikoLayerAdapter(
 
     override val component: FrameworkElement
         get() = layer.component
+
+    override val keyEventSources: List<FrameworkElement>
+        get() = listOf(layer.component, layer.renderPanel)
 
     override val renderApi: GraphicsApi
         get() = layer.renderApi

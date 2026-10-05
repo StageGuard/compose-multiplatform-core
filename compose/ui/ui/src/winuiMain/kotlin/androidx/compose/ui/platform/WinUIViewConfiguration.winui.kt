@@ -16,34 +16,22 @@
 
 package androidx.compose.ui.platform
 
-import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import windows.ui.viewmanagement.UISettings
 
-internal val WinUIViewConfiguration: ViewConfiguration = DefaultWinUIViewConfiguration()
-
+/**
+ * The view configuration of the desktop target (`PlatformContext.DefaultViewConfiguration` with
+ * a density dependent touch slop), so that gestures are recognized the same way on both targets.
+ */
 internal class DefaultWinUIViewConfiguration(
-    private val doubleClickTimeMillis: () -> Long = ::winUIDoubleClickTimeMillis,
+    private val density: () -> Density = { Density(1f) },
 ) : ViewConfiguration {
-
-    // Windows press-and-hold gestures use a 500 ms hold threshold.
     override val longPressTimeoutMillis: Long = 500L
 
-    // Windows.UI.ViewManagement.UISettings exposes the user's system double-click time in ms.
-    override val doubleTapTimeoutMillis: Long
-        get() = doubleClickTimeMillis()
+    override val doubleTapTimeoutMillis: Long = 300L
 
-    // Compose requires a lower bound before accepting a second tap; WinUI does not expose one.
     override val doubleTapMinTimeMillis: Long = 40L
 
-    // Windows gesture recognition uses an 8 effective pixel movement tolerance for touch holds.
-    override val touchSlop: Float = 8f
-
-    // WinUI Standard sizing aligns interactive items to 40x40 effective pixels.
-    override val minimumTouchTargetSize: DpSize = DpSize(40.dp, 40.dp)
+    override val touchSlop: Float
+        get() = with(density()) { 18.dp.toPx() }
 }
-
-private val uiSettings by lazy(LazyThreadSafetyMode.PUBLICATION) { UISettings() }
-
-private fun winUIDoubleClickTimeMillis(): Long =
-    uiSettings.doubleClickTime.toLong()

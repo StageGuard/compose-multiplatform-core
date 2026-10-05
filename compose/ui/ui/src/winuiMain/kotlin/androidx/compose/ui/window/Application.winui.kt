@@ -104,7 +104,8 @@ private class WinUIApplicationRuntime(
         GlobalSnapshotManager.register(WinUIDispatcher(dispatcherQueue, immediate = false))
     private val root = WinUIApplicationNode()
     private val composition = Composition(
-        applier = WinUIApplicationApplier(root),
+        // As on desktop, the application ends when its content has no window left.
+        applier = WinUIApplicationApplier(root, onEndChanges = ::exitApplicationIfEmpty),
         parent = recomposer,
     )
     private val recomposerJob: Job
@@ -138,6 +139,12 @@ private class WinUIApplicationRuntime(
         application.exit()
     }
 
+    private fun exitApplicationIfEmpty() {
+        if (root.isEmpty) {
+            exitApplication()
+        }
+    }
+
     override fun attachWindow(dispatcherQueue: DispatcherQueue) {
         check(this.dispatcherQueue == dispatcherQueue) {
             "WinUI windows must be created on the application DispatcherQueue."
@@ -159,6 +166,9 @@ private class WinUIApplicationRuntime(
 
 internal open class WinUIApplicationNode : ComposeNodeLifecycleCallback {
     private val children = mutableListOf<WinUIApplicationNode>()
+
+    val isEmpty: Boolean
+        get() = children.isEmpty()
 
     open fun insertAt(index: Int, instance: WinUIApplicationNode) {
         children.add(index, instance)
@@ -194,6 +204,7 @@ internal open class WinUIApplicationNode : ComposeNodeLifecycleCallback {
 
 internal class WinUIApplicationApplier(
     root: WinUIApplicationNode,
+    private val onEndChanges: () -> Unit = {},
 ) : AbstractApplier<WinUIApplicationNode>(root) {
     override fun insertTopDown(index: Int, instance: WinUIApplicationNode) = Unit
 
@@ -213,5 +224,7 @@ internal class WinUIApplicationApplier(
         root.removeAll()
     }
 
-    override fun onEndChanges() = Unit
+    override fun onEndChanges() {
+        onEndChanges.invoke()
+    }
 }

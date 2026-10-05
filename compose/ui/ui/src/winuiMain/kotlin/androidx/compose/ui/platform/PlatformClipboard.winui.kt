@@ -69,7 +69,7 @@ internal class WinUIClipboard : Clipboard {
         get() = winUIClipboardStatics
 
     internal fun hasText(): Boolean =
-        lastPlainText != null || runCatching { getWinUIContent().contains(winUITextFormat) }
+        currentPlainText() != null || runCatching { getWinUIContent().contains(winUITextFormat) }
             .getOrElse {
                 logClipboardReadFailure(it)
                 false
@@ -78,7 +78,7 @@ internal class WinUIClipboard : Clipboard {
     internal fun getTextBlocking(): String? {
         // The deprecated ClipboardManager API is synchronous. Preserve Android-like
         // setText/getText round-trips for in-process writes without blocking WinRT async work.
-        lastPlainText?.let { return it }
+        currentPlainText()?.let { return it }
         val content = runCatching { getWinUIContent() }
             .getOrElse {
                 logClipboardReadFailure(it)
@@ -91,14 +91,14 @@ internal class WinUIClipboard : Clipboard {
     }
 
     internal fun setText(text: String) {
-        lastPlainText = text
         // Windows clipboard ownership can be transiently locked by another process. Keep Compose
         // API state coherent and treat the native clipboard write as best effort.
         runCatching { setWinUIContent(DataPackage().apply { setText(text) }) }
+        rememberPlainText(text)
     }
 
     internal fun getClipEntryBlocking(): ClipEntry? {
-        lastPlainText?.let { return ClipEntry(it) }
+        currentPlainText()?.let { return ClipEntry(it) }
         val content = runCatching { getWinUIContent() }
             .getOrElse {
                 logClipboardReadFailure(it)
@@ -109,7 +109,7 @@ internal class WinUIClipboard : Clipboard {
     }
 
     private suspend fun readClipEntry(): ClipEntry? {
-        lastPlainText?.let { return ClipEntry(it) }
+        currentPlainText()?.let { return ClipEntry(it) }
         val content = runCatching { getWinUIContent() }
             .getOrElse {
                 logClipboardReadFailure(it)
@@ -139,19 +139,21 @@ internal class WinUIClipboard : Clipboard {
             is DataPackage -> nativeClipEntry
             is DataPackageView -> DataPackage().also { dataPackage ->
                 if (nativeClipEntry.contains(winUITextFormat)) {
-                    lastPlainText?.let(dataPackage::setText)
+                    currentPlainText()?.let(dataPackage::setText)
                 }
             }
             is String -> DataPackage().apply {
-                lastPlainText = nativeClipEntry
                 setText(nativeClipEntry)
             }
             else -> return
         }
-        if (clipEntry.nativeClipEntry !is String) {
+        runCatching { setWinUIContent(dataPackage) }
+        val text = clipEntry.nativeClipEntry as? String
+        if (text != null) {
+            rememberPlainText(text)
+        } else {
             lastPlainText = null
         }
-        runCatching { setWinUIContent(dataPackage) }
     }
 
     private fun clearWinUIContent() {
@@ -182,7 +184,29 @@ actual class ClipEntry constructor(val nativeClipEntry: Any?) {
 
 actual class ClipMetadata
 
+// The plain text this process put on the clipboard, for the synchronous ClipboardManager API, and
+// the clipboard sequence number right after; another application copying changes the number.
 private var lastPlainText: String? = null
+private var lastPlainTextSequenceNumber = 0L
+
+private fun rememberPlainText(text: String) {
+    lastPlainText = text
+    lastPlainTextSequenceNumber = clipboardSequenceNumber()
+}
+
+private fun currentPlainText(): String? {
+    val text = lastPlainText ?: return null
+    if (clipboardSequenceNumber() != lastPlainTextSequenceNumber) {
+        lastPlainText = null
+        return null
+    }
+    return text
+}
+
+/**
+ * The clipboard sequence number of the window station, which changes with the clipboard content.
+ */
+internal expect fun clipboardSequenceNumber(): Long
 
 private val winUIClipboardStatics: IUnknownReference
     get() = WinRTClipboardClass.StaticInterfaces.iClipboardStatics()

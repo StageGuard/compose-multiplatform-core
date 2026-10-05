@@ -26,11 +26,23 @@ import androidx.compose.ui.platform.InspectorInfo
 internal class WinUIDragAndDropManager : DragAndDropManager {
     private val rootDragAndDropNode = DragAndDropNode()
     private val interestedTargets = mutableSetOf<DragAndDropTarget>()
-    private var starter: WinUIDragAndDropStarter? = null
+
+    /**
+     * Starts the drags that Compose sources request. Drag sources read
+     * [isRequestDragAndDropTransferRequired] when they attach, so the host sets this before it
+     * composes any content.
+     */
+    internal var starter: WinUIDragAndDropStarter? = null
 
     override val modifier: Modifier = RootWinUIDragAndDropElement(rootDragAndDropNode)
     override val isRequestDragAndDropTransferRequired: Boolean
         get() = starter != null
+
+    /**
+     * Whether the last drag event was over a target that accepted the session.
+     */
+    internal val hasEligibleDropTarget: Boolean
+        get() = rootDragAndDropNode.hasEligibleDropTarget
 
     override fun requestDragAndDropTransfer(node: DragAndDropNode, offset: Offset) {
         val currentStarter = starter ?: return

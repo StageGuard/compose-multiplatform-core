@@ -16,6 +16,7 @@
 
 package androidx.compose.ui.platform
 
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
@@ -23,23 +24,22 @@ import kotlin.test.assertEquals
 
 class WinUIViewConfigurationTest {
     @Test
-    fun usesWinUIDoubleClickTime() {
-        val configuration = DefaultWinUIViewConfiguration(
-            doubleClickTimeMillis = { 620L },
-        )
+    fun usesTheDesktopInteractionDefaults() {
+        val configuration = DefaultWinUIViewConfiguration()
 
-        assertEquals(620L, configuration.doubleTapTimeoutMillis)
+        assertEquals(500L, configuration.longPressTimeoutMillis)
+        assertEquals(300L, configuration.doubleTapTimeoutMillis)
+        assertEquals(40L, configuration.doubleTapMinTimeMillis)
+        assertEquals(DpSize(48.dp, 48.dp), configuration.minimumTouchTargetSize)
     }
 
     @Test
-    fun usesWinUIInteractionDefaults() {
-        val configuration = DefaultWinUIViewConfiguration(
-            doubleClickTimeMillis = { 500L },
-        )
+    fun touchSlopFollowsDensity() {
+        var density = Density(1f)
+        val configuration = DefaultWinUIViewConfiguration { density }
 
-        assertEquals(500L, configuration.longPressTimeoutMillis)
-        assertEquals(40L, configuration.doubleTapMinTimeMillis)
-        assertEquals(8f, configuration.touchSlop)
-        assertEquals(DpSize(40.dp, 40.dp), configuration.minimumTouchTargetSize)
+        assertEquals(18f, configuration.touchSlop)
+        density = Density(1.5f)
+        assertEquals(27f, configuration.touchSlop)
     }
 }

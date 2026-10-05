@@ -200,8 +200,6 @@ kotlin {
 
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
     if (task.name.contains("Winui")) {
-        task.exclude("**/Menu.skiko.kt")
-        task.exclude("**/ExposedDropdownMenuPopup.skiko.kt")
         task.compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
             freeCompilerArgs.add("-Xjdk-release=25")

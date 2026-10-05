@@ -34,6 +34,35 @@ private val setWindowDisplayAffinity = Linker.nativeLinker().downcallHandle(
     ),
 )
 
+private val isIconic = Linker.nativeLinker().downcallHandle(
+    user32Lookup.find("IsIconic").orElseThrow(),
+    FunctionDescriptor.of(
+        ValueLayout.JAVA_INT,
+        ValueLayout.ADDRESS,
+    ),
+)
+
+private val getDpiForWindow = Linker.nativeLinker().downcallHandle(
+    user32Lookup.find("GetDpiForWindow").orElseThrow(),
+    FunctionDescriptor.of(
+        ValueLayout.JAVA_INT,
+        ValueLayout.ADDRESS,
+    ),
+)
+
+internal actual fun windowDpiScale(window: XamlWindow): Float {
+    val hwnd = runCatching { winuiWindowHwnd(window) }.getOrDefault(0L)
+    if (hwnd == 0L) return 1f
+    val dpi = getDpiForWindow.invokeWithArguments(MemorySegment.ofAddress(hwnd)) as Int
+    return if (dpi > 0) dpi / 96f else 1f
+}
+
+internal actual fun isWindowMinimized(window: XamlWindow): Boolean {
+    val hwnd = runCatching { winuiWindowHwnd(window) }.getOrDefault(0L)
+    if (hwnd == 0L) return false
+    return (isIconic.invokeWithArguments(MemorySegment.ofAddress(hwnd)) as Int) != 0
+}
+
 internal actual fun setWindowCaptureProtection(window: XamlWindow, isProtected: Boolean): Boolean {
     val hwnd = winuiWindowHwnd(window)
     if (hwnd == 0L) return false
