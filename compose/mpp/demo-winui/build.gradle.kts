@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import io.github.composefluent.windows.toolkit.gradle.GenerateWinAppMingwEntryTask
 import io.github.composefluent.windows.toolkit.gradle.GenerateWinRTProjectionsTask
 import io.github.composefluent.windows.toolkit.gradle.RunWinAppHostTask
 import io.github.composefluent.windows.toolkit.gradle.WindowsPackageType
@@ -44,6 +45,12 @@ val kotlinWinRtVersion = providers
 val composeWinUiSkikoWinUiVersion = providers
     .gradleProperty("composeWinUi.skikoWinUiVersion")
     .orElse("0.0.0-SNAPSHOT")
+// Adds the native application next to the JVM one. It needs the same flag on the libraries.
+val composeWinUiMingwTargetEnabled = providers
+    .gradleProperty("composeWinUi.enableMingwTarget")
+    .map { it.toBoolean() }
+    .orElse(false)
+    .get()
 // The Windows 10 version that the Windows App SDK supports as a minimum.
 val composeWinUiMinWindowsVersion = "10.0.19041.0"
 
@@ -170,6 +177,63 @@ fun localWinUiJar(path: String) = rootProject.project(path).provider {
     rootProject.project(path).tasks.named("winuiJvmJar", Jar::class).get().archiveFile.get().asFile
 }
 
+// skiko-winui for MinGW links against its Skia bridge DLLs, and Skia loads its ICU data from the
+// directory of the executable. Both come in runtime jars of skiko-winui and are staged with the
+// native application, as in the samples of skiko-winui.
+val skikoWinuiMingwRuntimeFiles = configurations.create("skikoWinuiMingwRuntimeFiles") {
+    isTransitive = false
+    isCanBeConsumed = false
+}
+val skikoWinuiWindowsRuntimeFiles = configurations.create("skikoWinuiWindowsRuntimeFiles") {
+    isTransitive = false
+    isCanBeConsumed = false
+}
+dependencies {
+    if (composeWinUiMingwTargetEnabled) {
+        add(
+            skikoWinuiMingwRuntimeFiles.name,
+            "io.github.compose-fluent:skiko-winui-mingw-runtime:${composeWinUiSkikoWinUiVersion.get()}",
+        )
+        add(
+            skikoWinuiWindowsRuntimeFiles.name,
+            "io.github.compose-fluent:skiko-winui-windows:${composeWinUiSkikoWinUiVersion.get()}",
+        )
+    }
+}
+val skikoWinuiMingwRuntimeDir = layout.buildDirectory.dir("skiko-winui-mingw-runtime")
+val skikoWinuiWindowsRuntimeDir = layout.buildDirectory.dir("skiko-winui-windows-runtime")
+val unpackSkikoWinuiMingwRuntime = tasks.register<Sync>("unpackSkikoWinuiMingwRuntime") {
+    description = "Unpacks the native runtime of skiko-winui for the native application layout."
+    from(skikoWinuiMingwRuntimeFiles.elements.map { jars -> jars.map { zipTree(it) } })
+    into(skikoWinuiMingwRuntimeDir)
+}
+val unpackSkikoWinuiWindowsRuntime = tasks.register<Sync>("unpackSkikoWinuiWindowsRuntime") {
+    description = "Unpacks the ICU data of skiko-winui for the native application layout."
+    from(skikoWinuiWindowsRuntimeFiles.elements.map { jars -> jars.map { zipTree(it) } })
+    include("icudtl.dat")
+    into(skikoWinuiWindowsRuntimeDir)
+}
+val skikoWinuiMingwRuntimeAssets = listOf("skiko_winui.dll", "skiko_winui_skia.dll").map { name ->
+    skikoWinuiMingwRuntimeDir.map { it.file("winui-mingw/windows-x64/$name").asFile }
+} + skikoWinuiWindowsRuntimeDir.map { it.file("icudtl.dat").asFile }
+
+// The Material icons have no mingwX64 artifact. Their common sources are compiled into the
+// native application instead, as on winui_dev.
+val materialIconsCoreSources = configurations.create("materialIconsCoreSources") {
+    isTransitive = false
+    isCanBeConsumed = false
+}
+dependencies {
+    add(materialIconsCoreSources.name, "org.jetbrains.compose.material:material-icons-core:1.7.3:sources")
+}
+val extractWinUIMaterialIconsSources = tasks.register<Sync>("extractWinUIMaterialIconsSources") {
+    from(materialIconsCoreSources.map { files(it).map(::zipTree) })
+    include("commonMain/**/*.kt")
+    eachFile { path = path.removePrefix("commonMain/") }
+    includeEmptyDirs = false
+    into(layout.buildDirectory.dir("generated/winui-material-icons"))
+}
+
 val stageWinUIMppSampleResources = tasks.register<Copy>("stageWinUIMppSampleResources") {
     from(project.file("../demo/src/commonMain/resources"))
     from(project.file("../demo/src/desktopMain/resources"))
@@ -179,6 +243,11 @@ val stageWinUIMppSampleResources = tasks.register<Copy>("stageWinUIMppSampleReso
 kotlin {
     jvmToolchain(25)
     jvm("winuiJvm")
+    if (composeWinUiMingwTargetEnabled) {
+        mingwX64("winuiMingw") {
+            binaries.executable()
+        }
+    }
 
     sourceSets {
         commonMain {
@@ -189,6 +258,16 @@ kotlin {
             kotlin.exclude("androidx/compose/mpp/demo/components/text/FontRasterization.kt")
             // SKIKO-012: Skottie is published separately from Skiko and has no WinUI artifact.
             kotlin.exclude("androidx/compose/mpp/demo/LottieAnimation.kt")
+            if (composeWinUiMingwTargetEnabled) {
+                // The Material icons and Compose resources have no mingwX64 artifact, and common
+                // sources cannot use what only one target has. So in a build with the native
+                // target both applications compile the icons from their sources, as on
+                // winui_dev, and have a placeholder for the one screen that uses resources.
+                kotlin.srcDir(extractWinUIMaterialIconsSources)
+                kotlin.srcDir("src/commonWithoutResourcesMain/kotlin")
+                kotlin.exclude("androidx/compose/mpp/demo/resources/DemoRes.kt")
+                kotlin.exclude("androidx/compose/mpp/demo/bug/VectorPainterInPainter.kt")
+            }
             resources.srcDir("../demo/src/commonMain/resources")
             dependencies {
                 implementation(kotlin("stdlib"))
@@ -222,29 +301,76 @@ kotlin {
                 implementation(project(":navigation:navigation-common"))
                 implementation(project(":navigation:navigation-compose"))
                 implementation(project(":navigation:navigation-runtime"))
-                implementation("org.jetbrains.compose.material:material-icons-core:1.7.3") {
-                    exclude(group = "org.jetbrains.compose.runtime")
-                    exclude(group = "org.jetbrains.compose.ui")
+                if (!composeWinUiMingwTargetEnabled) {
+                    implementation("org.jetbrains.compose.material:material-icons-core:1.7.3") {
+                        exclude(group = "org.jetbrains.compose.runtime")
+                        exclude(group = "org.jetbrains.compose.ui")
+                    }
+                    implementation("org.jetbrains.compose.components:components-resources:1.11.1") {
+                        exclude(group = "org.jetbrains.compose.runtime")
+                        exclude(group = "org.jetbrains.compose.ui")
+                    }
+                    implementation("io.github.compose-fluent:winrt-runtime-jvm:${kotlinWinRtVersion.get()}")
                 }
-                implementation("org.jetbrains.compose.components:components-resources:1.11.1") {
-                    exclude(group = "org.jetbrains.compose.runtime")
-                    exclude(group = "org.jetbrains.compose.ui")
-                }
-                implementation("io.github.compose-fluent:winrt-runtime-jvm:${kotlinWinRtVersion.get()}")
                 implementation("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}")
             }
         }
 
+        // winuiMain of the demo is shared by its WinUI JVM and native applications. With one
+        // target its sources are compiled as part of that target's source set.
+        val sharedWinUiMain = if (composeWinUiMingwTargetEnabled) {
+            maybeCreate("winuiMain").apply {
+                dependsOn(getByName("commonMain"))
+                kotlin.srcDir("../demo/src/winuiMain/kotlin")
+            }
+        } else {
+            null
+        }
+
         named("winuiJvmMain") {
-            // winuiMain of the demo is shared by its WinUI JVM and native applications.
-            kotlin.srcDir("../demo/src/winuiMain/kotlin")
+            if (sharedWinUiMain != null) {
+                dependsOn(sharedWinUiMain)
+            } else {
+                kotlin.srcDir("../demo/src/winuiMain/kotlin")
+            }
             kotlin.srcDir("../demo/src/winuiJvmMain/kotlin")
             resources.srcDir("../demo/src/desktopMain/resources")
             resources.srcDir(stageWinUIMppSampleResources.map { it.destinationDir })
             dependencies {
+                if (composeWinUiMingwTargetEnabled) {
+                    implementation("io.github.compose-fluent:winrt-runtime-jvm:${kotlinWinRtVersion.get()}")
+                }
                 runtimeOnly("io.github.compose-fluent:skiko-winui-windows:${composeWinUiSkikoWinUiVersion.get()}")
             }
         }
+
+        if (composeWinUiMingwTargetEnabled) {
+            named("winuiMingwMain") {
+                dependsOn(sharedWinUiMain!!)
+                kotlin.srcDir("../demo/src/winuiMingwMain/kotlin")
+                dependencies {
+                    implementation("io.github.compose-fluent:winrt-runtime:${kotlinWinRtVersion.get()}")
+                }
+            }
+        }
+    }
+}
+
+if (composeWinUiMingwTargetEnabled) {
+    tasks.matching { it.name.startsWith("stageWindowsPackageRuntimeAssets") }.configureEach {
+        dependsOn(unpackSkikoWinuiMingwRuntime, unpackSkikoWinuiWindowsRuntime)
+    }
+    // The application options name the JVM main class; the native entry calls the main function.
+    // The toolkit sets the property when it registers the task, so this is a configuration of
+    // the registered task and not of the task type, which would run first.
+    afterEvaluate {
+        tasks.withType<GenerateWinAppMingwEntryTask>().names
+            .filter { name -> name.contains("WinuiMingw") }
+            .forEach { name ->
+                tasks.named<GenerateWinAppMingwEntryTask>(name) {
+                    mainClass.set("androidx.compose.mpp.demo.main")
+                }
+            }
     }
 }
 
@@ -323,6 +449,12 @@ windows {
         projectPriApplicationDefinition(winUiMppPriApplicationDefinition, "App.xaml")
         projectPriContent(winUiMppPriContent, "Assets/Sample.txt")
         projectPriEmbedFile(winUiMppPriEmbed, "Embedded/Payload.bin")
+        if (composeWinUiMingwTargetEnabled) {
+            skikoWinuiMingwRuntimeAssets.forEach { asset -> runtimeAsset(asset.get()) }
+            // The native application has no class path resources: it reads the fonts of the
+            // demo next to its executable.
+            winUiMppSampleResourceFiles.forEach { font -> runtimeAsset(font) }
+        }
     }
     packageReferences {
         windowsSdk(

@@ -204,7 +204,7 @@ class WinUISourceSetIsolationTest {
     }
 
     @Test
-    fun winuiWindowHandleLookupIsShared() {
+    fun winuiWindowHandleUsesSharedGeneratedInteropProjection() {
         val moduleRoot = findUiModuleRoot()
         val sharedSource = moduleRoot.resolve(
             "src/winuiMain/kotlin/androidx/compose/ui/window/WinUIWindowInterop.winui.kt"
@@ -213,21 +213,24 @@ class WinUISourceSetIsolationTest {
             "src/winuiJvmMain/kotlin/androidx/compose/ui/window/WinUIWindowNative.winuiJvm.kt"
         ).readText()
 
-        // KWINRT-077: until kotlin-winrt generates winrt.interop.WindowNative for this module,
-        // the shared lookup makes the IWindowNative call itself, with the portable runtime API.
         assertTrue(
-            sharedSource.contains("internal fun winuiWindowHandle(window: XamlWindow): RawAddress") &&
-                sharedSource.contains("internal fun winuiWindowHwnd(window: XamlWindow): Long"),
-            "The HWND lookup should be shared by the WinUI targets.",
+            sharedSource.contains("import winrt.interop.WindowNative") &&
+                sharedSource.contains("WindowNative.getWindowHandle(window)"),
+            "Shared WinUI HWND lookup should use kotlin-winrt generated WindowNative interop.",
         )
         assertFalse(
-            jvmSource.contains("IWindowNative") || jvmSource.contains("queryInterface("),
+            jvmSource.contains("winrt.interop.WindowNative") ||
+                jvmSource.contains("WindowNative.getWindowHandle(window)"),
             "WinUI JVM native calls should reuse the shared HWND lookup.",
         )
-        listOf("java.lang.foreign", "MemorySegment", "Linker").forEach { forbidden ->
+        listOf(
+            "ComVtableInvoker",
+            "IWindowNativeIid",
+            "queryInterface(IWindowNative",
+        ).forEach { forbidden ->
             assertFalse(
                 sharedSource.contains(forbidden),
-                "The shared HWND lookup must stay portable: found $forbidden.",
+                "WinUI HWND lookup should not manually query IWindowNative: found $forbidden.",
             )
         }
     }
@@ -259,18 +262,16 @@ class WinUISourceSetIsolationTest {
         )
         assertFalse(
             jvmInteropFile.exists(),
-            "InputPane window interop is shared by WinUI JVM and MinGW.",
+            "Generated InputPane window interop is shared by WinUI JVM and MinGW.",
         )
         val sharedInteropSource = sharedInteropFile.readText()
         val composeViewSource = moduleRoot.resolve(
             "src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt"
         ).readText()
 
-        // KWINRT-077: until kotlin-winrt generates InputPaneInterop for this module, the shared
-        // source makes the IInputPaneInterop call itself, with the portable runtime API.
         listOf(
-            "winuiWindowHandle(window)",
-            "winUIInputPaneForWindow(windowHandle)",
+            "WindowNative.getWindowHandle(window)",
+            "InputPaneInterop.getForWindow(windowHandle)",
         ).forEach { expected ->
             assertTrue(
                 sharedInteropSource.contains(expected),

@@ -26,26 +26,6 @@ import microsoft.ui.dispatching.DispatcherQueueController
  */
 internal object WinUITestRuntime {
     private const val RuntimeAssetsRootProperty = "compose.winui.test.runtimeAssetsRoot"
-    private const val ShutdownGraceMillis = 3_000L
-
-    /**
-     * KWINRT-079: when the JVM exits, kotlin-winrt removes the event registrations that are
-     * still alive from its shutdown hook. The scheduler keeps the tick registration of its timer
-     * for the lifetime of the process, and removing it calls into the apartment of the test
-     * thread, which is blocked in `System.exit` by then: the test worker would never exit.
-     * The results are reported before the worker exits, so it is ended after a grace period.
-     */
-    private fun exitWhenShutdownHangs() {
-        Runtime.getRuntime().addShutdownHook(
-            Thread(
-                {
-                    Thread.sleep(ShutdownGraceMillis)
-                    Runtime.getRuntime().halt(0)
-                },
-                "winui-test-exit",
-            ).apply { isDaemon = true }
-        )
-    }
 
     private var applicationHostScope: AutoCloseable? = null
     private var dispatcherQueueController: DispatcherQueueController? = null
@@ -74,7 +54,6 @@ internal object WinUITestRuntime {
             applicationHostScope = hostScope
             dispatcherQueueController = controller
             ownerThread = currentThread
-            exitWhenShutdownHangs()
         } catch (throwable: Throwable) {
             runCatching { hostScope.close() }
             throw throwable

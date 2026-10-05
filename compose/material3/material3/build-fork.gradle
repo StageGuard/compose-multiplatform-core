@@ -48,6 +48,13 @@ def composeWinUiWindowsSdkVersion = providers
         .gradleProperty("composeWinUi.windowsSdkVersion")
         .orElse("10.0.26100.0")
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
+
 androidXMultiplatform {
     redirect("androidx.compose.material3") {
         androidLibrary {
@@ -136,7 +143,10 @@ androidXMultiplatform {
 
         nonJvmMain {
             dependsOn(skikoMain)
-            dependsOn(skikoNonJvmMain)
+            // One source set cannot both have and not have these actuals; see :compose:ui:ui.
+            if (!composeWinUiMingwTargetEnabled) {
+                dependsOn(skikoNonJvmMain)
+            }
             dependencies {
                 implementation(libs.atomicFu)
             }
@@ -312,7 +322,7 @@ tasks.register("updateTranslations", UpdateTranslationsTask.class) {
 }
 
 // Applied after androidXMultiplatform has applied the Kotlin plugin (see :compose:ui:ui).
-if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
     apply plugin: "io.github.compose-fluent.windows-toolkit"
 
     windows {
@@ -324,6 +334,14 @@ if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
             // Whether there are a keyboard and a mouse, for the precision pointer sizing.
             type("Windows.Devices.Input.KeyboardCapabilities")
             type("Windows.Devices.Input.MouseCapabilities")
+            if (composeWinUiMingwTargetEnabled) {
+                // The calendar locale and date format of the native target are the WinRT ones;
+                // the JVM target has the JVM ones, like the desktop target.
+                type("Windows.Globalization.Calendar")
+                type("Windows.Globalization.DateTimeFormatting.DateTimeFormatter")
+                type("Windows.Globalization.NumberFormatting.DecimalFormatter")
+                type("Windows.System.UserProfile.GlobalizationPreferences")
+            }
         }
     }
 
@@ -340,8 +358,13 @@ if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
 }
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
             // Shared by the WinUI JVM and native targets.
@@ -352,18 +375,27 @@ kotlin {
                 }
             }
 
-            winuiJvmMain {
-                dependsOn(winuiMain)
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                }
+
+                winuiJvmTest {
+                    // The default JVM hierarchy also routes through jvmAndAndroidTest, which
+                    // reaches commonTest and its :compose:ui:ui-test dependency.
+                    dependsOn.removeAll { parent ->
+                        parent.name == "commonTest" || parent.name == "jvmAndAndroidTest"
+                    }
+                    dependencies {
+                        implementation(kotlin("test"))
+                    }
+                }
             }
 
-            winuiJvmTest {
-                // The default JVM hierarchy also routes through jvmAndAndroidTest, which reaches
-                // commonTest and its :compose:ui:ui-test dependency.
-                dependsOn.removeAll { parent ->
-                    parent.name == "commonTest" || parent.name == "jvmAndAndroidTest"
-                }
-                dependencies {
-                    implementation(kotlin("test"))
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                    dependsOn(nativeMain)
                 }
             }
         }
@@ -408,6 +440,13 @@ if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
     }
 }
 
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeCompile).configureEach { task ->
+    if (task.name.contains("Winui")) {
+        // winuiMain has the actual of the WinUI targets.
+        task.exclude("**/PrecisionPointer.skiko.kt")
+    }
+}
+
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
     if (task.name.contains("Winui")) {
         // winuiMain has the actual of the WinUI targets.
@@ -420,11 +459,14 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { 
 }
 
 configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
+    def lowerName = configuration.name.toLowerCase(Locale.ROOT)
+    if (lowerName.contains("winui")) {
+        if (!lowerName.contains("mingw")) {
+            configuration.attributes.attribute(
+                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                    25
+            )
+        }
         configuration.resolutionStrategy.dependencySubstitution {
             substitute(module("org.jetbrains.skiko:skiko"))
                     .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))

@@ -86,7 +86,12 @@ internal fun Project.addLicensesToPublishedArtifacts(license: License) {
 
             compilation.compileTaskProvider.configure { task ->
                 task.doLast {
-                    val licenseDir = File(compileTaskOutputFileProvider.get(), kmpSubdir).toPath()
+                    val output = compileTaskOutputFileProvider.get()
+                    // A compilation can produce a packed klib: the projection compilation that
+                    // the kotlin-winrt plugin adds to a MinGW target does. Its klib holds only
+                    // generated WinRT projections and gets no license file.
+                    if (output.isFile) return@doLast
+                    val licenseDir = File(output, kmpSubdir).toPath()
                     Files.createDirectories(licenseDir)
                     Files.write(licenseDir.resolve("LICENSE.txt"), licenseFile.readBytes())
                 }
