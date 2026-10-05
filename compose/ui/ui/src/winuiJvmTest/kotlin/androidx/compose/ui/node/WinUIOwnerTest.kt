@@ -854,6 +854,32 @@ class WinUIOwnerTest : WinUISkikoTestBase() {
         assertFalse(remainingListenerCalled)
     }
 
+    // A listener that measures a lazy layout composes its items, which applies changes and ends
+    // them on the same owner: the year list of the Material 3 date picker.
+    @Test
+    fun endApplyChangesInsideAListenerRunsEveryListenerOnce() {
+        val owner = createOwner()
+        val events = mutableListOf<String>()
+        try {
+            owner.registerOnEndApplyChangesListener { events += "first" }
+            owner.registerOnEndApplyChangesListener {
+                events += "nested"
+                owner.registerOnEndApplyChangesListener { events += "added" }
+                owner.onEndApplyChanges()
+            }
+            owner.registerOnEndApplyChangesListener { events += "last" }
+
+            owner.onEndApplyChanges()
+
+            assertEquals(listOf("first", "nested", "last", "added"), events)
+
+            owner.onEndApplyChanges()
+            assertEquals(4, events.size)
+        } finally {
+            owner.dispose()
+        }
+    }
+
     @Test
     fun disposeSuppressesPendingAndFutureOwnerCallbacks() {
         val events = OwnerEvents()

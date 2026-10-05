@@ -45,21 +45,68 @@ Result:
 - [x] Idle on the main screen for ten seconds: 16 ms of CPU time on desktop,
   31 ms on WinUI JVM, 47 ms native; working set 291 MB, 384 MB and 200 MB.
 - [x] `winuiJvmTest` of `ui` after the move of the dispatcher: 360 tests pass.
-- [ ] Not verified yet: the behaviour with real pointer and key input (drag
-  and drop, bottom sheet, drawer, menu keys, wheel, text editing and the
-  clipboard, context menu, text selection, cursors, focus, date picker,
-  pagers). The workstation was locked during this work, and a locked
-  workstation takes no injected input.
+
+Real input (2026-10-06). The same scripted mouse and key input (`mouse_event`,
+`keybd_event`) was sent to the native demo (debug and release), the WinUI JVM
+demo and the desktop demo, and the captures after every step were compared.
+
+- [x] Identical captures on native and WinUI JVM, and the same result as on
+  desktop: drag and drop between the two boxes (drag image, drop), modal
+  bottom sheet, navigation drawer, dropdown menu with the arrow keys and
+  Escape, the wheel over a scrolling column (one notch, three more, two back),
+  typing into a text field, select all, Ctrl+Shift+Left, copy, paste, undo,
+  paste of text from another application, Home, Delete, End, Backspace, cut,
+  double click on a word and a mouse drag over static text with Ctrl+C,
+  focus and typing in the two boxes of a dialog with Tab and Escape, the
+  window focus state, the date picker (a day, the next month, the year list,
+  a year, the input mode, a typed date).
+- [x] The clipboard has the same text after every copy and cut on the three
+  targets.
+- [x] Cursors over the areas of the PointerIcon screen and over a text field:
+  arrow, cross, I-beam, hand on the three targets (`GetCursorInfo`).
+- [x] The context menu of a text field opens on the right click. On WinUI it
+  is a `MenuFlyout` of the system in its own window, on both WinUI targets,
+  where desktop draws a Compose menu; that is the design of "Desktop parity".
+- [ ] Not exercised: the pagers did not turn a page with the scripted wheel
+  or drag on any of the three targets, so they say nothing; touch, pen and IME
+  input, which cannot be injected this way.
+
+Found and fixed with real input:
+
+- [x] The process ended with `IndexOutOfBoundsException` when the year list of
+  the date picker opened after a date had been selected.
+  `WinUIOwner.onEndApplyChanges` removed as many listeners as it had counted,
+  and a listener that measures a lazy layout applies changes on the same owner
+  and has removed them already. Shared WinUI code; the native target met it.
+  Test: `WinUIOwnerTest.endApplyChangesInsideAListenerRunsEveryListenerOnce`.
+- [x] The headline of a selected date was "14-Oct-26" on the native target and
+  "Oct 14, 2026" on the JVM: a WinRT formatter applies the date formats of the
+  regional settings of the user. The native Material 3 date format takes the
+  patterns of the locale without those (`GetLocaleInfoEx`).
+- [x] A date typed in the input mode of the date picker was always rejected on
+  the native target: the parser took a pattern without delimiters for one
+  field.
+- [x] After a copy, a native application whose window was closed within a few
+  seconds never ended: `KWINRT-081` in `kotlin-winrt-issues.md`, a deadlock of
+  the finalizer drain of the native kotlin-winrt runtime with the UI thread.
+  Compose releases its clipboard projections on the UI thread now, which
+  avoids it for the clipboard; the runtime problem is open.
 
 Differences that stay:
 
+- `KWINRT-081`: any other object whose last release calls into the UI thread
+  can still keep a native process from ending.
+- Both WinUI targets against desktop, seen in these checks: `Key.toString()`
+  is "Key(25)" where desktop says "Key: B" (the FocusAndKeyInput screen prints
+  it), and the drag image has the "Copy" badge of the system.
 - An exception that nothing catches (a route that does not exist, for example)
   ends a native process; the JVM targets print it and go on.
 - The screen `VectorPainter inside another Painter` is a placeholder in a build
   with the MinGW flag (no Compose resources artifact for mingwX64).
 - The demo entry of the JVM target has the validation hooks of the sample tasks
   (`compose.winui.mpp.sample.*`); the native entry has none.
-- No test covers the three fixes: the native target has no test compilation
+- No test covers the fixes in native-only sources (the entry, the main
+  dispatcher, the date format): the native target has no test compilation
   (`winuiMingwTest` is not wired, `:compose:ui:ui-test` has no MinGW target).
 
 ## WinUI MinGW target 2026-10-05
