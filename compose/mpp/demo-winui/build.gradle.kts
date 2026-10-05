@@ -451,6 +451,9 @@ windows {
         projectPriEmbedFile(winUiMppPriEmbed, "Embedded/Payload.bin")
         if (composeWinUiMingwTargetEnabled) {
             skikoWinuiMingwRuntimeAssets.forEach { asset -> runtimeAsset(asset.get()) }
+            // The native application has no class path resources: it reads the fonts of the
+            // demo next to its executable.
+            winUiMppSampleResourceFiles.forEach { font -> runtimeAsset(font) }
         }
     }
     packageReferences {
