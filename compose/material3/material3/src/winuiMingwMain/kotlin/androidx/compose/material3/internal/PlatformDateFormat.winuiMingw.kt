@@ -62,7 +62,10 @@ internal actual class PlatformDateFormat actual constructor(private val locale: 
         val formatter = cache.getOrPut(cacheKey) {
             DateTimeFormatter(template, languages)
         } as DateTimeFormatter
+        // The formatter marks the direction of every field with U+200E or U+200F, which the
+        // formatters of the other targets do not and which take room in a line of text.
         return formatter.format(Instant.fromEpochMilliseconds(utcTimeMillis), UtcTimeZone)
+            .filterNot { it == '‎' || it == '‏' }
     }
 
     actual fun parse(
@@ -127,10 +130,14 @@ internal actual class PlatformDateFormat actual constructor(private val locale: 
         return DateInputFormat(normalized, delimiter)
     }
 
+    // The second name is the narrow one, as on the other targets ("M" for Monday). The shortest
+    // abbreviation of WinRT has two letters in many languages ("Mo"), and its first letter is
+    // the narrow name there.
     actual val weekdayNames: List<Pair<String, String>>
         get() = calendarAt(KnownMondayUtcMillis).let { calendar ->
             List(DaysInWeek) {
-                val names = calendar.dayOfWeekAsString() to calendar.dayOfWeekAsString(1)
+                val names = calendar.dayOfWeekAsString() to
+                    calendar.dayOfWeekAsString(1).firstCodePoint()
                 calendar.addDays(1)
                 names
             }
@@ -210,6 +217,9 @@ private inline fun String.indexOfFirstFrom(startIndex: Int, predicate: (Char) ->
     }
     return -1
 }
+
+private fun String.firstCodePoint(): String =
+    if (length >= 2 && this[0].isHighSurrogate() && this[1].isLowSurrogate()) take(2) else take(1)
 
 private const val UtcTimeZone = "UTC"
 private const val KnownMondayUtcMillis = 1704067200000L // 2024-01-01
