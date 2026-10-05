@@ -14,29 +14,71 @@
  * limitations under the License.
  */
 
+@file:OptIn(ExperimentalForeignApi::class)
+
 package androidx.compose.mpp.demo
 
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.darkColors
-import androidx.compose.material.lightColors
+import androidx.compose.mpp.demo.components.text.loadResource
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.platform.Font
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Application
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.rememberWindowState
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.get
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.toKStringFromUtf16
+import kotlinx.cinterop.value
+import platform.windows.CommandLineToArgvW
+import platform.windows.GetCommandLineW
+import platform.windows.LocalFree
 
+// The same window and content as the desktop demo (Main.desktop.kt): the two are compared
+// screen by screen. The first command line argument names the screen to open.
 fun main() {
+    val args = commandLineArguments()
     Application {
         Window(
             title = "Compose MPP demo",
+            state = rememberWindowState(width = 1024.dp, height = 850.dp),
             onCloseRequest = { exitApplication() },
-            extendsContentIntoTitleBar = true,
         ) {
-            val app = remember { App() }
-            MaterialTheme(
-                colors = if (isSystemInDarkTheme()) darkColors() else lightColors()
-            ) {
+            val app = remember { App(initialScreenName = args.getOrNull(0)) }
+            val fontFamilyResolver = LocalFontFamilyResolver.current
+            val fontsLoaded = remember { mutableStateOf(false) }
+
+            if (fontsLoaded.value) {
                 app.Content()
             }
+
+            LaunchedEffect(Unit) {
+                val fontBytes = loadResource("NotoColorEmoji.ttf")
+                if (fontBytes != null) {
+                    val fontFamily = FontFamily(listOf(Font("NotoColorEmoji", fontBytes)))
+                    fontFamilyResolver.preload(fontFamily)
+                }
+                fontsLoaded.value = true
+            }
         }
+    }
+}
+
+// The generated application entry calls main without the arguments of the process.
+private fun commandLineArguments(): List<String> = memScoped {
+    val count = alloc<IntVar>()
+    val arguments = CommandLineToArgvW(GetCommandLineW()?.toKStringFromUtf16() ?: "", count.ptr)
+        ?: return emptyList()
+    try {
+        (1 until count.value).mapNotNull { index -> arguments[index]?.toKStringFromUtf16() }
+    } finally {
+        LocalFree(arguments)
     }
 }

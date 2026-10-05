@@ -24,6 +24,12 @@ plugins {
     id("JetBrainsAndroidXPlugin")
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     androidLibrary {
         namespace = "androidx.compose.ui.backhandler"
@@ -33,6 +39,9 @@ androidXMultiplatform {
     ios()
     js()
     wasmJs()
+    if (composeWinUiMingwTargetEnabled) {
+        mingwX64()
+    }
 
     defaultPlatform(PlatformIdentifier.ANDROID)
 

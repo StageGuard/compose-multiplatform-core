@@ -42,6 +42,12 @@ def composeWinUiSkikoWinUiVersion = providers
         .gradleProperty("composeWinUi.skikoWinUiVersion")
         .orElse("0.0.0-SNAPSHOT")
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     redirect("androidx.compose.animation") {
         androidLibrary {
@@ -132,6 +138,15 @@ tasks.withType(KotlinCompile).configureEach { task ->
 }
 
 kotlin {
+    if (composeWinUiGradlePluginAvailable && composeWinUiMingwTargetEnabled) {
+        mingwX64("winuiMingw")
+
+        sourceSets {
+            winuiMingwMain {
+                dependsOn(nativeMain)
+            }
+        }
+    }
     if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
         jvm("winuiJvm")
 
@@ -157,11 +172,14 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { 
 }
 
 configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
+    def lowerName = configuration.name.toLowerCase(Locale.ROOT)
+    if (lowerName.contains("winui")) {
+        if (!lowerName.contains("mingw")) {
+            configuration.attributes.attribute(
+                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                    25
+            )
+        }
         configuration.resolutionStrategy.dependencySubstitution {
             substitute(module("org.jetbrains.skiko:skiko"))
                     .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))

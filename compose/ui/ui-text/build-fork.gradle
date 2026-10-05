@@ -47,6 +47,13 @@ def composeWinUiWindowsSdkVersion = providers
         .gradleProperty("composeWinUi.windowsSdkVersion")
         .orElse("10.0.26100.0")
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+def composeWinUiTargetEnabled = composeWinUiJvmTargetEnabled || composeWinUiMingwTargetEnabled
+
 androidXMultiplatform {
     redirect("androidx.compose.ui") {
         androidLibrary {
@@ -191,7 +198,7 @@ afterEvaluate {
 }
 
 // Applied after androidXMultiplatform has applied the Kotlin plugin (see :compose:ui:ui).
-if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
+if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
     apply plugin: "io.github.compose-fluent.windows-toolkit"
 
     windows {
@@ -219,8 +226,13 @@ if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
 }
 
 kotlin {
-    if (composeWinUiGradlePluginAvailable && composeWinUiJvmTargetEnabled) {
-        jvm("winuiJvm")
+    if (composeWinUiGradlePluginAvailable && composeWinUiTargetEnabled) {
+        if (composeWinUiJvmTargetEnabled) {
+            jvm("winuiJvm")
+        }
+        if (composeWinUiMingwTargetEnabled) {
+            mingwX64("winuiMingw")
+        }
 
         sourceSets {
             // Shared by the WinUI JVM and native targets.
@@ -231,11 +243,6 @@ kotlin {
                 }
             }
 
-            winuiJvmMain {
-                dependsOn(winuiMain)
-                dependsOn(jvmAndAndroidMain)
-            }
-
             winuiTest {
                 dependsOn(commonTest)
                 dependencies {
@@ -244,10 +251,24 @@ kotlin {
                 }
             }
 
-            winuiJvmTest {
-                dependsOn(winuiTest)
-                dependencies {
-                    runtimeOnly("io.github.compose-fluent:skiko-winui-windows:${composeWinUiSkikoWinUiVersion.get()}")
+            if (composeWinUiJvmTargetEnabled) {
+                winuiJvmMain {
+                    dependsOn(winuiMain)
+                    dependsOn(jvmAndAndroidMain)
+                }
+
+                winuiJvmTest {
+                    dependsOn(winuiTest)
+                    dependencies {
+                        runtimeOnly("io.github.compose-fluent:skiko-winui-windows:${composeWinUiSkikoWinUiVersion.get()}")
+                    }
+                }
+            }
+
+            if (composeWinUiMingwTargetEnabled) {
+                winuiMingwMain {
+                    dependsOn(winuiMain)
+                    dependsOn(nativeMain)
                 }
             }
         }
@@ -266,11 +287,14 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { 
 }
 
 configurations.configureEach { configuration ->
-    if (configuration.name.toLowerCase(Locale.ROOT).contains("winui")) {
-        configuration.attributes.attribute(
-                org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
-                25
-        )
+    def lowerName = configuration.name.toLowerCase(Locale.ROOT)
+    if (lowerName.contains("winui")) {
+        if (!lowerName.contains("mingw")) {
+            configuration.attributes.attribute(
+                    org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE,
+                    25
+            )
+        }
         configuration.resolutionStrategy.dependencySubstitution {
             substitute(module("org.jetbrains.skiko:skiko"))
                     .using(module("io.github.compose-fluent:skiko-winui:${composeWinUiSkikoWinUiVersion.get()}"))

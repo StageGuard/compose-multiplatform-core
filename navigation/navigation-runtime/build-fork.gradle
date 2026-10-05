@@ -29,6 +29,12 @@ plugins {
     id("JetBrainsAndroidXPlugin")
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     redirect("androidx.navigation") {
         androidLibrary {
@@ -43,6 +49,11 @@ androidXMultiplatform {
         js()
         wasmJs()
     }
+    if (composeWinUiMingwTargetEnabled) {
+        // No published navigation artifact has a mingwX64 variant, so the WinUI native target
+        // cannot be redirected like the others: it is compiled from the sources here.
+        mingwX64()
+    }
 
     defaultPlatform(PlatformIdentifier.ANDROID)
 
@@ -56,6 +67,29 @@ androidXMultiplatform {
                 api("org.jetbrains.androidx.lifecycle:lifecycle-common:2.11.0")
                 api("org.jetbrains.androidx.lifecycle:lifecycle-runtime:2.11.0")
                 api("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel:2.11.0")
+            }
+        }
+
+        if (composeWinUiMingwTargetEnabled) {
+            // The source sets and dependencies of the source build (build.gradle), for the one
+            // target that is compiled here.
+            nonAndroidMain {
+                dependsOn(commonMain)
+            }
+            nonJvmMain {
+                dependsOn(nonAndroidMain)
+            }
+            nativeMain {
+                dependsOn(nonJvmMain)
+            }
+            mingwX64Main {
+                dependsOn(nativeMain)
+                dependencies {
+                    api(libs.kotlinCoroutinesCore)
+                    implementation(libs.kotlinSerializationCore)
+                    implementation("androidx.collection:collection:1.6.0")
+                    implementation(libs.atomicFu)
+                }
             }
         }
     }

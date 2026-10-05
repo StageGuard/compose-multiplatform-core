@@ -29,6 +29,12 @@ plugins {
     id("JetBrainsAndroidXPlugin")
 }
 
+def composeWinUiMingwTargetEnabled = providers
+        .gradleProperty("composeWinUi.enableMingwTarget")
+        .map { it.toBoolean() }
+        .orElse(false)
+        .get()
+
 androidXMultiplatform {
     redirect("androidx.navigation") {
         androidLibrary {
@@ -42,6 +48,11 @@ androidXMultiplatform {
         ios()
         js()
         wasmJs()
+    }
+    if (composeWinUiMingwTargetEnabled) {
+        // No published navigation artifact has a mingwX64 variant, so the WinUI native target
+        // cannot be redirected like the others: it is compiled from the sources here.
+        mingwX64()
     }
 
     defaultPlatform(PlatformIdentifier.ANDROID)
@@ -58,6 +69,38 @@ androidXMultiplatform {
                 api("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-savedstate:2.11.0")
                 api("org.jetbrains.androidx.savedstate:savedstate:1.4.0")
             }
+        }
+
+        if (composeWinUiMingwTargetEnabled) {
+            // The source sets and dependencies of the source build (build.gradle), for the one
+            // target that is compiled here.
+            configureEach {
+                languageSettings.optIn("kotlin.contracts.ExperimentalContracts")
+            }
+            nonAndroidMain {
+                dependsOn(commonMain)
+            }
+            nativeMain {
+                dependsOn(nonAndroidMain)
+            }
+            mingwX64Main {
+                dependsOn(nativeMain)
+                dependencies {
+                    api("androidx.annotation:annotation:1.9.1")
+                    implementation("androidx.collection:collection:1.6.0")
+                    implementation(libs.kotlinSerializationCore)
+                }
+            }
+        }
+    }
+}
+
+if (composeWinUiMingwTargetEnabled) {
+    // nativeMain has the POSIX mutex of the other native targets (winui_dev has it in a
+    // posixMain, which this build does not declare); mingwX64Main has the one of this target.
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeCompile).configureEach { task ->
+        if (task.name.contains("MingwX64")) {
+            task.exclude("**/internal/SynchronizedObject.native.kt")
         }
     }
 }
