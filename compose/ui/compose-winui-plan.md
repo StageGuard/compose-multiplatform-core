@@ -1,5 +1,92 @@
 # compose-winui implementation plan
 
+## WinUI MinGW target 2026-10-05
+
+The fork build has the native WinUI target of `winui_dev` now: with
+`-PcomposeWinUi.enableMingwTarget=true` (next to
+`-PcomposeWinUi.enableJvmTarget=true`) the modules that the demo needs get a
+`mingwX64` target, and `:compose:mpp:demo-winui` gets a native application.
+`winuiMain` is the source set that the JVM and the native target share, as
+`winui_dev` designed it; no file of it had to move.
+
+Build:
+
+- [x] Plain `mingwX64()` in `ui-util`, `ui-geometry`, `ui-unit`,
+  `ui-backhandler`; `mingwX64("winuiMingw")` on the native source sets in
+  `ui-graphics`, `ui-skiko`, `animation-core`, `animation`, `material-ripple`,
+  `material`, `material3-ripple`, `material3-window-size-class`, the three
+  `adaptive` modules and `navigation-compose`; with `winuiMain` as well in
+  `ui-text`, `ui`, `foundation-layout`, `foundation` and `material3`.
+- [x] `ui`, `foundation` and `material3` keep the Skiko actuals of the other
+  non-JVM targets (`skikoNonJvmMain`, `skikoNativeMain`) apart from `nonJvmMain`
+  and `nativeMain`, which the WinUI native target shares. One source set cannot
+  both have and not have them, so a build with the flag leaves them out, as
+  `winui_dev` does: the Darwin and web targets of these three modules do not
+  compile in that build.
+- [x] `navigation-common` and `navigation-runtime` redirect every other target
+  to the published artifact. No published navigation artifact has a mingwX64
+  variant, so this one target is compiled from the sources, with the source sets
+  and dependencies of `build.gradle`. `nativeMain` has the POSIX mutex (in a
+  `posixMain` on `winui_dev`); it is excluded from this compilation, which has
+  the one of `mingwX64Main`.
+- [x] Dependencies without a mingwX64 variant, handled for the configurations of
+  a MinGW target in `buildSrc-fork` (`WinUiMingwDependencies.kt`): the JetBrains
+  `navigationevent`, `navigationevent-compose` and `window-core` are replaced by
+  the androidx artifacts that they redirect to, and a pinned published Compose
+  module (`org.jetbrains.compose.ui:ui:1.10.0`) by its project.
+- [x] Two problems of the fork build logic that only a native target of a
+  kotlin-winrt module meets: the Compose compiler plugin replaced the compiler
+  plugins of a native compilation instead of joining them, which dropped the
+  kotlin-winrt one (`AndroidXComposeImplPlugin`); and the license step expected
+  an unpacked klib, while the projection compilation of kotlin-winrt packs its
+  klib (`AddLicenses`).
+- [x] Demo: `mingwX64("winuiMingw")` with an executable, `winuiMain` as a real
+  shared source set, the native main function for the generated entry, and the
+  Skia bridge DLLs and ICU data of skiko-winui (`skiko-winui-mingw-runtime`,
+  `skiko-winui-windows`) as runtime assets of the application. The Material
+  icons and Compose resources have no mingwX64 artifact, and common sources
+  cannot use what one target lacks: in a build with the flag both applications
+  compile the icons from the sources jar (as on `winui_dev`) and show a
+  placeholder for the one screen that draws a resource
+  (`VectorPainterInPainter`). A JVM-only build is unchanged.
+
+Sources:
+
+- [x] Actuals that only the JVM target had, added for MinGW with the Windows
+  bindings of Kotlin/Native: `getCurrentThreadId`, `clipboardSequenceNumber`,
+  `winUIKeyCodePoint`, `isWindowMinimized`, `windowDpiScale` (`ui`),
+  `systemWheelScrollLines` (`foundation`) and `DefaultNavTransitions`
+  (`navigation-compose`). `GetDpiForWindow` is not in those bindings and is
+  looked up in user32 at run time.
+- [x] `WinUIScheduler` imports `kotlin.concurrent.Volatile`; the JVM resolved the
+  annotation without it.
+- [x] Material 3 projects the WinRT calendar, date and number formatting types
+  for the native target only; its JVM target keeps the JVM ones.
+- [x] `PointerIconExample.winui.kt` of the demo is in `winuiMain`.
+
+Verification:
+
+- [x] `compileKotlinWinuiMingw` / `compileKotlinMingwX64` of all of the modules
+  above and of the demo; `linkDebugExecutableWinuiMingw` of the demo.
+- [x] The staged native demo (`stageWinAppPackageWinuiMingwMainDebugExecutable`,
+  `stageWindowsPackageRuntimeAssetsWinuiMingwMainDebugExecutable`) starts and
+  draws its first screen.
+- [x] Without the flag: the WinUI JVM compilation, `winuiJvmTest` (`ui` 360,
+  `ui-graphics` 173, `foundation` 12, `ui-text` 6, `material3` 6), the eleven
+  sample run tasks and `runWinUIMppSample`; in the default mode (JDK 21)
+  `compileKotlinDesktop` of `ui`, `ui-text`, `foundation`, `material3` and
+  `navigation-compose`. With the flag: `compileKotlinWinuiJvm` of the demo.
+- [ ] Not verified: anything in the native demo beyond its first screen (no
+  input, no traversal of the screens, no comparison with the JVM demo); the
+  release executable; the native tests (`winuiMingwTest` is not wired, and
+  `:compose:ui:ui-test` has no MinGW target); `navigation3` and the WinUI
+  samples of `ui`, which have no native variant; the Darwin and web targets,
+  which cannot be built on this machine.
+- [ ] Known difference: the native entry (`Main.winuiMingw.kt`, from
+  `winui_dev`) wraps the demo in a dark or light `MaterialTheme` and extends
+  the content into the title bar; the JVM entry does neither, like the desktop
+  demo.
+
 ## kotlin-winrt fixes after the merge 2026-10-05
 
 The four kotlin-winrt problems that the merge of `winui_dev` worked around
@@ -40,8 +127,8 @@ Verification (JDK 25, `-PcomposeWinUi.enableJvmTarget=true`):
 - [x] Default mode (JDK 21): `compileKotlinDesktop` of `ui-text` and `ui`
   with the changed `compose/ui/ui-text/build-fork.gradle`, whose WinUI block
   is behind the WinUI flag. No other changed file belongs to that mode.
-- [ ] Not verified: the MinGW target, which the fork build does not wire, so
-  the shared `winuiMain` locale is compiled for the JVM target only; the
+- [ ] Not verified then: the MinGW target, which the fork build did not wire
+  yet (see above; the shared `winuiMain` locale compiles for it); the
   `winuiJvmTest` task of skiko-winui, which fails here with
   `UnsatisfiedLinkError` for the Skia natives in 266 of 345 tests (not
   examined; whether it did so before was not checked).

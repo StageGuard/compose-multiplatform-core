@@ -29,6 +29,7 @@ import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.file.FileCollection
 import org.gradle.kotlin.dsl.getByType
+import org.jetbrains.androidx.build.configureWinUiMingwDependencies
 import org.jetbrains.kotlin.gradle.plugin.CompilerPluginConfig
 import org.jetbrains.kotlin.gradle.plugin.KotlinBaseApiPlugin
 import org.jetbrains.kotlin.gradle.plugin.KotlinBasePluginWrapper
@@ -44,6 +45,8 @@ class AndroidXComposeImplPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         // TODO: https://youtrack.jetbrains.com/issue/CMP-10868
         // project.configureSwiftCompatibilityLinking()
+
+        project.configureWinUiMingwDependencies()
 
         project.plugins.configureEach { plugin ->
             when (plugin) {
@@ -236,7 +239,11 @@ private fun configureComposeCompilerPlugin(project: Project) {
 private fun KotlinCompilationTask<*>.applyPlugin(plugins: FileCollection) =
     when (this) {
         is AbstractKotlinCompile<*> -> pluginClasspath.from(plugins)
-        is AbstractKotlinNativeCompile<*, *> -> compilerPluginClasspath = plugins
+        // Added to the plugins that the task already has, as for the JVM tasks above: replacing
+        // them drops the kotlin-winrt compiler plugin of a WinUI native target, which the Kotlin
+        // plugin puts here from its compiler plugin configuration.
+        is AbstractKotlinNativeCompile<*, *> ->
+            compilerPluginClasspath = compilerPluginClasspath?.plus(plugins) ?: plugins
         else -> throw IllegalStateException("Unsupported Kotlin compilation task type")
     }
 

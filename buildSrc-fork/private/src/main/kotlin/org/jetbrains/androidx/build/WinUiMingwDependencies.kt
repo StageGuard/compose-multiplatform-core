@@ -31,6 +31,7 @@ private val mingwRedirectedModules = mapOf(
 )
 
 private const val ComposeGroupPrefix = "org.jetbrains.compose."
+private const val ConfiguredMarker = "composeWinUiMingwDependenciesConfigured"
 
 /**
  * Lets the WinUI native target (`composeWinUi.enableMingwTarget`) resolve the dependencies that
@@ -46,6 +47,9 @@ internal fun Project.configureWinUiMingwDependencies() {
         .map { it.toBoolean() }
         .getOrElse(false)
     if (!mingwTargetEnabled) return
+    // The library plugin and the Compose plugin both ask for this; an application has the second.
+    if (extensions.extraProperties.has(ConfiguredMarker)) return
+    extensions.extraProperties.set(ConfiguredMarker, true)
 
     configurations.configureEach { configuration ->
         if (!configuration.name.contains("mingw", ignoreCase = true)) return@configureEach
