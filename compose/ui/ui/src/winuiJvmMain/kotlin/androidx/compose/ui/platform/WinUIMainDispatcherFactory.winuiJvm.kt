@@ -16,12 +16,9 @@
 
 package androidx.compose.ui.platform
 
-import kotlin.coroutines.CoroutineContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.MainCoroutineDispatcher
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.internal.MainDispatcherFactory
 
 /**
@@ -39,41 +36,12 @@ internal class WinUIMainDispatcherFactory : MainDispatcherFactory {
         get() = 1
 
     override fun createDispatcher(allFactories: List<MainDispatcherFactory>): MainCoroutineDispatcher =
-        WinUIMainDispatcher(isImmediate = false)
+        WinUIMainDispatcher(isImmediate = false, rejectedWorkDispatcher = Dispatchers.IO)
 
     override fun hintOnError(): String =
         "Dispatchers.Main is available once a WinUI Application or WinUIComposeView has started."
 }
 
-/**
- * Dispatches to the dispatcher queue that [WinUIScheduler] has registered, which is the queue of
- * the thread that runs the WinUI application.
- */
-internal class WinUIMainDispatcher(
-    private val isImmediate: Boolean,
-) : MainCoroutineDispatcher() {
-    override val immediate: MainCoroutineDispatcher
-        get() = if (isImmediate) this else immediateDispatcher
-
-    private val immediateDispatcher by lazy { WinUIMainDispatcher(isImmediate = true) }
-
-    override fun isDispatchNeeded(context: CoroutineContext): Boolean =
-        !isImmediate || !WinUIScheduler.hasThreadAccess
-
-    override fun dispatch(context: CoroutineContext, block: Runnable) {
-        check(WinUIScheduler.isRegistered) {
-            "Dispatchers.Main is used before the WinUI application has started."
-        }
-        if (!WinUIScheduler.dispatch { block.run() }) {
-            // The queue no longer takes work: the application is shutting down. Cancel the work, as
-            // the Android main dispatcher does, and let it complete off the UI thread.
-            context.cancel(
-                CancellationException("The WinUI dispatcher queue was shut down, so $block was rejected.")
-            )
-            Dispatchers.IO.dispatch(context, block)
-        }
-    }
-
-    override fun toString(): String =
-        if (isImmediate) "Dispatchers.Main.immediate (WinUI)" else "Dispatchers.Main (WinUI)"
+// kotlinx.coroutines finds WinUIMainDispatcherFactory through the service loader.
+internal actual fun installWinUIMainDispatcher() {
 }

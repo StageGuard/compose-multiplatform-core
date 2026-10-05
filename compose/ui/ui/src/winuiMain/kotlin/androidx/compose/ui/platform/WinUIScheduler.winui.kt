@@ -29,6 +29,7 @@ internal object WinUIScheduler {
         if (this.dispatchQueue == null) {
             this.dispatchQueue = WinUIDispatchQueue(dispatcherQueue)
             this.dispatcherQueue = dispatcherQueue
+            installWinUIMainDispatcher()
         }
     }
 
