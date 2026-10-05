@@ -9,11 +9,11 @@ baseline, not every retest attempt.
 
 ## Current upstream triage
 
-- **kotlin-winrt build in use:** `xaml-support` `cf66ec5ba`:
-  `origin/xaml-support` `9d93cbfb9`, which has kotlin-winrt PR #15
-  (`KWINRT-075`) and PR #16 (`KWINRT-066`, `KWINRT-067`, `KWINRT-070`,
-  `KWINRT-071`, `KWINRT-073`), plus the fix of PR #17 (`KWINRT-076`) and the
-  four of PR #18 (`KWINRT-077` to `KWINRT-080`), both open. Published to Maven
+- **kotlin-winrt build in use:** `xaml-support` `7bd31fd48`:
+  `origin/xaml-support` `d5aaeed6b`, which has kotlin-winrt PRs #15 to #18
+  (`KWINRT-066`, `KWINRT-067`, `KWINRT-070`, `KWINRT-071`, `KWINRT-073`,
+  `KWINRT-075` to `KWINRT-080`), plus the fix of PR #19 (`KWINRT-081`), open.
+  skiko-winui was rebuilt against it on 2026-10-06. Published to Maven
   Local from the local checkout
   (since 2026-10-04; before that the `0.1.0-SNAPSHOT` published from
   `master`). The `external/kotlin-winrt` submodule of `winui_dev` pins a commit
@@ -25,11 +25,9 @@ baseline, not every retest attempt.
   `KWINRT-065` to `KWINRT-076` now (old number plus 13). The commits of the
   sync before the merge and kotlin-winrt PRs #15, #16 and #17 name them by
   their old numbers `KWINRT-052` to `KWINRT-063`.
-- **Open upstream/plugin/runtime:** `KWINRT-081` (native finalizer drain on
-  the UI thread), `KWINRT-065`, `KWINRT-072`, and
+- **Open upstream/plugin/runtime:** `KWINRT-065`, `KWINRT-072`, and
   `KWINRT-074`; the runtime half of `KWINRT-064` (see its merge note).
-- **Open compose-side workarounds:** `KWINRT-081`, `KWINRT-065` and
-  `KWINRT-074`.
+- **Open compose-side workarounds:** `KWINRT-065` and `KWINRT-074`.
 - **Closed local runtime/Compose lifetime fix:** `KWINRT-064`. The pointer
   event path now closes its transient WinRT projections and retained drag
   points, and the local kotlin-winrt submodule commit `f5f90d75` makes
@@ -76,8 +74,9 @@ baseline, not every retest attempt.
 
 ## KWINRT-081: A native application does not end when a finalizer releases into the UI thread
 
-- **Status:** Open in kotlin-winrt (`xaml-support` at `cf66ec5ba`, mingwX64
-  only). Compose-side workaround in `PlatformClipboard.winui.kt`.
+- **Status:** Closed. Fixed on kotlin-winrt `xaml-support` by `7bd31fd48`
+  (https://github.com/compose-fluent/kotlin-winrt/pull/19, open). mingwX64
+  only; the JVM target never had it.
 - **Observed in:** the native MPP demo (`:compose:mpp:demo-winui`,
   `winuiMingw`, debug and release). Copy text in the Selection screen with
   Ctrl+C and close the window within a few seconds: the window goes away and
@@ -100,24 +99,17 @@ baseline, not every retest attempt.
   `PlatformFinalization.collectForReferenceTracking`, which the UI thread runs
   during reference tracking, so it is not limited to the end of the
   application.
-- **Expected:** waiting for finalizers on an STA serves COM calls, as
-  `GC.WaitForPendingFinalizers` of .NET does (C#/WinRT relies on it); or the
-  collection runs on another thread while the UI thread waits with
-  `CoWaitForMultipleHandles`.
-- **Workaround:** Compose releases the `DataPackage` and `DataPackageView`
-  projections that it makes for a clipboard read or write on the UI thread as
-  soon as it is done with them (`releasedAfter` in `PlatformClipboard.winui.kt`),
-  so no finalizer has them left. A projection that a caller keeps
-  (`ClipEntry.nativeClipEntry`) is not covered, and neither is any other
-  object whose last release calls into the UI thread.
-- **Validation:** 2026-10-06: without the workaround the process stayed in 9
-  of 10 runs of copy, about one second, close; with it the process ended in 5
-  of 5, and the clipboard checks of the demo (copy, cut, paste, paste of
-  foreign text, drag and drop) give the same captures as on the JVM. In 2 of
-  12 runs of those checks after the workaround (one native, one JVM) the first
-  copy did not reach the system clipboard and the keys of that run did not
-  give the expected text either; ten runs after that were clean, so it was put
-  down to disturbed input and not to the workaround, without proof.
+- **Fix:** the cleaners hand their releases to the thread that drains
+  (`WaitedFinalizerReleases`), which runs them when `GC.collect()` has
+  returned. `ReferenceTrackerManager` already did that for the collection of a
+  reference tracking pass; the drain at the end of the application did not.
+  CsWinRT releases on the finalizer thread and relies on the CLR, which serves
+  COM calls while a single-threaded apartment waits in
+  `GC.WaitForPendingFinalizers`; Kotlin/Native has no such wait.
+- **Resolution:** the workaround of 2026-10-06 (`releasedAfter` in
+  `PlatformClipboard.winui.kt`, which released the clipboard projections on the
+  UI thread) is removed.
+- **Validation:** 2026-10-06: with the published fix and without the workaround, the native demo ended in 8 of 8 runs of copy, one second, close (9 of 10 stayed before). `NativeFinalizerDrainTest` on mingwX64 fails without the change. The fifteen real-input checks and the 105 captures of the native demo are as before, apart from one run of the dropdown check whose menu was closed in the capture and which three repeats did not reproduce.
 
 ## KWINRT-080: An authored control read back from a property cannot be cast to its base class
 
