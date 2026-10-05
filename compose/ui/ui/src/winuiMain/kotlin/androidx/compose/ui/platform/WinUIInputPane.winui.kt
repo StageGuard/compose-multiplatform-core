@@ -16,19 +16,14 @@
 
 package androidx.compose.ui.platform
 
-import androidx.compose.ui.window.winuiWindowHandle
-import io.github.composefluent.winrt.runtime.ActivationFactory
-import io.github.composefluent.winrt.runtime.ComVtableInvoker
-import io.github.composefluent.winrt.runtime.Guid
-import io.github.composefluent.winrt.runtime.HResult
-import io.github.composefluent.winrt.runtime.InspectableReference
-import io.github.composefluent.winrt.runtime.PlatformAbi
 import io.github.composefluent.winrt.runtime.RawAddress
 import microsoft.ui.xaml.Window
 import windows.foundation.Rect
 import windows.foundation.TypedEventHandler
 import windows.ui.viewmanagement.InputPane
+import windows.ui.viewmanagement.InputPaneInterop
 import windows.ui.viewmanagement.InputPaneVisibilityEventArgs
+import winrt.interop.WindowNative
 import kotlin.math.roundToInt
 
 internal data class WinUIInputPaneOccludedRect(
@@ -161,44 +156,10 @@ internal fun createWinUIInputPaneController(
 
 internal fun acquireWinUIInputPane(window: Window): InputPane? =
     runCatching {
-        val windowHandle = winuiWindowHandle(window)
+        val windowHandle = WindowNative.getWindowHandle(window)
         check(windowHandle != RawAddress.Null) { "WinUI window does not have an HWND." }
-        winUIInputPaneForWindow(windowHandle)
+        InputPaneInterop.getForWindow(windowHandle)
     }.getOrNull()
-
-private val IInputPaneInteropIid = Guid("75CF2C57-9195-4931-8332-F0B409E916AF")
-
-/**
- * The input pane of the window [windowHandle], from `IInputPaneInterop.GetForWindow`, which a
- * desktop application has to use instead of `InputPane.GetForCurrentView`.
- *
- * KWINRT-077: kotlin-winrt has a generated helper for this,
- * `windows.ui.viewmanagement.InputPaneInterop`, but does not generate it for this module (see
- * [winuiWindowHandle]). This is the call that the helper makes.
- */
-private fun winUIInputPaneForWindow(windowHandle: RawAddress): InputPane =
-    PlatformAbi.confinedScope().use { scope ->
-        val inputPaneIid = PlatformAbi.allocateBytes(scope, Guid.BYTE_SIZE.toLong())
-        PlatformAbi.writeGuid(inputPaneIid, InputPane.DEFAULT_INTERFACE_IID)
-        val inputPaneOut = PlatformAbi.allocatePointerSlot(scope)
-        ActivationFactory.get(InputPane.TYPE_NAME, IInputPaneInteropIid).use { interop ->
-            HResult(
-                ComVtableInvoker.invokeArgs(
-                    instance = interop.pointer,
-                    slot = 6,
-                    arg0 = windowHandle,
-                    arg1 = inputPaneIid,
-                    arg2 = inputPaneOut,
-                ),
-            ).requireSuccess("IInputPaneInterop.GetForWindow")
-            InputPane.wrap(
-                InspectableReference(
-                    pointer = PlatformAbi.toRawComPtr(PlatformAbi.readPointer(inputPaneOut)),
-                    interfaceId = InputPane.DEFAULT_INTERFACE_IID,
-                ),
-            )
-        }
-    }
 
 private class ProjectedWinUIInputPaneAdapter(
     private val inputPane: InputPane,

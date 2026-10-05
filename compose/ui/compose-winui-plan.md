@@ -1,5 +1,51 @@
 # compose-winui implementation plan
 
+## kotlin-winrt fixes after the merge 2026-10-05
+
+The four kotlin-winrt problems that the merge of `winui_dev` worked around
+(`KWINRT-077` to `KWINRT-080`) are fixed in kotlin-winrt (https://github.com/compose-fluent/kotlin-winrt/pull/18), and the
+workarounds are gone. compose-winui is at the code of `winui_dev` in these
+places again.
+
+- [x] Builds against kotlin-winrt `xaml-support` `cf66ec5ba` in Maven Local:
+  `origin/xaml-support` `9d93cbfb9` with the fix of PR #17 and the four fixes.
+  skiko-winui (`fix/winui-post-m154-sync`, the tree of `winui_dev`) was
+  rebuilt against it, its mingwX64 projection included, without a change.
+  Its projection now owns `winrt.interop.WindowNative` and
+  `InitializeWithWindow`, which the generation task used to leave out
+  (`KWINRT-077`); `ui` takes them from there.
+- [x] `KWINRT-077`: `winuiWindowHwnd` and `acquireWinUIInputPane` use the
+  generated `WindowNative.getWindowHandle` and `InputPaneInterop.getForWindow`.
+  The `IWindowNative` and `IInputPaneInterop` calls that `ui` made itself are
+  removed, and `WinUISourceSetIsolationTest` asserts the generated helpers
+  again.
+- [x] `KWINRT-078`: `ui-text` applies the projection plugin. The WinRT `Locale`
+  of `winui_dev` is in `winuiMain` for both WinUI targets; the JVM `Locale`
+  that the JVM target had kept (`PlatformLocale.winuiJvm.kt`) is removed.
+  Material 3 is not changed: its JVM target keeps the JVM calendar locale and
+  date format, which was a parity decision of the merge and not a workaround.
+- [x] `KWINRT-079`: `WinUITestRuntime` no longer halts the test worker.
+- [x] `KWINRT-080`: the view sample reads the root from `window.content`.
+
+Verification (JDK 25, `-PcomposeWinUi.enableJvmTarget=true`):
+
+- [x] `compileKotlinWinuiJvm` of `ui`, `ui-text`, `foundation` and
+  `material3`; `compileTestKotlinWinuiJvm` of `ui` and `ui-text`, the task
+  graph that `KWINRT-078` broke.
+- [x] `winuiJvmTest`: `ui` 360 tests, `ui-graphics` 173 (4 skipped),
+  `foundation` 12, `ui-text` 6, `material3` 6. The worker of `ui` exits by
+  itself.
+- [x] The eleven run tasks of `:compose:ui:ui:winui-samples` and
+  `:compose:mpp:demo-winui:runWinUIMppSample`.
+- [x] Default mode (JDK 21): `compileKotlinDesktop` of `ui-text` and `ui`
+  with the changed `compose/ui/ui-text/build-fork.gradle`, whose WinUI block
+  is behind the WinUI flag. No other changed file belongs to that mode.
+- [ ] Not verified: the MinGW target, which the fork build does not wire, so
+  the shared `winuiMain` locale is compiled for the JVM target only; the
+  `winuiJvmTest` task of skiko-winui, which fails here with
+  `UnsatisfiedLinkError` for the Skia natives in 266 of 345 tests (not
+  examined; whether it did so before was not checked).
+
 ## Merge of `winui_dev` 2026-10-05
 
 `winui_dev` (`49ecfa1c091`, 92 commits since the base of the `jb-main` sync)
@@ -44,7 +90,8 @@ Build:
   `WindowNative` and `InputPaneInterop`; `ui` makes the two COM calls itself),
   `KWINRT-078` (the plugin cannot be applied to `ui-text` on the `jb-main`
   module graph; its JVM target keeps the JVM `Locale`) and `KWINRT-079` (the
-  shutdown hook blocks the exit of the test worker; the tests end it). The
+  shutdown hook blocks the exit of the test worker; the tests end it). All of
+  them, and `KWINRT-080`, were fixed in kotlin-winrt later (see above). The
   issue numbers of the sync moved to `KWINRT-065` to `KWINRT-076`; see
   `kotlin-winrt-issues.md`.
 - [x] The sample hosts keep the low-footprint JVM profile of `winui_dev` with
@@ -109,7 +156,8 @@ Sources, by area (kept side and why):
 - [x] Coordinates: `winui_dev` (the same DIP conversion with shared helpers,
   and `WinUIView` is measured again when the density changes).
 - [x] Dispatcher: `winui_dev` (always dispatches to the queue).
-- [x] Text: the JVM `Locale` of the sync on the JVM target (`KWINRT-078`).
+- [x] Text: the JVM `Locale` of the sync on the JVM target (`KWINRT-078`);
+  the WinRT `Locale` of `winui_dev` since the fix (see above).
 - [x] Material 3: the Skiko menu, bottom sheet, navigation rail and dialog are
   compiled for WinUI as in the sync, without the copies of `winui_dev`. The
   JVM target keeps the JVM calendar locale and date format of the sync, which

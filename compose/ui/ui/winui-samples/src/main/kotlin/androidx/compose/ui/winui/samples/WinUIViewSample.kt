@@ -141,7 +141,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowBackdrop
-import androidx.compose.ui.window.currentComposeViewForTest
 import androidx.compose.foundation.text.BasicText
 import windows.foundation.EventRegistrationToken
 import io.github.composefluent.winrt.runtime.asWinRT
@@ -761,12 +760,7 @@ private object ComposeWinUiSmokeApp {
                     content = "Hello from Compose WinUI updated"
                 }
                 LaunchedEffect(Unit) {
-                    // The content of the window is the root of the Compose view. It is taken from
-                    // the view: read back from Window.Content it is a UIElement wrapper, which
-                    // the kotlin-winrt build in use does not cast to the authored ContentControl.
-                    @OptIn(InternalComposeUiApi::class)
-                    val composeView = currentComposeViewForTest
-                    val root = checkNotNull(composeView?.root.asWinRTContentControl()) {
+                    val root = checkNotNull(window.content.asWinRTContentControl()) {
                         "WinUI environment smoke could not find the Compose root ContentControl."
                     }
                     awaitCondition("WinUI root loaded") { root.isLoaded }
