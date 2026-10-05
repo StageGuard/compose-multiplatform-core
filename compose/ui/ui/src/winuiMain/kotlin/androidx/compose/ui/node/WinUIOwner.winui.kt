@@ -704,13 +704,18 @@ internal class WinUIOwner(
         while (onEndApplyChangesListeners.isNotEmpty()) {
             val size = onEndApplyChangesListeners.size
             for (i in 0 until size) {
+                // A listener may apply changes itself (a subcomposition that it measures): that
+                // call has run and removed the listeners that were left.
+                if (i >= onEndApplyChangesListeners.size) break
                 val listener = onEndApplyChangesListeners[i]
                 onEndApplyChangesListeners[i] = null
                 listener?.invoke()
                 // A listener may dispose this owner and clear the remaining listeners.
                 if (isShuttingDown) return
             }
-            onEndApplyChangesListeners.subList(0, size).clear()
+            onEndApplyChangesListeners
+                .subList(0, minOf(size, onEndApplyChangesListeners.size))
+                .clear()
         }
         winUIAutofill.onEndApplyChanges()
     }
