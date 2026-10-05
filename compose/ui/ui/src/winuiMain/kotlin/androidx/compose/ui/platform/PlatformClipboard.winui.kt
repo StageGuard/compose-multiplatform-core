@@ -71,7 +71,8 @@ internal class WinUIClipboard : Clipboard {
         get() = NativeClipboard(winUIClipboardStatics)
 
     internal fun hasText(): Boolean =
-        currentPlainText() != null || runCatching { getWinUIContent().contains(winUITextFormat) }
+        currentPlainText() != null ||
+            runCatching { getWinUIContent().releasedAfter { it.contains(winUITextFormat) } }
             .getOrElse {
                 logClipboardReadFailure(it)
                 false
@@ -86,16 +87,14 @@ internal class WinUIClipboard : Clipboard {
                 logClipboardReadFailure(it)
                 return null
             }
-        if (!runCatching { content.contains(winUITextFormat) }.getOrDefault(false)) {
-            return null
-        }
+        content.releasedAfter { }
         return null
     }
 
     internal fun setText(text: String) {
         // Windows clipboard ownership can be transiently locked by another process. Keep Compose
         // API state coherent and treat the native clipboard write as best effort.
-        runCatching { setWinUIContent(DataPackage().apply { setText(text) }) }
+        runCatching { DataPackage().releasedAfter { it.setText(text); setWinUIContent(it) } }
         rememberPlainText(text)
     }
 
@@ -106,7 +105,10 @@ internal class WinUIClipboard : Clipboard {
                 logClipboardReadFailure(it)
                 return null
             }
-        if (runCatching { content.availableFormats.isEmpty() }.getOrDefault(true)) return null
+        if (runCatching { content.availableFormats.isEmpty() }.getOrDefault(true)) {
+            content.releasedAfter { }
+            return null
+        }
         return ClipEntry(content)
     }
 
@@ -117,20 +119,24 @@ internal class WinUIClipboard : Clipboard {
                 logClipboardReadFailure(it)
                 return null
             }
-        if (runCatching { content.availableFormats.isEmpty() }.getOrDefault(true)) return null
+        if (runCatching { content.availableFormats.isEmpty() }.getOrDefault(true)) {
+            content.releasedAfter { }
+            return null
+        }
         if (runCatching { content.contains(winUITextFormat) }.getOrDefault(false)) {
             return runCatching {
                 ClipEntry(content.getTextAsync().await())
             }.getOrElse {
                 logClipboardReadFailure(it)
                 null
-            }
+            }.also { content.releasedAfter { } }
         }
         return ClipEntry(content)
     }
 
     internal fun setClipEntryBlocking(clipEntry: ClipEntry?) {
-        val dataPackage = when (val nativeClipEntry = clipEntry?.nativeClipEntry) {
+        val nativeClipEntry = clipEntry?.nativeClipEntry
+        val dataPackage = when (nativeClipEntry) {
             null -> {
                 lastPlainText = null
                 clearWinUIContent()
@@ -148,6 +154,8 @@ internal class WinUIClipboard : Clipboard {
             else -> return
         }
         runCatching { setWinUIContent(dataPackage) }
+        // The package of the caller stays the caller's; the one made here has no other owner.
+        if (dataPackage !== nativeClipEntry) dataPackage.releasedAfter { }
         val text = clipEntry.nativeClipEntry as? String
         if (text != null) {
             rememberPlainText(text)
@@ -164,6 +172,29 @@ internal class WinUIClipboard : Clipboard {
         WinRTClipboardClass.setContent(dataPackage)
     }
 }
+
+/**
+ * Runs [block] and then releases this projection of a clipboard object on the calling thread, which
+ * is the UI thread.
+ *
+ * KWINRT-081: left to the garbage collector, the projection is released by a finalizer. When that
+ * happens while the native runtime of kotlin-winrt drains the finalizers at the end of the
+ * application, the UI thread waits for the finalizer and the release waits for the UI thread: the
+ * process never ends.
+ */
+private inline fun <R> DataPackage.releasedAfter(block: (DataPackage) -> R): R =
+    try {
+        block(this)
+    } finally {
+        runCatching { nativeObject.close() }
+    }
+
+private inline fun <R> DataPackageView.releasedAfter(block: (DataPackageView) -> R): R =
+    try {
+        block(this)
+    } finally {
+        runCatching { nativeObject.close() }
+    }
 
 actual class ClipEntry constructor(val nativeClipEntry: Any?) {
     actual val clipMetadata: ClipMetadata = ClipMetadata(platformClipMetadataFor(nativeClipEntry))

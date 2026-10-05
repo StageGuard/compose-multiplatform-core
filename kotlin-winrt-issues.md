@@ -25,9 +25,11 @@ baseline, not every retest attempt.
   `KWINRT-065` to `KWINRT-076` now (old number plus 13). The commits of the
   sync before the merge and kotlin-winrt PRs #15, #16 and #17 name them by
   their old numbers `KWINRT-052` to `KWINRT-063`.
-- **Open upstream/plugin/runtime:** `KWINRT-065`, `KWINRT-072`, and
+- **Open upstream/plugin/runtime:** `KWINRT-081` (native finalizer drain on
+  the UI thread), `KWINRT-065`, `KWINRT-072`, and
   `KWINRT-074`; the runtime half of `KWINRT-064` (see its merge note).
-- **Open compose-side workarounds:** `KWINRT-065` and `KWINRT-074`.
+- **Open compose-side workarounds:** `KWINRT-081`, `KWINRT-065` and
+  `KWINRT-074`.
 - **Closed local runtime/Compose lifetime fix:** `KWINRT-064`. The pointer
   event path now closes its transient WinRT projections and retained drag
   points, and the local kotlin-winrt submodule commit `f5f90d75` makes
@@ -71,6 +73,51 @@ baseline, not every retest attempt.
   `KWINRT-063`, `KWINRT-064`, `KWINRT-066`, `KWINRT-067`, `KWINRT-068`,
   `KWINRT-069`, `KWINRT-070`, `KWINRT-071`, `KWINRT-073`, `KWINRT-075`,
   `KWINRT-076`, `KWINRT-077`, `KWINRT-078`, `KWINRT-079`, and `KWINRT-080`.
+
+## KWINRT-081: A native application does not end when a finalizer releases into the UI thread
+
+- **Status:** Open in kotlin-winrt (`xaml-support` at `cf66ec5ba`, mingwX64
+  only). Compose-side workaround in `PlatformClipboard.winui.kt`.
+- **Observed in:** the native MPP demo (`:compose:mpp:demo-winui`,
+  `winuiMingw`, debug and release). Copy text in the Selection screen with
+  Ctrl+C and close the window within a few seconds: the window goes away and
+  the process stays, for as long as it was watched (90 s). The JVM application
+  ends at once. Waiting seven seconds between the copy and the close also ends
+  the native one.
+- **Cause:** the stacks of the process that is left (lldb):
+  - The main thread, which is the UI thread and an STA, is in
+    `WinAppHostScope.close` -> `cleanupApplicationHostRuntime` ->
+    `PlatformFinalization.drain` -> `GC.collect()`. On Kotlin/Native
+    `GC.collect()` returns when the cleaners have run, and the thread waits for
+    that without dispatching COM calls or messages.
+  - The cleaner thread is in `closeComPtrSupportFromFinalizer` ->
+    `RawComObjectReferenceSupport.close` -> `Release` of an object of
+    `windows.applicationmodel.datatransfer.dll` (a `DataPackage` or
+    `DataPackageView` projection that Compose dropped after the copy). The
+    object has no context of its own, so it is released on the cleaner thread,
+    and its last release makes a COM call that the UI thread has to serve.
+  Each waits for the other. The same wait is in
+  `PlatformFinalization.collectForReferenceTracking`, which the UI thread runs
+  during reference tracking, so it is not limited to the end of the
+  application.
+- **Expected:** waiting for finalizers on an STA serves COM calls, as
+  `GC.WaitForPendingFinalizers` of .NET does (C#/WinRT relies on it); or the
+  collection runs on another thread while the UI thread waits with
+  `CoWaitForMultipleHandles`.
+- **Workaround:** Compose releases the `DataPackage` and `DataPackageView`
+  projections that it makes for a clipboard read or write on the UI thread as
+  soon as it is done with them (`releasedAfter` in `PlatformClipboard.winui.kt`),
+  so no finalizer has them left. A projection that a caller keeps
+  (`ClipEntry.nativeClipEntry`) is not covered, and neither is any other
+  object whose last release calls into the UI thread.
+- **Validation:** 2026-10-06: without the workaround the process stayed in 9
+  of 10 runs of copy, about one second, close; with it the process ended in 5
+  of 5, and the clipboard checks of the demo (copy, cut, paste, paste of
+  foreign text, drag and drop) give the same captures as on the JVM. In 2 of
+  12 runs of those checks after the workaround (one native, one JVM) the first
+  copy did not reach the system clipboard and the keys of that run did not
+  give the expected text either; ten runs after that were clean, so it was put
+  down to disturbed input and not to the workaround, without proof.
 
 ## KWINRT-080: An authored control read back from a property cannot be cast to its base class
 
