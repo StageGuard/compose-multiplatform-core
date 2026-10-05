@@ -1,5 +1,37 @@
 # compose-winui implementation plan
 
+## Slim package of the native demo 2026-10-06
+
+The toolkit stages the whole self-contained Windows App SDK next to the native
+demo: 195.7 MB in 281 files for the release executable (and the same runtime
+files once more in `runtime-assets`). `stageSlimWinuiMingwReleaseExecutable`
+(and `...Debug...`) of `:compose:mpp:demo-winui` copies what the demo uses into
+`build/compose-winui-slim/<variant>`: 116.5 MB in 46 files, a directory that
+runs by itself (`runSlimWinuiMingwReleaseExecutable`). Only the demo is
+changed; the toolkit and the libraries are not.
+
+- [x] Left out: ONNX Runtime and DirectML (38.5 MB), the Skiko bridge of the
+  JVM target (`skiko_winui.dll`, 22.8 MB, never loaded by the native
+  application), the Windows AI, Workloads, Widgets and WebView2 libraries,
+  `WinUIEdit.dll`, `Microsoft.UI.Xaml.Phone.dll`, the XAML resources of 85
+  languages (English stays), import libraries, headers, registration files,
+  the deployment and restart agents, and the XAML pages of the packaging
+  validation.
+- [x] Kept: `Microsoft.UI.Xaml` and its controls. The window, the input and the
+  menus of Compose are XAML elements.
+- [x] The list is measured: the 21 DLLs that the release demo had loaded on any
+  of its 105 screens and during the fifteen real-input checks, and the
+  resource libraries, resource indexes and metadata that are read as data.
+- [x] Verified on the slim release directory: the 105 captures and the
+  real-input checks give the captures of the full release package (the screens
+  with random or animated content aside), the context menu opens, the clipboard
+  contents are the same.
+- What remains: the executable itself (46.9 MB), `Microsoft.ui.xaml.dll`
+  (14.4 MB), Skia (12.5 MB), the emoji font of the demo (6.9 MB),
+  `Microsoft.UI.Xaml.Controls.dll` (6.3 MB).
+- A newer Windows App SDK may need another list. An application that misses a
+  file does not start, or fails where it uses the component.
+
 ## Native demo against the desktop demo 2026-10-05
 
 The MPP demo of the native WinUI target (`winuiMingw`) was compared with the

@@ -360,6 +360,71 @@ if (composeWinUiMingwTargetEnabled) {
     tasks.matching { it.name.startsWith("stageWindowsPackageRuntimeAssets") }.configureEach {
         dependsOn(unpackSkikoWinuiMingwRuntime, unpackSkikoWinuiWindowsRuntime)
     }
+    // The toolkit stages the whole self-contained Windows App SDK next to the executable: 196 MB
+    // for the release demo, most of it components that a Compose application never loads (ONNX
+    // Runtime, DirectML, the Windows AI, Widgets and WebView2 libraries, 85 languages of XAML
+    // resources, import libraries, headers), plus the Skiko bridge of the JVM target. These
+    // tasks copy only what the demo uses into build/compose-winui-slim/<variant>, a directory
+    // that runs by itself.
+    //
+    // The DLLs are the ones that the release demo had loaded on any of its screens and during
+    // the scripted pointer and key checks (2026-10-06, Windows App SDK
+    // ${composeWinUiWindowsAppSdkVersion.get()}), and the resource libraries, resource indexes and
+    // metadata that are read as data. Microsoft.UI.Xaml stays: the window, the input and the
+    // menus of Compose are XAML elements. A newer Windows App SDK may need another list; an
+    // application that misses a file does not start, or fails where it uses the component.
+    val winUiMppSlimFiles = listOf(
+        "demo-winui.exe", "demo-winui.exe.manifest", "AppxManifest.xml",
+        "windows-app-sdk.properties",
+        // Marks the directory as the runtime assets root for the application host.
+        "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+        // Skiko and the resources of the demo.
+        "skiko_winui_skia.dll", "icudtl.dat", "NotoColorEmoji.ttf", "RobotoFlex-VariableFont.ttf",
+        "skiko.host.json", "ui.host.json",
+        "skiko.winmd", "ui.winmd", "ui-text.winmd", "material3.winmd",
+        // Windows App SDK: runtime, windowing, input, composition, text, resources.
+        "Microsoft.WindowsAppRuntime.dll", "Microsoft.WindowsAppRuntime.pri",
+        "Microsoft.Windows.ApplicationModel.Resources.dll", "MRM.dll", "resources.pri",
+        "Microsoft.UI.dll", "Microsoft.UI.pri",
+        "Microsoft.UI.Windowing.dll", "Microsoft.UI.Windowing.Core.dll",
+        "Microsoft.UI.Input.dll", "Microsoft.InputStateManager.dll",
+        "Microsoft.DirectManipulation.dll", "CoreMessagingXP.dll",
+        "Microsoft.UI.Composition.OSSupport.dll", "Microsoft.Graphics.Display.dll",
+        "Microsoft.Internal.FrameworkUdk.dll",
+        "dcompi.dll", "dwmcorei.dll", "DwmSceneI.dll", "wuceffectsi.dll", "marshal.dll",
+        "DWriteCore.dll",
+        // XAML.
+        "Microsoft.ui.xaml.dll", "Microsoft.UI.Xaml.Controls.dll", "Microsoft.UI.Xaml.Controls.pri",
+        "Microsoft.UI.Xaml.Internal.dll",
+        "Microsoft.ui.xaml.resources.common.dll", "Microsoft.ui.xaml.resources.19h1.dll",
+        "Microsoft.UI.Xaml/**", "en-us/Microsoft.ui.xaml.dll.mui",
+    )
+    listOf("Debug", "Release").forEach { variant ->
+        val slimDirectory = layout.buildDirectory.dir("compose-winui-slim/${variant.lowercase()}")
+        val stageSlim = tasks.register<Sync>("stageSlimWinuiMingw${variant}Executable") {
+            group = "application"
+            description = "Stages the native MPP demo ($variant) with only the runtime files it uses."
+            dependsOn(
+                "stageWinAppPackageWinuiMingwMain${variant}Executable",
+                "stageWindowsPackageRuntimeAssetsWinuiMingwMain${variant}Executable",
+            )
+            from(
+                layout.buildDirectory.dir(
+                    "kotlin-winrt/application-layout/winuiMingw_main_${variant.lowercase()}Executable/package"
+                )
+            )
+            include(winUiMppSlimFiles)
+            into(slimDirectory)
+        }
+        tasks.register<Exec>("runSlimWinuiMingw${variant}Executable") {
+            group = "application"
+            description = "Runs the native MPP demo ($variant) from its slim directory."
+            dependsOn(stageSlim)
+            workingDir(slimDirectory)
+            executable(slimDirectory.map { it.file("demo-winui.exe").asFile.absolutePath }.get())
+        }
+    }
+
     // The application options name the JVM main class; the native entry calls the main function.
     // The toolkit sets the property when it registers the task, so this is a configuration of
     // the registered task and not of the task type, which would run first.
