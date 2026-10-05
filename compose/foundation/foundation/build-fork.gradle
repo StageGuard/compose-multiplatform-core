@@ -135,8 +135,15 @@ androidXMultiplatform {
             dependsOn(skikoTest)
         }
 
+        // The Skiko actuals of the native targets. They are separate from nativeMain, which a
+        // WinUI native target shares without skikoMain.
+        skikoNativeMain {
+            dependsOn(skikoMain)
+        }
+
         nativeMain {
             dependsOn(nonJvmMain)
+            dependsOn(skikoNativeMain)
         }
 
         nativeTest {
@@ -248,7 +255,10 @@ kotlin {
             }
 
             winuiTest {
-                dependsOn(skikoTest)
+                // :compose:ui:ui-test has no WinUI variant, so skikoTest, which uses it, cannot
+                // be compiled for this target. The WinUI tests of this module are the ones
+                // that do not need it.
+                dependsOn(commonTest)
             }
 
             winuiJvmTest {

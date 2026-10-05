@@ -179,7 +179,7 @@ abstract class AndroidXImplPlugin @Inject constructor() : Plugin<Project> {
                         androidXKmpExtension,
                     )
                 is KotlinBaseApiPlugin ->
-                    // KWINRT-054: without a Kotlin plugin wrapper this is AGP built-in Kotlin.
+                    // KWINRT-067: without a Kotlin plugin wrapper this is AGP built-in Kotlin.
                     // With one, a third-party plugin (kotlin-winrt) applied it to register
                     // standalone compile tasks, and the project is already configured through
                     // the wrapper.

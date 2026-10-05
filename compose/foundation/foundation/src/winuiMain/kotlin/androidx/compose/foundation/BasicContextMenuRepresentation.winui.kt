@@ -61,17 +61,6 @@ internal fun DefaultOpenContextMenu(
         }
     }
     LaunchedEffect(root, menu, positionInRoot, density) {
-        System.err.println(
-            "WinUIContextMenu.showAt source=foundation " +
-                "root=${root::class.simpleName} " +
-                "loaded=${runCatching { root.isLoaded }.getOrNull()} " +
-                "xamlRoot=${runCatching { root.xamlRoot != null }.getOrNull()} " +
-                "size=${runCatching { root.actualWidth }.getOrNull()}x" +
-                "${runCatching { root.actualHeight }.getOrNull()} " +
-                "density=${density.density} " +
-                "positionPx=${positionInRoot.x},${positionInRoot.y} " +
-                "items=${components.size}"
-        )
         if (components.isEmpty()) {
             return@LaunchedEffect
         }

@@ -27,6 +27,8 @@ import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+private const val UiBuildScript = "build-fork.gradle"
+
 class WinUISourceSetIsolationTest {
     @Test
     fun winuiSourceSetsDoNotReferenceDesktopAwtSwingOrSkiaLayer() {
@@ -37,7 +39,7 @@ class WinUISourceSetIsolationTest {
             "androidx.compose.ui.awt.",
             "org.jetbrains.skiko.SkiaLayer",
         )
-        val offenders = listOf("winuiMain", "winuiJvmMain").flatMap { sourceSet ->
+        val offenders = listOf("winuiMain", "winuiJvmMain", "winuiMingwMain").flatMap { sourceSet ->
             kotlinFiles(moduleRoot.resolve("src/$sourceSet/kotlin")).flatMap { file ->
                 val text = file.readText()
                 forbiddenReferences.mapNotNull { reference ->
@@ -59,13 +61,12 @@ class WinUISourceSetIsolationTest {
 
     @Test
     fun winuiSourceSetsDoNotDependOnDesktopMain() {
-        val moduleRoot = findUiModuleRoot()
-        val buildScript = moduleRoot.resolve("build-fork.gradle").readText()
+        val buildScript = uiBuildScript()
         val forbiddenSourceSets = listOf("desktopMain", "desktopJvmMain")
 
         listOf("winuiMain", "winuiJvmMain").forEach { sourceSet ->
             val block = checkNotNull(sourceSetBlock(buildScript, sourceSet)) {
-                "Could not find $sourceSet in compose/ui/ui/build-fork.gradle."
+                "Could not find $sourceSet in $UiBuildScript."
             }
             forbiddenSourceSets.forEach { forbidden ->
                 assertFalse(
@@ -75,14 +76,13 @@ class WinUISourceSetIsolationTest {
                 )
             }
         }
+        val winuiMainBlock = checkNotNull(sourceSetBlock(buildScript, "winuiMain"))
         assertTrue(
-            checkNotNull(sourceSetBlock(buildScript, "winuiMain"))
-                .contains("dependsOn(skikoRenderingMain)"),
-            "WinUI should depend on the shared Skiko rendering source set.",
+            winuiMainBlock.contains("dependsOn(skikoRenderingMain)"),
+            "WinUI should depend on the Skiko source set that it shares with skikoMain.",
         )
         assertFalse(
-            checkNotNull(sourceSetBlock(buildScript, "winuiMain"))
-                .contains("dependsOn(skikoMain)"),
+            winuiMainBlock.contains("dependsOn(skikoMain)"),
             "WinUI must not depend on all skikoMain sources because skikoMain also has generic " +
                 "or Desktop-backed actuals.",
         )
@@ -95,11 +95,11 @@ class WinUISourceSetIsolationTest {
             "java.",
             "javax.",
             "java.lang.foreign.",
-            "WindowsAppSdkBootstrap",
+            "WinRTWindowsAppSdkBootstrap",
             "RuntimeScope",
             "JavaExec",
-            "stageWindowsPackage",
-            "buildWinApp",
+            "stageWinRT",
+            "buildWinRT",
             "System.getProperty",
             "System.load",
             "Class.forName",
@@ -127,45 +127,49 @@ class WinUISourceSetIsolationTest {
     @Test
     fun winuiUsesSourceSetSplitForSharedSkikoRenderingSource() {
         val moduleRoot = findUiModuleRoot()
-        val buildScript = moduleRoot.resolve("build-fork.gradle").readText()
-        val sharedSource = moduleRoot.resolve(
-            "src/skikoRenderingMain/kotlin/androidx/compose/ui/skiko/" +
+        val buildScript = uiBuildScript()
+        val hostSource = moduleRoot.resolve(
+            "src/skikoHostMain/kotlin/androidx/compose/ui/skiko/" +
                 "RecordDrawRectRenderDecorator.skiko.kt"
         )
+        val renderingSource = moduleRoot.resolve(
+            "src/skikoRenderingMain/kotlin/androidx/compose/ui/node/" +
+                "GraphicsLayerOwnerLayer.skiko.kt"
+        )
+        val skikoHostBlock = checkNotNull(sourceSetBlock(buildScript, "skikoHostMain")) {
+            "Could not find skikoHostMain in $UiBuildScript."
+        }
         val skikoRenderingBlock = checkNotNull(sourceSetBlock(buildScript, "skikoRenderingMain")) {
-            "Could not find skikoRenderingMain in compose/ui/ui/build-fork.gradle."
+            "Could not find skikoRenderingMain in $UiBuildScript."
         }
         val winuiMainBlock = checkNotNull(sourceSetBlock(buildScript, "winuiMain")) {
-            "Could not find winuiMain in compose/ui/ui/build-fork.gradle."
+            "Could not find winuiMain in $UiBuildScript."
         }
 
+        assertTrue(hostSource.exists(), "Shared Skiko host source should live in skikoHostMain.")
         assertTrue(
-            sharedSource.exists(),
-            "Shared Skiko rendering source should live in skikoRenderingMain.",
+            renderingSource.exists(),
+            "The owned layer that WinUI shares with Skiko should live in skikoRenderingMain.",
         )
         assertTrue(
-            skikoRenderingBlock.contains("dependsOn(commonMain)") &&
-                skikoRenderingBlock.contains("api(project(\":compose:ui:ui-skiko\"))"),
-            "skikoRenderingMain should carry shared Skiko API sources and dependencies.",
+            skikoHostBlock.contains("dependsOn(commonMain)") &&
+                skikoHostBlock.contains("api(project(\":compose:ui:ui-skiko\"))"),
+            "skikoHostMain should carry platform-neutral Skiko host sources and dependencies.",
         )
         assertTrue(
-            checkNotNull(sourceSetBlock(buildScript, "skikoMain"))
-                .contains("dependsOn(skikoRenderingMain)"),
+            skikoRenderingBlock.contains("dependsOn(skikoHostMain)"),
+            "skikoRenderingMain should reuse the shared Skiko host source set.",
+        )
+        assertTrue(
+            // skikoMain is configured in more than one place of the script.
+            Regex("""skikoMain \{\s*dependsOn\(skikoRenderingMain\)""")
+                .containsMatchIn(buildScript),
             "skikoMain should reuse the shared Skiko rendering source set.",
         )
         assertTrue(
-            winuiMainBlock.contains("dependsOn(skikoRenderingMain)"),
-            "winuiMain should reuse the shared Skiko rendering source set.",
-        )
-        assertTrue(
-            buildScript.contains("apply plugin: \"io.github.compose-fluent.windows-toolkit\""),
-            "Generated WinRT sources should be wired by the kotlin-winrt plugin.",
-        )
-        assertFalse(
-            buildScript.contains("generated/kotlin-winrt/src/") ||
-                buildScript.contains("dependsOn(\"generateWinRTProjections\")"),
-            "The kotlin-winrt plugin owns its generated sources and task dependencies; the build " +
-                "script should not wire them by hand.",
+            winuiMainBlock.contains("dependsOn(skikoRenderingMain)") &&
+                !winuiMainBlock.contains("dependsOn(skikoMain)"),
+            "winuiMain should reuse the shared Skiko source sets, not skikoMain.",
         )
         assertFalse(
             buildScript.contains("task.setSource(project.files("),
@@ -184,8 +188,7 @@ class WinUISourceSetIsolationTest {
             "WinUI JVM runtime classpath should include skiko-winui.",
         )
 
-        // SKIKO-006: the current JVM Skiko API jar is still named skiko-awt,
-        // so keep the guard focused on Desktop/AWT native runtime artifacts.
+        // Keep the guard focused on Desktop/AWT native runtime artifacts.
         val forbiddenArtifacts = listOf(
             "skiko-awt-runtime",
         )
@@ -198,6 +201,182 @@ class WinUISourceSetIsolationTest {
             "WinUI JVM runtime classpath must not include Skiko AWT/Desktop native runtime artifacts:\n" +
                 offenders.joinToString(separator = "\n"),
         )
+    }
+
+    @Test
+    fun winuiWindowHandleLookupIsShared() {
+        val moduleRoot = findUiModuleRoot()
+        val sharedSource = moduleRoot.resolve(
+            "src/winuiMain/kotlin/androidx/compose/ui/window/WinUIWindowInterop.winui.kt"
+        ).readText()
+        val jvmSource = moduleRoot.resolve(
+            "src/winuiJvmMain/kotlin/androidx/compose/ui/window/WinUIWindowNative.winuiJvm.kt"
+        ).readText()
+
+        // KWINRT-077: until kotlin-winrt generates winrt.interop.WindowNative for this module,
+        // the shared lookup makes the IWindowNative call itself, with the portable runtime API.
+        assertTrue(
+            sharedSource.contains("internal fun winuiWindowHandle(window: XamlWindow): RawAddress") &&
+                sharedSource.contains("internal fun winuiWindowHwnd(window: XamlWindow): Long"),
+            "The HWND lookup should be shared by the WinUI targets.",
+        )
+        assertFalse(
+            jvmSource.contains("IWindowNative") || jvmSource.contains("queryInterface("),
+            "WinUI JVM native calls should reuse the shared HWND lookup.",
+        )
+        listOf("java.lang.foreign", "MemorySegment", "Linker").forEach { forbidden ->
+            assertFalse(
+                sharedSource.contains(forbidden),
+                "The shared HWND lookup must stay portable: found $forbidden.",
+            )
+        }
+    }
+
+    @Test
+    fun winuiExplicitlyProjectsInputPaneSurface() {
+        val buildScript = uiBuildScript()
+
+        listOf(
+            "type(\"Windows.Foundation.Rect\")",
+            "type(\"Windows.UI.ViewManagement.InputPane\")",
+            "type(\"Windows.UI.ViewManagement.InputPaneVisibilityEventArgs\")",
+        ).forEach { declaration ->
+            assertTrue(
+                buildScript.contains(declaration),
+                "Missing WinRT projection: $declaration",
+            )
+        }
+    }
+
+    @Test
+    fun winuiInputPaneUsesSharedWindowInteropAndOwnerRegistration() {
+        val moduleRoot = findUiModuleRoot()
+        val sharedInteropFile = moduleRoot.resolve(
+            "src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIInputPane.winui.kt"
+        )
+        val jvmInteropFile = moduleRoot.resolve(
+            "src/winuiJvmMain/kotlin/androidx/compose/ui/platform/WinUIInputPane.winuiJvm.kt"
+        )
+        assertFalse(
+            jvmInteropFile.exists(),
+            "InputPane window interop is shared by WinUI JVM and MinGW.",
+        )
+        val sharedInteropSource = sharedInteropFile.readText()
+        val composeViewSource = moduleRoot.resolve(
+            "src/winuiMain/kotlin/androidx/compose/ui/platform/WinUIComposeView.winui.kt"
+        ).readText()
+
+        // KWINRT-077: until kotlin-winrt generates InputPaneInterop for this module, the shared
+        // source makes the IInputPaneInterop call itself, with the portable runtime API.
+        listOf(
+            "winuiWindowHandle(window)",
+            "winUIInputPaneForWindow(windowHandle)",
+        ).forEach { expected ->
+            assertTrue(
+                sharedInteropSource.contains(expected),
+                "Shared InputPane interop should contain $expected.",
+            )
+        }
+        listOf(
+            "createWinUIInputPaneController(",
+            "registerInputPaneController(this, controller)",
+            "unregisterInputPaneController(this)",
+        ).forEach { expected ->
+            assertTrue(
+                composeViewSource.contains(expected),
+                "Window-backed WinUIComposeView should contain $expected.",
+            )
+        }
+        listOf(
+            "getForCurrentView",
+            "java.lang.foreign",
+            "ProcessBuilder",
+            "rundll32",
+            "powershell.exe",
+        ).forEach { forbidden ->
+            assertFalse(
+                sharedInteropSource.contains(forbidden),
+                "Compose InputPane acquisition must stay a portable desktop interop: found $forbidden.",
+            )
+        }
+    }
+
+    @Test
+    fun skikoOnlyNativeActualsAreOutsideWinuiNativeFragments() {
+        val moduleRoot = findUiModuleRoot()
+        val buildScript = uiBuildScript()
+        val nonJvmActuals = moduleRoot.resolve(
+            "src/nonJvmMain/kotlin/androidx/compose/ui/Actuals.nonJvm.kt"
+        ).readText()
+        val skikoNonJvmActuals = moduleRoot.resolve(
+            "src/skikoNonJvmMain/kotlin/androidx/compose/ui/Actuals.skikoNonJvm.kt"
+        )
+        val nativeThreading = moduleRoot.resolve(
+            "src/nativeMain/kotlin/androidx/compose/ui/internal/Threading.native.kt"
+        )
+        val skikoNativeThreading = moduleRoot.resolve(
+            "src/skikoNativeMain/kotlin/androidx/compose/ui/internal/Threading.skikoNative.kt"
+        )
+
+        assertFalse(nonJvmActuals.contains("PostDelayedDispatcher"))
+        assertTrue(skikoNonJvmActuals.exists())
+        assertFalse(nativeThreading.exists())
+        assertTrue(skikoNativeThreading.exists())
+
+        listOf("skikoNonJvmMain", "skikoNativeMain").forEach { sourceSet ->
+            val block = checkNotNull(sourceSetBlock(buildScript, sourceSet)) {
+                "Could not find $sourceSet in $UiBuildScript."
+            }
+            assertTrue(block.contains("dependsOn(skikoMain)"))
+        }
+        assertTrue(buildScript.contains("dependsOn(skikoNonJvmMain)"))
+        assertTrue(buildScript.contains("dependsOn(skikoNativeMain)"))
+    }
+
+    @Test
+    fun winuiMingwNativeHooksUseKotlinNativeWindowsApis() {
+        val moduleRoot = findUiModuleRoot()
+        val filesWithRequiredSymbols = mapOf(
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/platform/" +
+                "PlatformActuals.winuiMingw.kt" to listOf(
+                "kotlinx.atomicfu.locks.SynchronizedObject",
+                "kotlinx.atomicfu.locks.synchronized",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/" +
+                "ComposeFeatureFlags.winuiMingw.kt" to listOf(
+                "winUIProcessProperty(\"compose.layers.type\")",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/platform/" +
+                "WinUIPlatformProperties.winuiMingw.kt" to listOf(
+                "getenv(name)",
+                "fopen(logFile, \"a\")",
+                "fputs",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/window/" +
+                "WinUIWindowNative.winuiMingw.kt" to listOf(
+                "DwmEnableBlurBehindWindow",
+                "DwmSetWindowAttribute",
+                "CreateRectRgn",
+                "DeleteObject",
+            ),
+            "src/winuiMingwMain/kotlin/androidx/compose/ui/window/" +
+                "WindowCaptureProtection.winuiMingw.kt" to listOf(
+                "SetWindowDisplayAffinity",
+                "WDA_EXCLUDEFROMCAPTURE",
+            ),
+        )
+
+        filesWithRequiredSymbols.forEach { (relativePath, requiredSymbols) ->
+            val file = moduleRoot.resolve(relativePath)
+            assertTrue(file.exists(), "Missing WinUI MinGW implementation: $relativePath")
+            val source = file.readText()
+            requiredSymbols.forEach { symbol ->
+                assertTrue(source.contains(symbol), "$relativePath must use $symbol")
+            }
+            listOf("ProcessBuilder", "rundll32", "powershell.exe", "TODO").forEach { forbidden ->
+                assertFalse(source.contains(forbidden), "$relativePath contains $forbidden")
+            }
+        }
     }
 
     private fun kotlinFiles(root: Path): List<Path> {
@@ -221,15 +400,12 @@ class WinUISourceSetIsolationTest {
         error("Could not find compose/ui/ui module root from $start.")
     }
 
-    /** All blocks that configure [sourceSet]; the build script may configure it more than once. */
-    private fun sourceSetBlock(buildScript: String, sourceSet: String): String? {
-        val blocks = Regex("(?m)^\\s*${Regex.escape(sourceSet)} \\{").findAll(buildScript)
-            .mapNotNull { match -> blockAt(buildScript, match.range.first) }
-            .toList()
-        return blocks.takeIf { it.isNotEmpty() }?.joinToString(separator = "\n")
-    }
+    /** The WinUI targets are wired in the build script of the fork. */
+    private fun uiBuildScript(): String = findUiModuleRoot().resolve(UiBuildScript).readText()
 
-    private fun blockAt(buildScript: String, start: Int): String? {
+    private fun sourceSetBlock(buildScript: String, sourceSet: String): String? {
+        val start = buildScript.indexOf("$sourceSet {")
+        if (start < 0) return null
         var depth = 0
         for (index in start until buildScript.length) {
             when (buildScript[index]) {

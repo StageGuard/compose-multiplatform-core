@@ -99,9 +99,9 @@ private class WinUIApplicationRuntime(
         WinUIDispatcher(dispatcherQueue) + frameClock + recomposerParentJob
     private val recomposer = Recomposer(recomposerContext)
 
-    // The shared manager only pumps apply notifications on a dispatcher that always dispatches.
+    // The shared manager pumps the apply notifications on the dispatcher queue.
     private val globalSnapshotRegistration =
-        GlobalSnapshotManager.register(WinUIDispatcher(dispatcherQueue, immediate = false))
+        GlobalSnapshotManager.register(WinUIDispatcher(dispatcherQueue))
     private val root = WinUIApplicationNode()
     private val composition = Composition(
         // As on desktop, the application ends when its content has no window left.

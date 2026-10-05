@@ -1,5 +1,193 @@
 # compose-winui implementation plan
 
+## Merge of `winui_dev` 2026-10-05
+
+`winui_dev` (`49ecfa1c091`, 92 commits since the base of the `jb-main` sync)
+was merged into the sync. Both sides had changed the same WinUI code: the sync
+for desktop parity (below), `winui_dev` for new platform features and a
+MinGW target. Where both had a fix for the same thing, the merge kept the one
+that does more, or both when they cover different cases.
+
+Build:
+
+- [x] `winui_dev` wires WinUI in the files of the old build layout
+  (`build.gradle`, `settings.gradle`, `buildSrc`). Those files are `jb-main`'s
+  in the sync and stay so; the JVM-target changes of `winui_dev` are ported to
+  `build-fork.gradle`: the `skikoHostMain`, `skikoNativeMain` and
+  `skikoNonJvmMain` source sets, `winuiMain` source sets in
+  `foundation-layout` and `material3`, the projection of the WinRT input
+  device types in `material3`, the staged Windows App SDK runtime for
+  `:compose:ui:ui:winuiJvmTest`, the title bar options and the JVM profile of
+  the sample hosts.
+- [x] kotlin-winrt stays the `xaml-support` build from Maven
+  (`COMPOSE_WINUI_MAVEN_REPO`) with the toolkit plugin. The
+  `external/kotlin-winrt` submodule of `winui_dev` pins a commit that is not in
+  `compose-fluent/kotlin-winrt` and is not merged.
+- [ ] **The MinGW target of `winui_dev` is not wired in the fork build.** Its
+  sources are merged (`winuiMingwMain` directories,
+  `navigation-common/src/mingwX64Main`, `ui-util/src/mingwX64Main`) and its
+  source moves are kept (`skikoNativeMain`, `skikoNonJvmMain`), but no
+  `build-fork.gradle` declares `mingwX64("winuiMingw")`. What is missing:
+  the target and its `winuiMingwMain` source sets in every module; Compose
+  runtime, lifecycle, savedstate and navigation for `mingwX64` (`winui_dev`
+  redirects to other artifacts per target in the old `buildSrc`, the fork
+  redirects per module through `redirectversions.toml`); and actuals for the
+  JVM-only expects that the desktop parity work added (the code point of a
+  key, the wheel scroll lines, the DPI scale and the minimized state of a
+  window, the clipboard sequence number, the main dispatcher). The
+  properties `composeWinUi.cmpVersion` and
+  `kotlin.mpp.applyDefaultHierarchyTemplate=false` of `winui_dev` belong to
+  that wiring and are not merged; the second one changes every module of the
+  fork build.
+- [x] Three kotlin-winrt problems came up with the code of `winui_dev` on
+  `xaml-support`: `KWINRT-077` (the generation task does not generate
+  `WindowNative` and `InputPaneInterop`; `ui` makes the two COM calls itself),
+  `KWINRT-078` (the plugin cannot be applied to `ui-text` on the `jb-main`
+  module graph; its JVM target keeps the JVM `Locale`) and `KWINRT-079` (the
+  shutdown hook blocks the exit of the test worker; the tests end it). The
+  issue numbers of the sync moved to `KWINRT-065` to `KWINRT-076`; see
+  `kotlin-winrt-issues.md`.
+- [x] The sample hosts keep the low-footprint JVM profile of `winui_dev` with
+  bounds measured on this demo (64 MB heap, 96 MB metaspace, 32 MB code
+  cache). With the bounds of `winui_dev` (32, 44 and 8 MB) the demo of the sync
+  ends with `OutOfMemoryError: Metaspace`: its 105 screens use 63 MB of
+  metaspace.
+- [x] `runWinUIMppSample` compares the title bar insets with the title bar of
+  the `AppWindow` instead of with 276 pixels, which is the width of the
+  caption buttons at 200 % display scale only.
+
+Sources, by area (kept side and why):
+
+- [x] Owned layers: the sync. `WinUIOwner` uses the Skiko
+  `GraphicsLayerOwnerLayer`; `WinUIOwnerLayer` of `winui_dev` is a second
+  implementation of it without the layer manager. `skikoHostMain` of
+  `winui_dev` (frame recomposer, dispatchers, snapshot manager) is below
+  `skikoRenderingMain` of the sync (owned layers), and `winuiMain` depends on
+  the latter.
+- [x] Popup and Dialog: the sync for the default (canvas) path, a layer above
+  the content like the Skiko scene layers, which is what makes z-order,
+  focus, outside presses, the scrim and the animations match the desktop
+  target; `winui_dev` for `LayerType.OnWindow`, a native flyout, with its
+  dismiss state, DIP conversion and parent composition context.
+- [x] Pointer input: `winui_dev` as the base. Its pointer state tracker reports
+  every contact of an event, historical points, the eraser, pen hover and
+  capture, and closes the projections of a callback. Added from the sync: the
+  host hooks around an event, horizontal scrolling with Shift, a scroll that
+  does not end a press, pressure `1` for a pointer without pressure, and hover
+  of a pressed mouse as on Skiko. The contact tracking of the sync is replaced.
+- [x] Keys: `winui_dev` as the base (shared modifier state, reset on focus
+  loss, media and browser keys). Added from the sync: the hook that lets a
+  popup layer and back handling see a key first, `NumPadEnter`, and the code
+  point of a key. A pressed key with a code point is no typed event: typed
+  characters come from `CharacterReceived` or the text input session, as on
+  `winui_dev`, after dead keys and input methods. With the key events of the
+  sync and the typed event rule of the base, a text field inserted a character
+  for the key down and again for the key up.
+- [x] Drag and drop: `winui_dev` as the base (content transfer through
+  `PlatformDragAndDropData`, asynchronous text with a deferral, session
+  cleanup, a drag image written with `DataWriter`, which is portable). Added
+  from the sync: the transfer actions (`supportedActions`, the action from the
+  modifier keys, the action of the drop as the result), the decoration offset
+  and scale, `onTransferCompleted`, and offering a drop only over a target that
+  takes it. The FFM bitmap writer of the sync and its test are gone.
+- [x] Compose view: both. From `winui_dev` the environment (theme, layout
+  direction, font scale, animations), the view lifecycle, the root size
+  binding, the indirect pointer bridge, the input pane and the title bar
+  insets; from the sync the layer host, back handling, hover after layout,
+  the frame background and `Window` with `WindowState`. A minimized window
+  moves the lifecycle of `winui_dev` to `CREATED`, as the sync did. The layout
+  direction is right to left for a right-to-left XAML tree (`winui_dev`) and
+  for a right-to-left locale (the sync, as on the desktop target).
+- [x] Input pane: `winui_dev`, with one change. Every Compose view of a window
+  gets the same projection of the input pane of that window, so a view does
+  not close its reference when it is disposed; a window popup closing it broke
+  the handlers of the window.
+- [x] Demo: the validation events and title bar options of `winui_dev` with
+  the entry of the sync, which has no theme around the content, like the
+  desktop demo. The `MaterialTheme` that `winui_dev` puts around it (dark with
+  a dark system) changes the colors and the text sizes of every screen.
+- [x] Coordinates: `winui_dev` (the same DIP conversion with shared helpers,
+  and `WinUIView` is measured again when the density changes).
+- [x] Dispatcher: `winui_dev` (always dispatches to the queue).
+- [x] Text: the JVM `Locale` of the sync on the JVM target (`KWINRT-078`).
+- [x] Material 3: the Skiko menu, bottom sheet, navigation rail and dialog are
+  compiled for WinUI as in the sync, without the copies of `winui_dev`. The
+  JVM target keeps the JVM calendar locale and date format of the sync, which
+  are those of the desktop target; the WinRT ones of `winui_dev` (which write
+  the weekdays of the date picker as "Su", "Mo") are kept for the native
+  target in `winuiMingwMain`. The precision pointer of `winui_dev` (WinRT
+  keyboard and mouse capabilities) is kept.
+- [x] Navigation: `winui_dev` moved the default transitions to
+  `nonAndroidMain` and the POSIX mutex of `navigation-common` to `posixMain`.
+  `jb-main` has per-platform transitions and its `build.gradle` has no
+  `posixMain`, so both files stay where `jb-main` has them.
+- [x] Shared Skiko code changed by `winui_dev` and merged: the indirect
+  pointer events of `ComposeScene` and `RootNodeOwner` (adapted to the frame
+  recomposer of `jb-main`), `IndirectPointerInputFocusListener` and
+  `PlatformContentTransfer` in `commonMain`, the content transfer of
+  `foundation`, the `equals` of `ModalWideNavigationRailProperties` and the
+  localized tooltip strings.
+- [x] Tests: the structure tests of `winui_dev` read the fork build files and
+  the merged sources; the ones about the submodule, the MinGW wiring and the
+  WinRT locale and date format of the JVM target are gone.
+  `WinUIFontResourceLoaderTest` is gone with the loader object, which the sync
+  replaced by the Skiko `FontLoader`.
+
+Found while verifying the merged tree:
+
+- [x] A layer that is attached while the root is measured was never measured,
+  so a popup or dialog composed in a `Scaffold` at start-up stayed invisible
+  until the window was resized. The layer host of the sync is the same code
+  and showed such a popup; why it did was not examined (with `winui_dev` the
+  window has its size before the content is composed, so nothing measures the
+  root a second time). The layer host asks for a measure pass after the one
+  that is running
+  (`WinUIOwnerTest.layerAttachedWhileTheRootIsMeasuredIsMeasuredAfterwards`).
+- [x] A frame whose work closes its own window (an effect that calls
+  `Window.close()`) disposed the view and with it the picture recorder and
+  surface that the frame was still drawing to: `runWinUIViewSample` crashed in
+  Skia in 3 of 7 runs. The render host of a view that is disposed during its
+  frame is closed after the frame; 14 of 14 runs pass. Whether the sync
+  crashed the same way was not checked.
+
+Verification:
+
+- [x] WinUI JVM target (JDK 25, `-PcomposeWinUi.enableJvmTarget=true`):
+  `compileKotlinWinuiJvm` of `ui`, `ui-text`, `ui-graphics`, `ui-skiko`,
+  `animation`, `foundation`, `foundation-layout`, `material`, `material3`,
+  `demo-winui` and the `winui-samples` classes.
+- [x] `winuiJvmTest`: `ui` 360 tests, `ui-graphics` 173 (4 skipped),
+  `foundation` 12, `ui-text` 6, `material3` 6.
+- [x] Default mode (JDK 21): `compileKotlinDesktop` of `ui`, `ui-text`,
+  `foundation`, `foundation-layout`, `material`, `material3`,
+  `navigation-compose` and the demo; `compileKotlinJs` and
+  `compileKotlinWasmJs` of `ui`, `foundation` and `material3`;
+  `desktopTestClasses` of `ui` and `foundation`; of `:compose:ui:ui:desktopTest`
+  the scene, node, drag and drop, indirect pointer, snapshot manager and flush
+  dispatcher tests (94 in 16 classes) and of
+  `:compose:foundation:foundation:desktopTest` `TransferableContentDesktopTest`.
+- [x] `:compose:mpp:demo-winui:runWinUIMppSample` (its six smoke runs and the
+  run that validates the title bar insets) and the eleven run tasks of
+  `:compose:ui:ui:winui-samples`.
+- [x] The 105 screens of the demo, captured on WinUI before and after the
+  merge with the desktop shots as the reference: 93 are pixel-identical to
+  before the merge. The other 12 show content that changes with time or from
+  run to run (`LazyColumn`, `LazyGrid`, `StaggeredGrid`, `Pager`, `Resize In
+  LazyList`, `MeshGradient`, `Blending`, `ImageViewer`, `Drag and Drop`,
+  `WindowFocusDemo`, `Android TextBrushDemo`, `Linear Progress Indicator`);
+  their differences were not examined one by one.
+- [x] With real mouse and key input on the demo: the drag and drop screen
+  (drag, over the target, drop), the open modal bottom sheet and navigation
+  drawer are pixel-identical to before the merge; with the dropdown menu of
+  the demo made focusable, Down, Up and Esc act as on desktop (0.01 % of the
+  pixels differ after a shift of one pixel); typing into `BasicTextField`
+  gives the same text as on desktop; the wheel scrolls a list.
+- [ ] Not verified: the iOS and macOS targets (not buildable on this machine),
+  the AOSP mode, pen and touch input with a device, an input method with the
+  text input session, the input pane on a touch device, a right-to-left
+  locale, and the effect of the pointer projection cleanup on memory
+  (`KWINRT-064`), which was not measured here.
+
 ## Desktop parity 2026-10-05
 
 The MPP demo looked and behaved differently on WinUI than on the AWT desktop
@@ -99,7 +287,7 @@ Windows, popups and dialogs:
   the modifier keys (Ctrl copies, Shift moves, Ctrl+Shift links), which
   `DragAndDropEvent.action` reports. Without keys a drag copies when the
   source allows it; AWT prefers moving. Writing the drag image into the
-  `SoftwareBitmap` needs the kotlin-winrt fix of `KWINRT-063`.
+  `SoftwareBitmap` needs the kotlin-winrt fix of `KWINRT-076`.
 - [x] `Dispatchers.Main` is the UI thread of the WinUI application
   (`WinUIMainDispatcherFactory`), so `collectAsStateWithLifecycle`,
   `repeatOnLifecycle` and `viewModelScope` work.
@@ -183,7 +371,7 @@ Not changed:
   `buildSrc/` are identical to upstream.
 - [x] `-PcomposeWinUi.enableJvmTarget=true` selects the WinUI build: it adds
   the kotlin-winrt plugin to the build classpath, pins Kotlin to 2.4.0
-  (`KWINRT-052`), includes `demo-winui`, `winui-samples` and the two
+  (`KWINRT-065`), includes `demo-winui`, `winui-samples` and the two
   `*-winui` navigation modules, and replaces `desktop()` with `winuiJvm` in
   the modules that have a WinUI target. Without the flag the build is
   upstream's and runs on JDK 21.
@@ -191,7 +379,7 @@ Not changed:
   (`io.github.compose-fluent.windows-toolkit`, `windows { packageReferences { }
   application { } }`), Windows App SDK 2.2.0, and `RunWinAppHostTask` run
   tasks instead of nested Gradle builds. Workarounds for the plugin published
-  from `master` were `KWINRT-052` to `KWINRT-061`; see the next section for
+  from `master` were `KWINRT-065` to `KWINRT-074`; see the next section for
   the ones that remain.
 - [x] `org.jetbrains.skiko:skiko` is substituted with `skiko-winui` in every
   WinUI configuration. At the sync the current skiko-winui came from
@@ -242,25 +430,25 @@ application tasks):
   `io.github.compose-fluent`, so these builds win over the published snapshots
   of the same version.
 - [x] Removed with `xaml-support`: the LF copy of the authoring sources
-  (`KWINRT-055`) and the explicit additions to the projection compilation
-  classpath (`KWINRT-056`). `winui-samples` no longer filters its host
-  classpath (`KWINRT-057` only affects `demo-winui`).
+  (`KWINRT-068`) and the explicit additions to the projection compilation
+  classpath (`KWINRT-069`). `winui-samples` no longer filters its host
+  classpath (`KWINRT-070` only affects `demo-winui`).
 - [x] New with `xaml-support`: `:compose:ui:ui` switches off the XAML schema
   export that the plugin runs for every library, with
   `windows { xaml { exportLibrarySchema = false } }`. The export failed on
-  `fa4508d7c` (`KWINRT-062`, fixed in kotlin-winrt PR #15). The
+  `fa4508d7c` (`KWINRT-075`, fixed in kotlin-winrt PR #15). The
   `demo-winui` graph validation expects the authoring registrar
   `WinRTAuthoringTypeDetailsRegistrar_ui_winuiMain`, which the plugin now names
   after the source set.
-- [x] Removed with kotlin-winrt PR #16: the workarounds for `KWINRT-054`
-  (disabled Android projection compilation), `KWINRT-057` (`demo-winui` host
-  class path filter), `KWINRT-058` (`runtime\bin` first on `PATH`) and
-  `KWINRT-060` (`duplicatesStrategy` in `winui-samples`). `KWINRT-053` is
+- [x] Removed with kotlin-winrt PR #16: the workarounds for `KWINRT-067`
+  (disabled Android projection compilation), `KWINRT-070` (`demo-winui` host
+  class path filter), `KWINRT-071` (`runtime\bin` first on `PATH`) and
+  `KWINRT-073` (`duplicatesStrategy` in `winui-samples`). `KWINRT-066` is
   fixed too: WinUI builds no longer need configuration on demand.
 - [x] Still there: the toolkit is applied after `androidXMultiplatform`, and
   `buildSrc-fork` tells the toolkit's `KotlinBaseApiPlugin` apart from AGP
-  built-in Kotlin (see `KWINRT-054`). `KWINRT-052` (Kotlin 2.4.0),
-  `KWINRT-059` (`vswhere.exe` on `PATH`) and `KWINRT-061` (JDK 25) are
+  built-in Kotlin (see `KWINRT-067`). `KWINRT-065` (Kotlin 2.4.0),
+  `KWINRT-072` (`vswhere.exe` on `PATH`) and `KWINRT-074` (JDK 25) are
   unchanged.
 
 Validation on 2026-10-04 (Windows x64, JDK 25, Kotlin 2.4.0 in WinUI mode, a
@@ -278,7 +466,7 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] `:compose:ui:ui:help --no-configure-on-demand` configures.
 - [x] `:compose:ui:ui:compileAndroidMain` passes with the WinUI flag. The
   toolkit used to put its compiler plugin options on the Android compilation
-  as well (`KWINRT-054`).
+  as well (`KWINRT-067`).
 - [x] Without the WinUI flag, on JDK 21: `compileKotlinDesktop` of `ui`,
   `ui-skiko`, `foundation`, `material`, `material3`, `navigation-compose`,
   `navigation3-ui` and the MPP demo passes.
@@ -289,14 +477,14 @@ demo host have the SHA-1 of the Maven Local files):
 ## Architecture
 - [x] Implement compose-winui as a standalone `compose-ui` platform target, comparable in responsibility to `androidMain`.
 - [x] Keep compose-winui independent from `desktopMain`, AWT, Swing, and Skiko AWT/desktop runtime behavior.
-- [x] Place `winuiMain` under `skikoMain` in the source-set graph because the upstream `uiMain` inheritance graph must remain unchanged.
-- [x] Preserve WinUI/XAML actuals where `skikoMain` uses generic or Win32-backed behavior; use a WinUI-first compile bridge until `skiko-winui` can supply the rendering sources that should be shared.
+- [x] Keep `winuiMain` on the selected `skikoHostMain` rendering surface rather than inheriting the full `skikoMain` actual set.
+- [x] Preserve the normal non-WinUI Skiko graph through `skikoNonJvmMain` and `skikoNativeMain`, while conditionally excluding those Skiko-only actual sets from WinUI compilations.
 - [x] Use `kotlin-winrt` as the WinRT and WinUI projection/runtime foundation instead of duplicating COM or Windows App SDK bootstrap code in `compose-ui`.
-- [x] Share WinUI-specific Compose semantics in `winuiMain`, with `winuiJvmMain` providing current JVM runtime details and `winuiMingwMain` deferred until `kotlin-winrt` provides mingw support.
+- [x] Share WinUI-specific Compose semantics in `winuiMain`, with current JVM details in `winuiJvmMain` and Kotlin/Native Windows hooks in `winuiMingwMain`.
 - [x] Treat Android `AndroidView` interop as the behavioral reference for factory, update, reuse, detach, release, layout, focus, and input behavior.
 
 ## UIKit target parity gap
-- [ ] Treat the existing UIKit target as the near-term architecture reference for production readiness, not just Android/Desktop. The WinUI target currently has a real `Owner`, recomposer, application/window domain, and basic `WinUIView` interop, but it is still well behind UIKit in rendering, accessibility, text input, native interop synchronization, and test depth.
+- [ ] Treat the existing UIKit target as the near-term architecture reference for production readiness, not just Android/Desktop. The WinUI target now has a real `Owner`, recomposer, application/window domain, Skiko-backed rendering, UI Automation coverage, text input, native interop synchronization, and focused test/smoke coverage. Keep using UIKit as the parity reference for ongoing polish, edge cases, and future upstream syncs.
 - [x] Close the rendering architecture gap with UIKit's `ComposeSceneMediator` + `MetalView` / `MetalRedrawer` stack by adding a WinUI-native scene/rendering host that owns frame scheduling, surface resize, drawing submission, interop synchronization, and disposal as one coherent layer.
 - [x] Close the accessibility architecture gap with UIKit's `AccessibilityMediator` by mapping Compose `SemanticsOwner` changes to UI Automation peers/elements, including focus, actions, scroll state, live-region-like notifications, and interop/native accessibility participation.
 - [x] Add initial Skiko WinUI accessibility-provider hookup so the WinUI render
@@ -309,23 +497,37 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] Close the text input architecture gap with UIKit's `NativeTextInputView` / `ComposeTextInputView` stack by replacing the current WinUI text-input lifecycle stubs with a real IME/editing bridge, including selection, composition, keyboard visibility, software keyboard control where available, and text-toolbar coordination.
 - [x] Close the interop transaction gap with UIKit's `UIKitInteropContainer` by moving WinUI native child insertion, removal, z-order, layout, clipping, and native property updates into a render-synchronized transaction model instead of ad hoc root-content sync callbacks.
 - [x] Close the interop input/focus gap with UIKit's cooperative/non-cooperative interaction modes by supporting WinUIView native focus transfer, native pointer/keyboard handling inside hosted controls, Compose event delivery outside hosted controls, and predictable Tab / Shift+Tab traversal across Compose and WinUI controls.
-- [ ] Close the platform-dependency gap by removing direct ABI event/property workarounds as `kotlin-winrt` generated event sources, interface registries, nullable WinRT properties, and resource/application lifecycle support become reliable in compose-winui.
+- [x] Close the platform-dependency gap by removing direct ABI event/property workarounds as `kotlin-winrt` generated event sources, interface registries, nullable WinRT properties, and resource/application lifecycle support become reliable in compose-winui.
 - [x] Close the test architecture gap with UIKit's `iosTest` / `uikitInstrumentedTest` coverage by splitting the current large WinUI sample smoke into focused tests for scene/rendering, interop, accessibility, keyboard/text input, window/lifecycle, pointer/scroll, resource loading, memory/disposal, and integration launch.
-- [ ] Use the following rough maturity target when prioritizing work: Owner/composition/window is around 60-70% of the UIKit architecture shape, WinUIView interop basics are around 50-60%, and overall WinUI target maturity is around 35-45% until rendering host, UI Automation, real IME, transaction-based interop, and broader tests are implemented.
+- [x] Use the following rough maturity target when prioritizing work: the JVM WinUI path is past the original architecture bring-up target, and the MinGW target now compiles through the same shared platform layer. Remaining work is production hardening, upstream sync hygiene, pixel/readback-level render validation, and Native runtime/sample coverage.
 
 ## Gradle targets and source sets
 - [x] Add a JVM target for WinUI, for example `jvm("winuiJvm")`, configured for JDK 22 or newer because `kotlin-winrt` JVM support uses the Java Foreign Function and Memory API.
-- [ ] Add a Windows native target, `mingwX64("winuiMingw")`, after `kotlin-winrt` implements mingw support.
-- [x] Add `winuiMain` under `skikoMain` while keeping WinUI-specific actuals selected for the current WinUI JVM compile path.
+- [x] Add the Windows native target `mingwX64("winuiMingw")`; the refreshed
+  kotlin-winrt/Skiko graph now passes `compileKotlinWinuiMingw` on JDK 25.
+- [x] Keep `winuiMain` dependent on `skikoHostMain`, not the full `skikoMain`
+  actual set, so the JVM and MinGW WinUI targets share rendering-facing code
+  without importing generic Skiko platform actuals.
 - [x] Add `winuiJvmMain` as a dependent of `winuiMain`.
-- [ ] Add `winuiMingwMain` as a dependent of `winuiMain` after the mingw target is enabled.
+- [x] Add `winuiMingwMain` as a dependent of `winuiMain` while retaining the
+  connected default `winuiMingwMain -> nativeMain -> nonJvmMain` hierarchy.
 - [x] Add matching test source sets for shared WinUI behavior and target-specific JVM behavior.
 - [x] Do not make `winuiMain`, `winuiJvmMain`, or `winuiMingwMain` depend on `desktopMain`, AWT, Swing, or `org.jetbrains.skiko.SkiaLayer`.
-- [x] Replace the temporary WinUI JVM compile-source bridge with a principled source-set split now that `io.github.compose-fluent:skiko-winui:0.0.0-SNAPSHOT` is resolvable, so shared Skiko scene/rendering code can be reused without compiling conflicting Skiko generic actuals. Initial Maven dependency wiring, a narrow `WinUISkikoRenderHost` adapter, and the first `WinUIComposeView` render-surface connection compile on 2026-06-02. `SKIKO-002` and `SKIKO-003` are fixed as of 2026-06-03; runtime sample validation reaches the full current smoke path. Latest kotlin-winrt snapshots `0.1.0-20260603.042831-23` / plugin `0.1.0-20260603.043142-4` still leave only the deferred `KWINRT-024` native process-exit crash, which is not a current skiko-winui integration blocker.
+- [x] Preserve normal mode through `nonJvmMain -> skikoNonJvmMain -> skikoMain`
+  and `nativeMain -> skikoNativeMain -> skikoMain`; in WinUI mode remove only
+  those two Skiko-only ancestry edges, without mutating `dependsOn` after the
+  hierarchy is created.
+- [x] Append the Compose compiler plugin to the Native compiler-plugin
+  classpath so the kotlin-winrt compiler plugin remains active.
+- [x] In WinUI mode, redirect Android publications to AndroidX and other
+  configured non-WinUI targets plus root metadata to
+  `org.jetbrains.compose.*:1.10.0`; keep `winuiJvm` and `winuiMingw` local via
+  their target publications.
+- [x] Replace the temporary WinUI JVM compile-source bridge with a principled source-set split now that `io.github.compose-fluent:skiko-winui:0.0.0-SNAPSHOT` is resolvable, so shared Skiko scene/rendering code can be reused without compiling conflicting Skiko generic actuals. Initial Maven dependency wiring, a narrow `WinUISkikoRenderHost` adapter, and the first `WinUIComposeView` render-surface connection compile on 2026-06-02. `SKIKO-002` and `SKIKO-003` are fixed as of 2026-06-03; the 2026-07-06 validation baseline passes `compileKotlinWinuiJvm`, `winuiJvmTest`, the full repository WinUI sample, and the WinUI MPP sample.
 - [x] Wire `winuiMain` to the local `kotlin-winrt` runtime without depending on checked-in `winrt-projections`.
 - [x] Apply the local `kotlin-winrt` Gradle plugin for WinUI projection generation when running on JDK 22 or newer.
 - [x] Declare the Windows App SDK NuGet package through the `winRt` DSL instead of directly depending on projection modules.
-- [x] Explicitly declare the minimal WinRT projection `type(...)` entries required by `compose-ui` and repository-local samples for now. The current compose-winui configuration no longer uses prebuilt full projection artifacts and keeps the requested surface in explicit `type(...)` entries. Validation passes with kotlin-winrt snapshots from 2026-06-07 after `KWINRT-029` was fixed upstream; `KWINRT-030` remains as a narrow Gradle checker workaround.
+- [x] Explicitly declare the minimal WinRT projection `type(...)` entries required by `compose-ui` and repository-local samples for now. The current compose-winui configuration no longer uses prebuilt full projection artifacts and keeps the requested surface in explicit `type(...)` entries. Validation passes with the current `0.1.0-SNAPSHOT` kotlin-winrt Maven artifacts; the old `KWINRT-030` early identity-resolution failure is no longer reproduced.
 
 ## compose-ui platform abstractions
 - [x] Add initial `WinUIComposeView` in `winuiMain`, mirroring the role of Android's root owner rather than desktop's Skiko scene layer.
@@ -351,19 +553,39 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] Provide WinUI actuals for common platform hooks such as time, delayed posting, view configuration, window info, URI handling, haptics, semantics region, focusability, and platform velocity tracking.
 - [x] Route initial WinUI JVM delayed posting back through the registered WinUI `DispatcherQueue` instead of running callbacks directly on the scheduler thread.
 - [x] Provide initial WinUI composition locals for density, layout direction, view configuration, font resolution, URI handling, active-window focus state, and AppWindow-backed container size.
+- [x] Observe the effective XAML theme and flow direction plus Windows text scale and animation settings, then update `LocalSystemTheme`, owner layout direction, `Density.fontScale`, and the root recomposer `MotionDurationScale` without recreating the Compose root.
+- [x] Drive each `WinUIComposeView` lifecycle from its loaded, visible, and active state: unattached or hidden roots remain `CREATED`, inactive loaded roots are `STARTED`, active loaded roots are `RESUMED`, and disposal is terminal `DESTROYED`.
+- [x] Route WinUI caption-bar/title-bar insets from `AppWindow.titleBar`
+  (`height`, `leftInset`, and `rightInset`) into `WindowInsets.captionBar`,
+  `WindowInsets.systemBars`, `safeDrawing`, and `safeContent`; keep the other
+  desktop-only insets at zero until backed by a concrete WinUI/Windows signal.
+  The MPP sample now validates this through the common `SelectionTopBar`
+  `TopAppBar(contentPadding = WindowInsets.systemBars...)` path with
+  `extendsContentIntoTitleBar=true`, so titlebar inset propagation is checked
+  against real sample layout rather than a standalone WinUI-only sample.
 - [x] Provide initial WinUI clipboard hooks for `LocalClipboardManager`, `LocalClipboard`, `ClipEntry`, `ClipMetadata`, and `NativeClipboard`; the synchronous `ClipboardManager` text cache is compose-winui policy, not a kotlin-winrt helper requirement.
+- [x] Provide initial WinUI Autofill hooks for `LocalAutofill`,
+  `LocalAutofillManager`, and `LocalAutofillTree`, including legacy
+  `AutofillNode` fill callbacks, semantics-based `requestAutofill`, focus /
+  semantics lifecycle tracking, `commit` / `cancel` session state, and focused
+  WinUI JVM coverage. This is the Compose platform integration layer only:
+  WinUI desktop does not currently expose an Android-style system Autofill UI
+  surface here, so compose-winui does not fake a credential suggestion popup.
 - [x] Provide initial WinUI text input and IME integration hooks, with minimal stubs only where behavior is explicitly deferred.
 - [x] Provide initial WinUI text-toolbar state tracking for copy/paste/cut/select-all/autofill menu requests.
 - [x] Provide WinUI accessibility integration hooks that can later map Compose semantics to UI Automation.
 - [x] Ensure lifecycle, retained values, and saveable state behavior have WinUI equivalents instead of relying on Android `ViewTree*Owner` APIs.
 
 ## WinUI rendering host
-- [x] Implement a WinUI-native rendering host that does not require an AWT component or Skiko AWT layer. The first `skiko-winui` surface is installed under the WinUI root content on 2026-06-02. Runtime sample validation now reaches the full smoke path after `SKIKO-003` root-content sync fixes; the known `KWINRT-024` native teardown crash is tracked separately as non-blocking.
+- [x] Implement a WinUI-native rendering host that does not require an AWT component or Skiko AWT layer. The first `skiko-winui` surface is installed under the WinUI root content on 2026-06-02. The full repository WinUI sample and WinUI MPP sample pass with the current `0.1.0-SNAPSHOT` kotlin-winrt Maven artifacts as of 2026-07-06.
 - [x] Define the shared `winuiMain` rendering-facing abstraction used by `WinUIComposeView` to request frames, resize, and submit drawing work.
 - [x] Add initial unit coverage for the `WinUISkikoRenderHost` adapter lifecycle: render invalidation forwarding, resize forwarding, frame-scheduler reuse, close ordering, idempotent close, suppression of post-close render/resize requests, and render diagnostics exposure.
 - [x] Implement the JVM backend in `winuiJvmMain` using `kotlin-winrt`, Windows App SDK bootstrap, DispatcherQueue, and the JVM native interop path.
-- [ ] Implement the mingwX64 backend in `winuiMingwMain` after `kotlin-winrt` provides mingw runtime actuals, using Kotlin/Native interop, COM/WinRT initialization, and native Windows APIs.
-- [x] Bind the Compose render output to a WinUI-hostable native surface or composition-backed surface owned by the WinUI target. `WinUIComposeView` now draws its root `LayoutNode` into a `skiko-winui` Skia canvas through a WinUI `Canvas` root layer; fuller graphics actuals remain to be implemented, while the existing `KWINRT-024` teardown crash is deferred as non-blocking.
+- [x] Implement the mingwX64 backend in `winuiMingwMain`, including Native
+  process-property/debug logging, DWM transparency/corner handling, capture
+  protection, and shared projected InputPane acquisition. The target compiles
+  with the generated kotlin-winrt projections and `skiko-winui-mingw`.
+- [x] Bind the Compose render output to a WinUI-hostable native surface or composition-backed surface owned by the WinUI target. `WinUIComposeView` now draws its root `LayoutNode` into a `skiko-winui` Skia canvas through a WinUI `Canvas` root layer, and the 2026-07-06 validation baseline covers attached Direct3D rendering, positive render sizes, matching render state size, non-empty draw bounds, and observed frames.
 - [x] Keep frame scheduling on the WinUI UI thread and ensure rendering invalidations are coalesced with Compose measure/layout work. `WinUIComposeView` now starts the Skiko frame scheduler only after the WinUI root is loaded, so unattached roots can compose and run owner/interops tests without starting presentation callbacks.
 - [x] Release native rendering resources, DispatcherQueue handles, COM references, and Windows App SDK registrations when the host is disposed.
 
@@ -430,7 +652,9 @@ demo host have the SHA-1 of the Maven Local files):
   resource-loading smoke, and shutdown/disposal smoke.
 - [ ] Re-run Android/Desktop versions of the original MPP sample after sharing
   code with WinUI to ensure source-set guards did not regress existing sample
-  platforms.
+  platforms. The 2026-07-06 local validation covered the original sample's
+  Desktop `desktopJar`; no Android compile/run task is currently exposed by the
+  original MPP sample project.
 - [x] Keep unresolved kotlin-winrt/skiko blockers tied to this sample as stable
   `KWINRT-###` or `SKIKO-###` entries, and do not hide generator/runtime issues
   by excluding legitimate WinMD dependency-chain types.
@@ -463,7 +687,7 @@ demo host have the SHA-1 of the Maven Local files):
 - [ ] Add missing projection/runtime capabilities to `kotlin-winrt` first when compose-winui requires WinUI APIs that are not yet projected.
 - [x] Keep kotlin-winrt's KMP graph baseline covered with repository-local validation for customized source sets, transitive WinRT identity, support artifact merging, and multi-module generated projection ownership.
 - [x] Follow kotlin-winrt's WinUI resource bootstrap with full Windows SDK PRI pipeline alignment: `Page`, `ApplicationDefinition`, `PRIResource`, manifest default language, `ProjectPriIndexName`, `AppxPriInitialPath`, duplicate filtering, and `WinAppSdkExpandPriContent` behavior.
-- [x] Keep target-specific native interop code inside `winuiJvmMain`, and later `winuiMingwMain`; keep shared Compose/WinUI behavior in `winuiMain`.
+- [x] Keep target-specific native interop code inside `winuiJvmMain` and `winuiMingwMain`; keep shared Compose/WinUI behavior in `winuiMain`.
 
 ## Tests and validation
 - [x] Add a repository-local compose-winui sample that compiles against `:compose:ui:ui` and calls `WinUIView { Button() }`.
@@ -476,6 +700,7 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] Add compile validation for the new WinUI JVM source set.
 - [x] Add repository-local reusable `WinUIView` smoke validation for reset on deactivation, reactivation without recreation, and final release on disposal.
 - [x] Add repository-local composition-local smoke validation for WinUI density, layout direction, view configuration, font resolver, and URI handler.
+- [x] Add repository-local environment/lifecycle tests and window smoke coverage for effective Light/Dark theme changes, RTL flow-direction changes, positive text scale, attach-safe lifecycle locals, activated `RESUMED`, and disposal to `DESTROYED`.
 - [x] Add repository-local architecture-owner composition-local smoke validation for WinUI lifecycle, saved-state registry, and ViewModel store owners.
 - [x] Add repository-local architecture-owner smoke validation for WinUI `viewModel()` creation with `SavedStateHandle`, retention across `disposeComposition()`, and `ViewModelStore` clearing on `dispose()`.
 - [x] Add repository-local architecture-owner smoke validation for WinUI `LocalNavigationEventDispatcherOwner` host-default provisioning.
@@ -489,7 +714,7 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] Add repository-local WinUI `LocalLifecycleOwner` smoke validation for resumed composition state and destroyed state after `WinUIComposeView.dispose()`.
 - [x] Add repository-local WinUI `rememberSaveable` smoke validation for restoring state across `WinUIComposeView.disposeComposition()` and subsequent `setContent()`.
 - [x] Add repository-local WinUI `retain` smoke validation for restoring retained values across `WinUIComposeView.disposeComposition()` and subsequent `setContent()`.
-- [ ] Add compile validation for the new WinUI mingwX64 source set after `kotlin-winrt` supports mingw.
+- [x] Add compile validation for the WinUI mingwX64 source set with generated kotlin-winrt projections, both compiler plugins, and no duplicate actuals.
 - [x] Add tests proving WinUI source sets do not depend on `desktopMain`, AWT, Swing, or Skiko AWT classes, and that WinUI keeps its own XAML/WinRT actuals where Skiko has generic or Win32-backed behavior.
 - [x] Add a WinUI JVM compile-source bridge isolation test that keeps the
   temporary `compileKotlinWinuiJvm` source override limited to common,
@@ -497,8 +722,8 @@ demo host have the SHA-1 of the Maven Local files):
   Skiko sources, without compiling `desktopMain` or the whole generic
   `skikoMain` source tree.
 - [x] Add a WinUI JVM runtime classpath guard that rejects Skiko AWT/Desktop
-  native runtime artifacts while `SKIKO-006` tracks the temporary need for the
-  AWT-named Skiko JVM API jar.
+  native runtime artifacts while requiring the WinUI runtime to resolve through
+  `skiko-winui`.
 - [x] Add the same Skiko runtime classpath isolation guard to the repository-local
   WinUI sample and focused `runWinUISkikoSample` smoke path, so the runnable
   validation rejects `skiko-awt-runtime-*` artifacts while requiring
@@ -559,7 +784,7 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] Add Windows JVM integration smoke test that shows Compose content with embedded WinUI `Button` and `ToggleSwitch`.
 - [x] Retest shutdown/upcall validation after current kotlin-winrt sync: `KWINRT-013` is treated as fixed upstream, though compose-winui did not identify the exact fixing commit. If `upcallLinker.cpp:66` returns, preserve and analyze `hs_err`, WER, or dump output before reopening it.
 - [x] Extend the Windows JVM integration smoke to a live WinUI `TextBox` after `KWINRT-008` is resolved.
-- [ ] Add Windows mingwX64 integration smoke test for the same shared `WinUIView` sample after the mingw target is enabled.
+- [ ] Add a Windows mingwX64 runtime integration smoke test for the same shared `WinUIView` sample; compilation is green, but a Native application launch is not yet covered.
 - [x] Add shutdown tests that verify composition disposal releases WinUI event tokens, COM references, rendering resources, and runtime registrations.
 - [x] Split the current monolithic `runWinUIViewSample` smoke into focused WinUI JVM test/smoke suites, mirroring UIKit's split between unit/instrumented coverage: scene/rendering, interop lifecycle/layout/input, accessibility, text input/keyboard, window/lifecycle, pointer/scroll, resource loading, disposal/leaks, and launch integration.
 - [x] Add WinUI rendering-host tests comparable to UIKit `MetalRedrawer` and layer tests: resize, invalidation coalescing, frame pacing, render/interop transaction ordering, disposal after pending frame callbacks, and nonblank surface output once drawing is implemented.
@@ -608,57 +833,57 @@ demo host have the SHA-1 of the Maven Local files):
 - [x] Add WinUI text input and keyboard tests comparable to UIKit keyboard/text-field tests: focus entry, IME session lifecycle, composing text, selection updates, clipboard/edit menu interaction, software keyboard show/hide behavior where available, and keyboard-driven focus order.
 - [x] Re-run existing Android, desktop, and iOS compose-ui interop tests to confirm the new WinUI target does not regress existing targets.
 
-## kotlin-winrt blockers
-- `KWINRT-024`: Still open in the latest published Maven snapshot retest. After
-  upgrading compose-winui to Kotlin `2.4.0`, `compileKotlinWinuiJvm`, focused
-  WinUI JVM tests, and `runWinUISkikoSample` pass with kotlin-winrt
-  `0.1.0-20260604.125452-24`, but the full `runWinUIViewSample` still reaches
-  `compose-winui-sample: text input session cancellation` and exits with
-  `NTSTATUS 0xC0000005`. Fresh WER dumps were produced at
-  `%LOCALAPPDATA%\CrashDumps\java.exe.5868.dmp` and
-  `%LOCALAPPDATA%\CrashDumps\java.exe(1).5868.dmp`.
-- `KWINRT-027`: Resolved for compose-winui by upgrading this repository to
-  Kotlin `2.4.0`; the kotlin-winrt compiler plugin no longer fails with missing
-  `org.jetbrains.kotlin.extensions.ExtensionPointDescriptor`, and WinUI JVM
-  compilation now reaches runtime validation.
-- The local README-required application initialization chain is still
+## kotlin-winrt status
+
+- `KWINRT-060` is closed in kotlin-winrt snapshot
+  `0.1.0-20260714.234543-80`: `compose/foundation/foundation` applies the
+  normal library-mode plugin without the former identity/projection task cycle.
+- `KWINRT-062` is closed in kotlin-winrt snapshot
+  `0.1.0-20260715.042347-81`. The repository-local `runWinUISkikoSample`
+  passes projection generation, compilation, authoring validation,
+  application-host build, staging, and launch without compose-side IID
+  filters or projection overrides.
+- `KWINRT-056` and `KWINRT-059` are closed in the 2026-07-09 compose-winui
+  validation baseline. Repository-local WinUI sample tasks now use typed
+  kotlin-winrt application-host run tasks with declared `jvmArgs`, output logs,
+  and per-smoke report files.
+- `KWINRT-060` is closed. The normal `io.github.compose-fluent.winrt` plugin
+  injects runtime dependencies in library mode while skipping local
+  projection/compiler-support/authored validation work when the combined local
+  projection output is empty. `foundation` no longer declares
+  `winrt-runtime` manually and does not call `application {}`.
+- `KWINRT-061` is closed as a Compose fragment-graph misdiagnosis. A single
+  connected Native fragment root removes all 794 `overrides nothing`
+  diagnostics; selectively excluding Skiko-only actual ancestry removes the
+  51 duplicate actuals. `compileKotlinWinuiMingw` now passes with normal
+  kotlin-winrt and Skiko MinGW consumption.
+- `KWINRT-053`, `KWINRT-054`, `KWINRT-055`, `KWINRT-057`, and `KWINRT-058`
+  are closed in the refreshed 2026-07-08 kotlin-winrt/skiko validation
+  baseline. Keep the existing scanner, task graph, packaging, and transitive
+  artifact checks as regression coverage rather than active upstream
+  workarounds.
+- The required application initialization chain remains
   `WinRtWindowsAppSdkBootstrap.initialize()` -> `RuntimeScope.initializeSingleThreaded()`
-  -> `Application.start { ... }`; custom sample `JavaExec` tasks now depend on
-  both `stageWinRtRuntimeAssets` and `buildWinRtAuthoringHost`.
-- Latest cache-clear retest still resolves Sonatype metadata to kotlin-winrt
-  runtime/compiler `0.1.0-20260603.042831-23` and Gradle plugin
-  `0.1.0-20260603.043142-4`; the full sample still fails at process teardown
-  with fresh XAML dynamic-metadata / unloaded-XAML CDB buckets.
-- The 2026-06-03 17:06 +08 fix-claim retest still resolves the same
-  kotlin-winrt snapshots; normal and forced `--rerun-tasks` full sample runs
-  still reach the final smoke log and exit with `NTSTATUS 0xC0000005`, with no
-  newer WER dump.
-- The 2026-06-03 18:49 +08 fix-claim retest also resolves the same cached
-  kotlin-winrt snapshots; direct metadata for runtime/compiler is unchanged,
-  `--refresh-dependencies` is blocked by external TLS handshakes, and the full
-  sample still reaches the final smoke log before `NTSTATUS 0xC0000005` without
-  producing a newer WER dump.
-- The 2026-06-03 19:21 +08 cache-clear fix-claim retest uses the correct
-  `GRADLE_USER_HOME=F:\Dependencies\gradle`, re-resolves Gradle to the same
-  kotlin-winrt runtime/compiler `0.1.0-20260603.042831-23` and plugin
-  `0.1.0-20260603.043142-4`, and the full sample still reaches the final smoke
-  log before `NTSTATUS 0xC0000005`; fresh Store CDB evidence is back in the XAML
-  dynamic-metadata / unloaded-XAML teardown buckets.
-- `KWINRT-023`: Fixed for compose-winui by compiling kotlin-winrt generated
-  authoring sources into the WinUI JVM target; the hand-written
-  `WinUIXamlApplication` authoring registration workaround has been removed.
-- `KWINRT-008`: Mostly fixed for the compose-winui validation path; `App.xaml`
-  is no longer required. Keep removing interface/property workarounds only after
-  exact compose graph retests prove the generated projection path works.
-- `KWINRT-013`: Treated as fixed upstream. The exact fixing commit was not
-  identified from compose-winui; reopen only with fresh native crash evidence
-  and log/dump analysis.
-- `KWINRT-020`: Fixed by the current registry/classloader changes. compose-winui
-  removed the keep-screen-on ABI fallback and now uses generated
-  `DisplayRequest.requestActive()` / `requestRelease()` directly.
-- KMP graph baseline: Keep testing customized source sets, transitive identity,
-  and support artifact merging. Do not regress to a single-module JVM sample as
-  the only kotlin-winrt validation shape.
+  -> `Application.start { ... }`; repository-local sample tasks now launch it
+  through kotlin-winrt typed run tasks rather than nested Gradle wrappers.
+- `KWINRT-024`, `KWINRT-030`, `KWINRT-031`, and `KWINRT-032` are no longer
+  reproduced by the current compose-winui validation baseline. On 2026-07-06,
+  `:compose:ui:ui:compileKotlinWinuiJvm`, `:compose:ui:ui:winuiJvmTest`,
+  `:compose:ui:ui:winui-samples:runWinUIViewSample`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` pass with
+  `-PcomposeWinUi.enableJvmTarget=true --no-configuration-cache
+  --no-configure-on-demand`. The 2026-07-09 baseline additionally validates
+  `:compose:ui:ui:winui-samples:runWinUISkikoSample --rerun-tasks`, and
+  `:compose:mpp:demo-winui:runWinUIMppSample` after the typed run-task
+  migration. The 2026-07-15 snapshot 80 validation additionally passes
+  `:compose:foundation:foundation:compileKotlinWinuiJvm` and
+  `:compose:ui:ui:compileKotlinWinuiJvm`. Snapshot 81 additionally passes the
+  repository-local `runWinUISkikoSample` end to end with refreshed
+  dependencies, closing `KWINRT-062`.
+- KMP graph baseline remains important: keep testing customized source sets,
+  transitive identity, support artifact merging, authored application hosts,
+  and multi-module sample consumption. Do not regress to a single-module JVM
+  sample as the only kotlin-winrt validation shape.
 
 ## skiko-winui status
 
@@ -756,11 +981,11 @@ demo host have the SHA-1 of the Maven Local files):
   only with a deliberate upstream-style unattached scheduler repro on the
   current snapshot. Pixel-read nonblank frame validation is still deferred until
   there is a stable attached-window pixel-read path.
-- `SKIKO-006`: Open upstream/publication/API. The current WinUI JVM path still
-  needs `org.jetbrains.skiko:skiko-awt` for core Skia/Skiko JVM API classes, so
-  compose-winui guards against `skiko-awt-runtime-*` native runtime artifacts
-  while waiting for an AWT-free JVM API artifact. Still observed with
-  `skiko-winui` `0.0.0-20260603.150039-4`.
+- `SKIKO-006`: Closed. Current WinUI JVM runtime and test classpaths no longer
+  resolve `org.jetbrains.skiko:skiko-awt` or `org.jetbrains.skiko:skiko-jvm-api`
+  as consumer dependencies; dependency insight reports no matching dependencies
+  for `winuiJvmRuntimeClasspath` or `winuiJvmTestRuntimeClasspath` as of the
+  2026-07-06 validation baseline.
 - `SKIKO-005`: Closed in `skiko-winui` `0.0.0-20260603.075139-3`.
   `WinUISkikoRenderHost` now consumes the public typed render diagnostics API
   directly instead of reflecting `getRenderDiagnostics$skiko_winui`.
@@ -770,8 +995,8 @@ demo host have the SHA-1 of the Maven Local files):
   separately from the Skiko render base child. With JDK 25,
   `:compose:ui:ui:compileKotlinWinuiJvm` passes and
   `:compose:ui:ui:winui-samples:runWinUIViewSample` reaches the full current
-  smoke path. The known `KWINRT-024` native teardown crash is deferred as
-  non-blocking.
+  smoke path. The later `KWINRT-024` native teardown crash no longer reproduces
+  with current kotlin-winrt Maven snapshots.
 - `SKIKO-002`: Closed in the 2026-06-03 Maven snapshots. The published
   skiko-winui and kotlin-winrt snapshots carry the generic WinRT support needed
   by `WinUISkiaLayer`; the sample no longer fails with the generic-support

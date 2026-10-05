@@ -16,15 +16,44 @@
 
 package androidx.compose.ui.input.indirect
 
-internal class WinUIIndirectPointerEvent(
-    override val changes: List<IndirectPointerInputChange>,
-    override val type: IndirectPointerEventType,
-    override val primaryDirectionalMotionAxis: IndirectPointerEventPrimaryDirectionalMotionAxis,
-) : PlatformIndirectPointerEvent {
-    init {
-        require(changes.isNotEmpty()) { "changes cannot be empty" }
-    }
-}
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerId
+import org.jetbrains.skiko.winui.WinUIIndirectPointerEvent
+import org.jetbrains.skiko.winui.WinUIIndirectPointerEventType
+import org.jetbrains.skiko.winui.WinUIIndirectPointerPrimaryDirectionalMotionAxis
+
+internal fun WinUIIndirectPointerEvent.toComposeIndirectPointerEvent(): IndirectPointerEvent =
+    SkikoIndirectPointerEvent(
+        changes =
+            changes.map { change ->
+                IndirectPointerInputChange(
+                    id = PointerId(change.pointerId),
+                    uptimeMillis = change.timestampMillis,
+                    position = Offset(change.x, change.y),
+                    pressed = change.pressed,
+                    pressure = change.pressure,
+                    previousUptimeMillis = change.previousTimestampMillis,
+                    previousPosition = Offset(change.previousX, change.previousY),
+                    previousPressed = change.previousPressed,
+                )
+            },
+        type =
+            when (type) {
+                WinUIIndirectPointerEventType.PRESS -> IndirectPointerEventType.Press
+                WinUIIndirectPointerEventType.MOVE -> IndirectPointerEventType.Move
+                WinUIIndirectPointerEventType.RELEASE -> IndirectPointerEventType.Release
+            },
+        primaryDirectionalMotionAxis =
+            when (primaryDirectionalMotionAxis) {
+                WinUIIndirectPointerPrimaryDirectionalMotionAxis.NONE ->
+                    IndirectPointerEventPrimaryDirectionalMotionAxis.None
+                WinUIIndirectPointerPrimaryDirectionalMotionAxis.X ->
+                    IndirectPointerEventPrimaryDirectionalMotionAxis.X
+                WinUIIndirectPointerPrimaryDirectionalMotionAxis.Y ->
+                    IndirectPointerEventPrimaryDirectionalMotionAxis.Y
+            },
+        nativeEvent = this,
+    )
 
 /**
  * Create an [IndirectPointerEvent] for WinUI test use cases.
@@ -37,8 +66,9 @@ fun IndirectPointerEvent(
     primaryDirectionalMotionAxis: IndirectPointerEventPrimaryDirectionalMotionAxis =
         IndirectPointerEventPrimaryDirectionalMotionAxis.None,
 ): IndirectPointerEvent =
-    WinUIIndirectPointerEvent(
+    SkikoIndirectPointerEvent(
         changes = changes,
         type = type,
         primaryDirectionalMotionAxis = primaryDirectionalMotionAxis,
+        nativeEvent = null,
     )

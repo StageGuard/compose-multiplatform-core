@@ -16,6 +16,8 @@
 
 package androidx.compose.ui.platform
 
+import androidx.compose.ui.input.key.KeyEventType
+import windows.system.VirtualKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -119,8 +121,9 @@ class WinUICharacterInputProcessorTest {
         val processor = WinUICharacterInputProcessor()
         val committed = mutableListOf<String>()
 
-        processor.onKeyDownProcessed(
-            keyCodePoint = 'A'.code,
+        processor.onKeyEventProcessed(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.A,
             wasHandled = true,
         )
         val skipped = processor.process(
@@ -150,8 +153,9 @@ class WinUICharacterInputProcessorTest {
         val processor = WinUICharacterInputProcessor()
         val committed = mutableListOf<String>()
 
-        processor.onKeyDownProcessed(
-            keyCodePoint = 'A'.code,
+        processor.onKeyEventProcessed(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.A,
             wasHandled = false,
         )
         val handled = processor.process(
@@ -165,6 +169,95 @@ class WinUICharacterInputProcessorTest {
 
         assertEquals(true, handled)
         assertEquals(listOf("a"), committed)
+    }
+
+    @Test
+    fun handledNonCharacterKeyDoesNotSuppressCharacter() {
+        val processor = WinUICharacterInputProcessor()
+        val committed = mutableListOf<String>()
+
+        processor.onKeyEventProcessed(
+            eventType = KeyEventType.KeyDown,
+            key = VirtualKey.Left,
+            wasHandled = true,
+        )
+        val handled = processor.process(
+            codePoint = 'a'.code,
+            isHandled = false,
+            commitText = { text ->
+                committed += text
+                true
+            },
+        )
+
+        assertEquals(true, handled)
+        assertEquals(listOf("a"), committed)
+    }
+
+    @Test
+    fun nextKeyDownClearsStaleCharacterSuppression() {
+        val processor = WinUICharacterInputProcessor()
+        val committed = mutableListOf<String>()
+
+        processor.onKeyEventProcessed(KeyEventType.KeyDown, VirtualKey.A, wasHandled = true)
+        processor.onKeyEventProcessed(KeyEventType.KeyDown, VirtualKey.B, wasHandled = false)
+        val handled = processor.process(
+            codePoint = 'b'.code,
+            isHandled = false,
+            commitText = { text ->
+                committed += text
+                true
+            },
+        )
+
+        assertEquals(true, handled)
+        assertEquals(listOf("b"), committed)
+    }
+
+    @Test
+    fun keyUpClearsPendingCharacterSuppression() {
+        val processor = WinUICharacterInputProcessor()
+        val committed = mutableListOf<String>()
+
+        processor.onKeyEventProcessed(KeyEventType.KeyDown, VirtualKey.A, wasHandled = true)
+        processor.onKeyEventProcessed(KeyEventType.KeyUp, VirtualKey.A, wasHandled = true)
+        val handled = processor.process(
+            codePoint = 'a'.code,
+            isHandled = false,
+            commitText = { text ->
+                committed += text
+                true
+            },
+        )
+
+        assertEquals(true, handled)
+        assertEquals(listOf("a"), committed)
+    }
+
+    @Test
+    fun handledCharacterReceivedClearsPendingSuppression() {
+        val processor = WinUICharacterInputProcessor()
+        val committed = mutableListOf<String>()
+
+        processor.onKeyEventProcessed(KeyEventType.KeyDown, VirtualKey.A, wasHandled = true)
+        assertNull(
+            processor.process(
+                codePoint = 'a'.code,
+                isHandled = true,
+                commitText = { error("handled character must not be committed") },
+            )
+        )
+        val handled = processor.process(
+            codePoint = 'b'.code,
+            isHandled = false,
+            commitText = { text ->
+                committed += text
+                true
+            },
+        )
+
+        assertEquals(true, handled)
+        assertEquals(listOf("b"), committed)
     }
 
     @Test

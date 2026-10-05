@@ -18,26 +18,29 @@ package androidx.compose.ui.text.platform
 
 import androidx.compose.ui.text.PlatformStringDelegate
 import androidx.compose.ui.text.intl.Locale
+import java.util.Locale as JavaLocale
 
 private class WinUIStringDelegate : PlatformStringDelegate {
     override fun toUpperCase(string: String, locale: Locale): String =
-        string.uppercase(locale.platformLocale)
+        string.uppercase(locale.toJavaLocale())
 
     override fun toLowerCase(string: String, locale: Locale): String =
-        string.lowercase(locale.platformLocale)
+        string.lowercase(locale.toJavaLocale())
 
     override fun capitalize(string: String, locale: Locale): String =
         string.replaceFirstChar {
             if (it.isLowerCase()) {
-                it.titlecase(locale.platformLocale)
+                it.titlecase(locale.toJavaLocale())
             } else {
                 it.toString()
             }
         }
 
     override fun decapitalize(string: String, locale: Locale): String =
-        string.replaceFirstChar { it.lowercase(locale.platformLocale) }
+        string.replaceFirstChar { it.lowercase(locale.toJavaLocale()) }
 }
+
+private fun Locale.toJavaLocale(): JavaLocale = JavaLocale.forLanguageTag(toLanguageTag())
 
 internal actual fun ActualStringDelegate(): PlatformStringDelegate =
     WinUIStringDelegate()

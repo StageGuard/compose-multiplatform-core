@@ -236,6 +236,8 @@ kotlin {
         }
 
         named("winuiJvmMain") {
+            // winuiMain of the demo is shared by its WinUI JVM and native applications.
+            kotlin.srcDir("../demo/src/winuiMain/kotlin")
             kotlin.srcDir("../demo/src/winuiJvmMain/kotlin")
             resources.srcDir("../demo/src/desktopMain/resources")
             resources.srcDir(stageWinUIMppSampleResources.map { it.destinationDir })
@@ -346,7 +348,10 @@ configurations.configureEach {
 }
 
 tasks.named<GenerateWinRTProjectionsTask>("generateWinRTProjections") {
-    sourceRoots.setFrom(project.file("../demo/src/winuiJvmMain/kotlin"))
+    sourceRoots.setFrom(
+        project.file("../demo/src/winuiMain/kotlin"),
+        project.file("../demo/src/winuiJvmMain/kotlin"),
+    )
 }
 
 tasks.named("compileKotlinWinuiJvm") {
@@ -369,12 +374,34 @@ tasks.withType<KotlinCompile>().configureEach {
     }
 }
 
+// Bounds the footprint of the sample host: a JVM sized by its defaults reserves several hundred
+// megabytes for a WinUI window (KWINRT-064). KOTLIN_WINRT_JVM_OPTIONS still overrides these.
+// The bounds leave room over what the traversal of the 105 screens of this demo uses: 21 MB of
+// live heap (36 MB before a collection), 63 MB of metaspace and 7 MB of code. The bounds of
+// winui_dev (32 MB heap, 44 MB metaspace, 8 MB code) end this demo with
+// "OutOfMemoryError: Metaspace".
+val winUiMppSampleJvmFootprintOptions = listOf(
+    "-Xms8m",
+    "-Xmx64m",
+    "-Xss128k",
+    "-XX:+UseSerialGC",
+    "-XX:TieredStopAtLevel=1",
+    "-XX:CICompilerCount=1",
+    "-XX:ReservedCodeCacheSize=32m",
+    "-XX:MaxMetaspaceSize=96m",
+    "-XX:CompressedClassSpaceSize=64m",
+    "-XX:-UsePerfData",
+    "-Dfile.encoding=UTF-8",
+)
+
 fun RunWinAppHostTask.configureWinUIMppSampleApplicationHost(
     taskDescription: String,
     reportName: String,
     requiredEvents: List<String>,
     autoExit: Boolean = true,
     autoTraverse: Boolean = false,
+    extendsContentIntoTitleBar: Boolean = false,
+    validateTitleBarInsets: Boolean = false,
 ) {
     group = "verification"
     description = taskDescription
@@ -385,9 +412,11 @@ fun RunWinAppHostTask.configureWinUIMppSampleApplicationHost(
     outputs.upToDateWhen { false }
     jvmArgs.addAll(
         reportFile.map { report ->
-            listOf(
+            winUiMppSampleJvmFootprintOptions + listOf(
                 "-Dcompose.winui.mpp.sample.autoExit=$autoExit",
                 "-Dcompose.winui.mpp.sample.autoTraverse=$autoTraverse",
+                "-Dcompose.winui.mpp.sample.extendsContentIntoTitleBar=$extendsContentIntoTitleBar",
+                "-Dcompose.winui.mpp.sample.validateTitleBarInsets=$validateTitleBarInsets",
                 "-Dcompose.winui.mpp.sample.validationReport=${report.asFile.absolutePath}",
             )
         }
@@ -432,6 +461,23 @@ fun RunWinAppHostTask.configureWinUIMppSampleApplicationHost(
         check(missing.isEmpty()) {
             "WinUI MPP sample validation report ${report.absolutePath} is missing events: $missing. " +
                 "Observed events: ${events.sorted()}"
+        }
+        if (validateTitleBarInsets) {
+            // The caption buttons take a number of pixels that depends on the display scale:
+            // the title bar insets have to be the ones the AppWindow reports
+            // ("titlebar-raw:<height>:<left>:<right>").
+            val rawTitleBar = events.firstOrNull { it.startsWith("titlebar-raw:") }
+                ?.removePrefix("titlebar-raw:")?.split(":")
+            val titleBarInsets = events.firstOrNull { it.startsWith("titlebar-insets-horizontal:") }
+                ?.removePrefix("titlebar-insets-horizontal:")?.split(":")
+            check(
+                rawTitleBar != null && titleBarInsets != null &&
+                    rawTitleBar.drop(1) == titleBarInsets &&
+                    (titleBarInsets.last().toIntOrNull() ?: 0) > 0
+            ) {
+                "WinUI MPP sample title bar insets $titleBarInsets do not match the title bar of " +
+                    "the window $rawTitleBar."
+            }
         }
     }
 }
@@ -885,11 +931,20 @@ registerWinAppHostRunTask("runWinUIMppSample") {
             "non-empty-draw-bounds",
             "autorun-start",
             "autorun-complete",
+            "window-extends-content-into-titlebar",
+            "titlebar-raw-positive",
+            "captionbar-inset-positive",
+            "systembars-inset-includes-caption",
+            "safedrawing-inset-includes-caption",
+            "window-insets-horizontal:0:0",
+            "topappbar-extends-below-titlebar",
             "frame-observed",
             "exit-requested",
             "window-content-disposed",
         ),
         autoTraverse = true,
+        extendsContentIntoTitleBar = true,
+        validateTitleBarInsets = true,
     )
 }
 
@@ -899,6 +954,8 @@ registerWinAppHostRunTask("runWinUIMppSampleInteractive") {
         reportName = "winui-mpp-sample-interactive",
         requiredEvents = emptyList(),
         autoExit = false,
+        extendsContentIntoTitleBar = true,
+        validateTitleBarInsets = true,
     )
     group = "application"
 }

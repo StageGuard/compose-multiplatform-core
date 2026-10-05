@@ -32,7 +32,7 @@ buildscript {
     apply(from: "buildSrc-fork/repos.gradle")
     repos.addMavenRepositories(repositories)
 
-    // KWINRT-061: the kotlin-winrt Gradle plugin needs JDK 25, so it is only put on the classpath
+    // KWINRT-074: the kotlin-winrt Gradle plugin needs JDK 25, so it is only put on the classpath
     // when the WinUI JVM target is enabled. Projects apply it by id
     // ("io.github.compose-fluent.windows-toolkit").
     def composeWinUiJvmTargetEnabled = providers

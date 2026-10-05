@@ -17,16 +17,21 @@
 package androidx.compose.foundation.content
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.PlatformClipMetadata
 
-// TODO https://youtrack.jetbrains.com/issue/COMPOSE-1263/Implement-Modifier.receiveContent
+@ExperimentalFoundationApi actual class PlatformTransferableContent internal constructor()
 
-@ExperimentalFoundationApi
-actual class PlatformTransferableContent internal constructor()
-
+@OptIn(InternalComposeUiApi::class)
 @ExperimentalFoundationApi
 actual fun TransferableContent.hasMediaType(mediaType: MediaType): Boolean {
-    return false
+    val platformMetadata = clipMetadata as? PlatformClipMetadata ?: return false
+    return platformMetadata.hasMediaType(mediaType.representation)
 }
 
-internal actual fun ClipEntry.readPlainText(): String? = null
+@OptIn(InternalComposeUiApi::class)
+internal actual fun ClipEntry.readPlainText(): String? =
+    runCatching { clipMetadata as? PlatformClipMetadata }.getOrNull()?.let { metadata ->
+        runCatching { metadata.readPlainText() }.getOrNull()
+    }

@@ -14,20 +14,22 @@
  * limitations under the License.
  */
 
+@file:OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.text.AnnotatedString
-import io.github.composefluent.winrt.runtime.IUnknownReference
 import io.github.composefluent.winrt.runtime.await
+import io.github.composefluent.winrt.runtime.IUnknownReference
 import windows.applicationmodel.datatransfer.DataPackage
 import windows.applicationmodel.datatransfer.DataPackageView
 import windows.applicationmodel.datatransfer.Clipboard as WinRTClipboardClass
 import windows.applicationmodel.datatransfer.StandardDataFormats as WinRTStandardDataFormats
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 
-actual typealias NativeClipboard = IUnknownReference
+actual class NativeClipboard internal constructor(
+    internal val reference: IUnknownReference,
+)
 
 @Suppress("DEPRECATION")
 internal class WinUIClipboardManager(
@@ -53,7 +55,7 @@ internal class WinUIClipboardManager(
 
     @Suppress("OVERRIDE_DEPRECATION")
     override val nativeClipboard: NativeClipboard
-        get() = winUIClipboardStatics
+        get() = NativeClipboard(winUIClipboardStatics)
 }
 
 internal class WinUIClipboard : Clipboard {
@@ -66,7 +68,7 @@ internal class WinUIClipboard : Clipboard {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override val nativeClipboard: NativeClipboard
-        get() = winUIClipboardStatics
+        get() = NativeClipboard(winUIClipboardStatics)
 
     internal fun hasText(): Boolean =
         currentPlainText() != null || runCatching { getWinUIContent().contains(winUITextFormat) }
@@ -118,9 +120,7 @@ internal class WinUIClipboard : Clipboard {
         if (runCatching { content.availableFormats.isEmpty() }.getOrDefault(true)) return null
         if (runCatching { content.contains(winUITextFormat) }.getOrDefault(false)) {
             return runCatching {
-                withContext(NonCancellable) {
-                    ClipEntry(content.getTextAsync().await())
-                }
+                ClipEntry(content.getTextAsync().await())
             }.getOrElse {
                 logClipboardReadFailure(it)
                 null
@@ -166,23 +166,18 @@ internal class WinUIClipboard : Clipboard {
 }
 
 actual class ClipEntry constructor(val nativeClipEntry: Any?) {
-    actual val clipMetadata: ClipMetadata
-        get() = ClipMetadata()
+    actual val clipMetadata: ClipMetadata = ClipMetadata(platformClipMetadataFor(nativeClipEntry))
 
     @ExperimentalComposeUiApi
-    fun getPlainText(): String? = when (val nativeClipEntry = nativeClipEntry) {
-        is String -> nativeClipEntry
-        else -> null
-    }
+    fun getPlainText(): String? = runCatching { clipMetadata.readPlainText() }.getOrNull()
 
     companion object {
-        @ExperimentalComposeUiApi
-        fun withPlainText(text: String): ClipEntry =
-            ClipEntry(text)
+        @ExperimentalComposeUiApi fun withPlainText(text: String): ClipEntry = ClipEntry(text)
     }
 }
 
-actual class ClipMetadata
+actual class ClipMetadata internal constructor(private val platformMetadata: PlatformClipMetadata) :
+    PlatformClipMetadata by platformMetadata
 
 // The plain text this process put on the clipboard, for the synchronous ClipboardManager API, and
 // the clipboard sequence number right after; another application copying changes the number.
@@ -219,7 +214,7 @@ private fun getWinUIContent(): DataPackageView =
     WinRTClipboardClass.getContent()
 
 private fun logClipboardReadFailure(throwable: Throwable) {
-    System.err.println(
+    println(
         "WinUIClipboard read failed: ${throwable::class.qualifiedName}: ${throwable.message}"
     )
 }

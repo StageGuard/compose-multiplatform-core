@@ -121,12 +121,21 @@ kotlin {
         jvm("winuiJvm")
 
         sourceSets {
-            winuiJvmMain {
+            // Shared by the WinUI JVM and native targets.
+            winuiMain {
                 dependsOn(skikoMain)
             }
 
-            winuiJvmTest {
+            winuiTest {
                 dependsOn(skikoTest)
+            }
+
+            winuiJvmMain {
+                dependsOn(winuiMain)
+            }
+
+            winuiJvmTest {
+                dependsOn(winuiTest)
             }
         }
     }

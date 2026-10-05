@@ -17,114 +17,113 @@
 package androidx.compose.ui.platform
 
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTransferAction
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.WinUIDragAndDropManager
 import androidx.compose.ui.draganddrop.WinUIDragAndDropStarter
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.node.WinUIOwner
+import androidx.compose.ui.unit.LayoutDirection
 import io.github.composefluent.winrt.runtime.WinRTAsyncOperationReference
-import io.github.composefluent.winrt.runtime.WinRTAsyncStatus
-import io.github.composefluent.winrt.runtime.WinRTDelegateHandle
 import io.github.composefluent.winrt.runtime.WinRTEvent
-import kotlin.math.roundToInt
-import microsoft.ui.dispatching.DispatcherQueue
-import microsoft.ui.dispatching.DispatcherQueueHandler
+import io.github.composefluent.winrt.runtime.await
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.math.ceil
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import microsoft.ui.input.PointerPoint
 import microsoft.ui.xaml.DragEventArgs
 import microsoft.ui.xaml.DragEventHandler
 import microsoft.ui.xaml.DragStartingEventArgs
 import microsoft.ui.xaml.DropCompletedEventArgs
 import microsoft.ui.xaml.UIElement
-import org.jetbrains.skia.ColorAlphaType
-import org.jetbrains.skia.ColorType
-import org.jetbrains.skia.ImageInfo
 import windows.applicationmodel.datatransfer.DataPackage
 import windows.applicationmodel.datatransfer.DataPackageOperation
+import windows.applicationmodel.datatransfer.DataPackageView
+import windows.applicationmodel.datatransfer.DataProviderHandler
 import windows.applicationmodel.datatransfer.dragdrop.DragDropModifiers
 import windows.foundation.EventRegistrationToken
 import windows.foundation.Point
 import windows.foundation.TypedEventHandler
+import windows.graphics.imaging.BitmapAlphaMode
+import windows.graphics.imaging.BitmapPixelFormat
 import windows.graphics.imaging.SoftwareBitmap
+import windows.storage.streams.DataWriter
 
-/**
- * Connects the WinUI drag and drop of [root] to Compose: drags that enter the root go to the
- * Compose drop targets, and drags that Compose sources start become WinUI drags of the root.
- */
+@OptIn(InternalComposeUiApi::class)
 internal class WinUIDragAndDropAdapter(
     private val root: UIElement,
+    private val source: UIElement = root,
     private val owner: WinUIOwner,
+    private val coroutineContextProvider: () -> CoroutineContext = { owner.coroutineContext },
 ) : WinUIDragAndDropStarter {
     private val dragAndDropManager: WinUIDragAndDropManager = owner.winUIDragAndDropManager
+    private val lifecycleJob = SupervisorJob()
     private var isDisposed = false
-    private var isDragSessionActive = false
+    private var eventScope: CoroutineScope? = null
+    private var activeTransfer: WinUIActiveDragTransfer? = null
+    private var pendingDrop: WinUIPendingDrop? = null
+    private val sourcePointerPoint =
+        WinUIOwnedResourceSlot<PointerPoint> { point -> point.nativeObject.close() }
+    private var pendingSourceTransfer: WinUIPendingSourceTransfer? = null
+    private var activeDragOperation: WinRTAsyncOperationReference<DataPackageOperation>? = null
     private var lastAction: DragAndDropTransferAction? = null
-
-    // WinUI starts a drag from a pointer that is down, so the adapter keeps the last one.
-    private var dragPointerId: Long? = null
-    private var dragPointerPoint: PointerPoint? = null
-
-    // The drag that a Compose source started, until WinUI reports that it is over.
-    private var outgoingTransfer: OutgoingTransfer? = null
-    private val dispatcherQueue: DispatcherQueue? =
-        runCatching { DispatcherQueue.getForCurrentThread() }.getOrNull()
-
-    private val registrations = listOf(
-        register(root.dragEnter, ::handleDragEnter),
-        register(root.dragOver, ::handleDragOver),
-        register(root.dragLeave, ::handleDragLeave),
-        register(root.drop, ::handleDrop),
-    )
-    private val dragStartingHandler: TypedEventHandler<UIElement, DragStartingEventArgs> =
-        { _, args -> if (!isDisposed) handleDragStarting(args) }
-    private val dragStartingToken: EventRegistrationToken =
-        root.dragStarting.add(dragStartingHandler)
-    private val dropCompletedHandler: TypedEventHandler<UIElement, DropCompletedEventArgs> =
-        { _, args -> handleDropCompleted(args) }
-    private val dropCompletedToken: EventRegistrationToken =
-        root.dropCompleted.add(dropCompletedHandler)
+    private val dragSession =
+        WinUIDragSessionController(
+            onStart = dragAndDropManager::onDragStarted,
+            onEnd = dragAndDropManager::onDragEnded,
+            onClearTransfer = ::clearActiveTransfer,
+        )
+    private val registrations =
+        listOf(
+            register(root.dragEnter, ::handleDragEnter),
+            register(root.dragOver, ::handleDragOver),
+            register(root.dragLeave, ::handleDragLeave),
+            register(root.drop, ::handleDrop),
+        )
+    private val sourceUnregisterActions = registerSourceEvents()
 
     init {
         root.allowDrop = true
-        dragAndDropManager.starter = this
+        dragAndDropManager.setStarter(this)
     }
 
     fun dispose() {
         if (isDisposed) return
         isDisposed = true
-        registrations.forEach { registration ->
-            runCatching { registration.event.remove(registration.token) }
-        }
-        runCatching { root.dragStarting.remove(dragStartingToken) }
-        runCatching { root.dropCompleted.remove(dropCompletedToken) }
-        if (isDragSessionActive) {
-            dragAndDropManager.onDragEnded(DragAndDropEvent())
-            isDragSessionActive = false
-        }
-        dragAndDropManager.starter = null
-        dragPointerPoint = null
-        outgoingTransfer = null
-        root.allowDrop = false
-    }
-
-    /**
-     * Remembers the pointer that a drag would start from. The host calls this before Compose
-     * handles the event, because a Compose source starts its drag while it handles one.
-     */
-    fun onPointerEvent(event: WinUIPointerEvent) {
-        if (event.down && event.pointerPoint != null) {
-            dragPointerId = event.pointerId
-            dragPointerPoint = event.pointerPoint
-        } else if (event.pointerId == dragPointerId) {
-            dragPointerId = null
-            dragPointerPoint = null
-        }
+        val cleanupActions =
+            buildList<() -> Unit> {
+                add { dragAndDropManager.clearStarter(this@WinUIDragAndDropAdapter) }
+                add(::cancelPendingDrop)
+                add {
+                    runWinUIDragSourceCleanup(
+                        closeActiveDragOperation = ::closeActiveDragOperation,
+                        clearPendingSourceTransfer = ::clearPendingSourceTransfer,
+                        clearPointerPoint = ::disposeSourcePointerPoint,
+                    )
+                }
+                add { lifecycleJob.cancel() }
+                registrations.forEach { registration ->
+                    add { registration.event.remove(registration.token) }
+                }
+                addAll(sourceUnregisterActions)
+                add { dragSession.terminate(DragAndDropEvent()) }
+                add { root.allowDrop = false }
+            }
+        runWinUIDragAndDropCleanup(*cleanupActions.toTypedArray())
     }
 
     override fun startDragAndDropTransfer(
@@ -132,167 +131,177 @@ internal class WinUIDragAndDropAdapter(
         decorationSize: Size,
         drawDragDecoration: DrawScope.() -> Unit,
     ): Boolean {
-        if (isDisposed) return false
-        val pointerPoint = dragPointerPoint ?: return false
-        // WinUI runs one drag at a time, so a drag that never reported its end is over.
-        outgoingTransfer?.let { finishTransfer(it, DataPackageOperation.None) }
-        val transfer = OutgoingTransfer(transferData, decorationSize, drawDragDecoration)
-        outgoingTransfer = transfer
-        val operation = runCatching { root.startDragAsync(pointerPoint) }.getOrElse {
-            outgoingTransfer = null
+        if (isDisposed || pendingSourceTransfer != null || activeDragOperation != null) return false
+        val pointerPoint = sourcePointerPoint.value ?: return false
+        pendingSourceTransfer =
+            WinUIPendingSourceTransfer(
+                transferData = transferData,
+                decoration =
+                    runCatching {
+                            renderWinUIDragDecoration(
+                                    decorationSize = decorationSize,
+                                    density = owner.density,
+                                    layoutDirection = owner.layoutDirection,
+                                    drawDragDecoration = drawDragDecoration,
+                                )
+                                .toSoftwareBitmap(owner.density.density)
+                        }
+                        .getOrNull(),
+            )
+        val operation = runCatching { source.startDragAsync(pointerPoint) }.getOrNull()
+        if (operation == null) {
+            clearPendingSourceTransfer()
             return false
         }
-        transfer.operation = operation
-        transfer.completedHandle = runCatching {
-            operation.whenCompleted { completedOperation, status ->
-                val result = if (status == WinRTAsyncStatus.Completed) {
-                    runCatching { completedOperation.getResults() }
-                        .getOrDefault(DataPackageOperation.None)
-                } else {
-                    DataPackageOperation.None
-                }
-                // The drop completed event normally ends the drag first; this covers drags
-                // that end without it.
-                dispatcherQueue?.tryEnqueue(DispatcherQueueHandler { finishTransfer(transfer, result) })
-            }
-        }.getOrNull()
+        if (pendingSourceTransfer == null) {
+            runCatching { operation.cancel() }
+            runCatching { operation.close() }
+            return false
+        }
+        activeDragOperation = operation
         return true
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
-    private fun handleDragStarting(args: DragStartingEventArgs) {
-        val transfer = outgoingTransfer ?: return
-        val transferData = transfer.transferData
-        val dataPackage = args.data ?: return
-        when (val data = transferData.nativeTransferData) {
-            is String -> dataPackage.setText(data)
-            is Function1<*, *> -> {
-                @Suppress("UNCHECKED_CAST")
-                (data as (DataPackage) -> Unit).invoke(dataPackage)
-            }
-        }
-        args.allowedOperations = transferData.supportedActions.toDataPackageOperation()
-        val decoration = runCatching { renderDragDecoration(transfer) }.getOrNull()
-        if (decoration != null) {
-            // The anchor is in pixels of the bitmap, like the offset.
-            val anchor = transferData.dragDecorationOffset
-            runCatching {
-                args.dragUI?.setContentFromSoftwareBitmap(decoration, Point(anchor.x, anchor.y))
-            }
-        }
-    }
-
-    private fun handleDropCompleted(args: DropCompletedEventArgs) {
-        val transfer = outgoingTransfer ?: return
-        finishTransfer(transfer, args.dropResult)
-    }
-
-    @OptIn(ExperimentalComposeUiApi::class)
-    private fun finishTransfer(transfer: OutgoingTransfer, result: DataPackageOperation) {
-        if (outgoingTransfer !== transfer) return
-        outgoingTransfer = null
-        transfer.completedHandle = null
-        transfer.operation = null
-        // The drag took the pointer away from Compose, which never saw it released.
-        if (!isDisposed) {
-            owner.cancelPointerInput()
-        }
-        transfer.transferData.onTransferCompleted?.invoke(result.toTransferAction())
-    }
-
-    private fun renderDragDecoration(transfer: OutgoingTransfer): SoftwareBitmap? {
-        val size = transfer.decorationSize
-        val width = size.width.roundToInt()
-        val height = size.height.roundToInt()
-        if (width <= 0 || height <= 0) return null
-        val imageBitmap = ImageBitmap(width, height)
-        CanvasDrawScope().draw(
-            density = owner.density,
-            layoutDirection = owner.layoutDirection,
-            canvas = Canvas(imageBitmap),
-            size = size,
-            block = transfer.drawDragDecoration,
-        )
-        val pixels = imageBitmap.asSkiaBitmap().readPixels(
-            ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.PREMUL),
-            dstRowBytes = width * 4,
-        ) ?: return null
-        val bitmap = createSoftwareBitmap(width, height, pixels) ?: return null
-        // Show the bitmap at its size in physical pixels, as Compose drew it.
-        val dpi = 96.0 * owner.density.density
-        runCatching {
-            bitmap.dpiX = dpi
-            bitmap.dpiY = dpi
-        }
-        return bitmap
-    }
-
-    @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDragEnter(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        val accepted = ensureDragSessionStarted(event)
-        lastAction = event.action
-        dragAndDropManager.onDragEntered(event)
-        args.acceptedOperation = if (accepted) {
-            event.action.toDataPackageOperation()
-        } else {
-            DataPackageOperation.None
-        }
-        return accepted
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        val accepted =
+            dispatch.withPlatformData {
+                val accepted = dragSession.ensureStarted(dispatch.event)
+                lastAction = dispatch.event.action
+                dragAndDropManager.onDragEntered(dispatch.event)
+                accepted
+            }
+        return advertiseAcceptedOperation(args, dispatch, accepted, overTarget = accepted)
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDragOver(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        val accepted = ensureDragSessionStarted(event)
-        if (accepted && event.action != lastAction) {
-            lastAction = event.action
-            dragAndDropManager.onDragChanged(event)
-        }
-        dragAndDropManager.onDragMoved(event)
-        // Like AWT, accept the drag only over a target that takes it, so that WinUI shows that
-        // a drop elsewhere does nothing.
-        args.acceptedOperation = if (accepted && dragAndDropManager.hasEligibleDropTarget) {
-            event.action.toDataPackageOperation()
-        } else {
-            DataPackageOperation.None
-        }
-        return accepted
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        val accepted =
+            dispatch.withPlatformData {
+                val accepted = dragSession.ensureStarted(dispatch.event)
+                if (accepted && dispatch.event.action != lastAction) {
+                    lastAction = dispatch.event.action
+                    dragAndDropManager.onDragChanged(dispatch.event)
+                }
+                dragAndDropManager.onDragMoved(dispatch.event)
+                accepted
+            }
+        // Like AWT, offer the drop only over a target that takes it, so that WinUI shows that a
+        // drop elsewhere does nothing.
+        return advertiseAcceptedOperation(
+            args = args,
+            dispatch = dispatch,
+            accepted = accepted,
+            overTarget = accepted && dragAndDropManager.hasEligibleDropTarget,
+        )
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDragLeave(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        if (isDragSessionActive) {
-            dragAndDropManager.onDragExited(event)
-            dragAndDropManager.onDragEnded(event)
-            isDragSessionActive = false
-        }
         lastAction = null
+        setAcceptedOperation(args, null)
+        if (pendingDrop != null) return true
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
+        dispatch.withPlatformData {
+            try {
+                if (dragSession.isActive) {
+                    dragAndDropManager.onDragExited(dispatch.event)
+                }
+            } finally {
+                dragSession.terminate(dispatch.event)
+            }
+        }
         return false
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun handleDrop(args: DragEventArgs): Boolean {
-        val event = args.toComposeDragAndDropEvent()
-        ensureDragSessionStarted(event)
-        val handled = dragAndDropManager.onDrop(event)
-        // The source learns the action from the accepted operation.
-        args.acceptedOperation = if (handled) {
-            event.action.toDataPackageOperation()
-        } else {
-            DataPackageOperation.None
-        }
-        dragAndDropManager.onDragEnded(event)
-        isDragSessionActive = false
+        cancelPendingDrop()
+        val dispatch = args.toComposeDragAndDropDispatch() ?: return rejectTerminalEvent(args)
         lastAction = null
-        return handled
+        val accepted = dispatch.withPlatformData { dragSession.ensureStarted(dispatch.event) }
+        if (!setAcceptedOperation(args, dispatch.event.action.takeIf { accepted })) {
+            abortDrop(dispatch)
+            return false
+        }
+
+        if (!dispatch.transfer.metadata.containsPlainText) {
+            return finishSynchronousDrop(args, dispatch)
+        }
+
+        val scope = eventCoroutineScope() ?: return finishSynchronousDrop(args, dispatch)
+        val deferral =
+            runCatching { args.getDeferral() }.getOrNull()
+                ?: return finishSynchronousDrop(args, dispatch)
+        startPlainTextRead(dispatch.transfer)
+        lateinit var pending: WinUIPendingDrop
+        val termination =
+            createDropTermination(
+                args = args,
+                dispatch = dispatch,
+                completeDeferral = deferral::complete,
+                onTerminated = { if (pendingDrop === pending) pendingDrop = null },
+            )
+        pending = WinUIPendingDrop(termination)
+        pendingDrop = pending
+        pending.job =
+            scope.launchWinUIDropRead(
+                loadPlainText = {
+                    val plainTextRead = dispatch.transfer.plainTextRead
+                    if (plainTextRead != null) {
+                        plainTextRead.await()
+                    } else {
+                        dispatch.transfer.metadata.loadPlainText()
+                    }
+                },
+                termination = termination,
+                onHandled = {},
+            )
+        return true
     }
 
-    private fun ensureDragSessionStarted(event: DragAndDropEvent): Boolean {
-        if (isDragSessionActive) return true
-        isDragSessionActive = dragAndDropManager.onDragStarted(event)
-        return isDragSessionActive
+    /**
+     * Tells WinUI which operation a drop at the current position performs.
+     *
+     * @param accepted whether a target takes part in the session.
+     * @param overTarget whether the position is over such a target.
+     */
+    private fun advertiseAcceptedOperation(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+        accepted: Boolean,
+        overTarget: Boolean,
+    ): Boolean {
+        val advertised = setAcceptedOperation(args, dispatch.event.action.takeIf { overTarget })
+        if (accepted) {
+            startPlainTextRead(dispatch.transfer)
+        } else {
+            abortDrop(dispatch)
+        }
+        return accepted && (advertised || !overTarget)
+    }
+
+    /**
+     * Sets the operation that WinUI shows and reports to the source; `null` rejects the drop.
+     * Returns whether an operation was accepted.
+     */
+    private fun setAcceptedOperation(
+        args: DragEventArgs,
+        action: DragAndDropTransferAction?,
+    ): Boolean {
+        val assigned =
+            runCatching { args.acceptedOperation = action.toDataPackageOperation() }.isSuccess
+        return action != null && assigned
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    private fun rejectTerminalEvent(args: DragEventArgs): Boolean {
+        lastAction = null
+        setAcceptedOperation(args, null)
+        dragSession.terminate(DragAndDropEvent())
+        return false
     }
 
     private fun register(
@@ -307,29 +316,432 @@ internal class WinUIDragAndDropAdapter(
         return WinUIDragAndDropEventRegistration(event, event.add(handler), handler)
     }
 
-    @OptIn(ExperimentalComposeUiApi::class)
-    private fun DragEventArgs.toComposeDragAndDropEvent(): DragAndDropEvent {
-        val position = getPosition(root)
-        return DragAndDropEvent(
-            nativeEvent = this,
-            positionInRootImpl = winUIPositionToComposeOffset(position.x, position.y, owner.density),
-            action = winUIDragAction(
-                allowedOperations = allowedOperations,
-                isControlPressed = modifiers.hasFlag(DragDropModifiers.Control),
-                isShiftPressed = modifiers.hasFlag(DragDropModifiers.Shift),
-            ),
+    private fun registerSourceEvents(): List<() -> Unit> {
+        val dragStarting: TypedEventHandler<UIElement, DragStartingEventArgs> = { _, args ->
+            handleDragStarting(args)
+        }
+        val dropCompleted: TypedEventHandler<UIElement, DropCompletedEventArgs> = { _, args ->
+            if (
+                shouldHandleWinUIDropCompleted(
+                    hasPendingSourceTransfer = pendingSourceTransfer != null,
+                    hasActiveDragOperation = activeDragOperation != null,
+                )
+            ) {
+                val onTransferCompleted = pendingSourceTransfer?.transferData?.onTransferCompleted
+                val userAction =
+                    runCatching { args.dropResult.toTransferAction() }.getOrNull()
+                runWinUIDragAndDropCleanup(
+                    {
+                        runWinUIDragSourceCleanup(
+                            closeActiveDragOperation = { closeActiveDragOperation(cancel = false) },
+                            clearPendingSourceTransfer = ::clearPendingSourceTransfer,
+                            clearPointerPoint = ::clearSourcePointerPoint,
+                        )
+                    },
+                    // As on desktop: the action the target performed, or null without a drop.
+                    { onTransferCompleted?.invoke(userAction) },
+                )
+            }
+        }
+        return listOf(
+            registerSourceEvent(source.dragStarting, dragStarting),
+            registerSourceEvent(source.dropCompleted, dropCompleted),
         )
+    }
+
+    private fun <T : Any> registerSourceEvent(event: WinRTEvent<T>, handler: T): () -> Unit {
+        val token = event.add(handler)
+        return { event.remove(token) }
+    }
+
+    private fun handleDragStarting(args: DragStartingEventArgs) {
+        val pending = pendingSourceTransfer
+        val dataPackage = args.data
+        val populated =
+            pending != null &&
+                dataPackage != null &&
+                runCatching { populateDragDataPackage(dataPackage, pending) }.getOrDefault(false)
+        when (
+            winUIDragStartingDecision(
+                hasPendingSourceTransfer = pending != null,
+                hasDataPackage = dataPackage != null,
+                populatedDataPackage = populated,
+            )
+        ) {
+            WinUIDragStartingDecision.Ignore -> return
+            WinUIDragStartingDecision.Cancel -> {
+                args.cancel = true
+                clearPendingSourceTransfer()
+                return
+            }
+            WinUIDragStartingDecision.Start -> Unit
+        }
+        val transferData = checkNotNull(pending).transferData
+        args.allowedOperations = transferData.supportedActions.toDataPackageOperation()
+        val dragUI = args.dragUI
+        val decoration = pending.decoration
+        if (decoration != null && dragUI != null) {
+            // The anchor is in pixels of the bitmap, like the offset.
+            val anchor = transferData.dragDecorationOffset
+            runCatching { dragUI.setContentFromSoftwareBitmap(decoration, Point(anchor.x, anchor.y)) }
+                .onFailure { runCatching { dragUI.setContentFromDataPackage() } }
+        } else if (dragUI != null) {
+            runCatching { dragUI.setContentFromDataPackage() }
+        }
+    }
+
+    private fun populateDragDataPackage(
+        target: DataPackage,
+        pending: WinUIPendingSourceTransfer,
+    ): Boolean =
+        when (val nativeData = pending.transferData.nativeTransferData) {
+            is String -> runCatching { target.setText(nativeData) }.isSuccess
+            is DataPackage -> forwardDataPackage(nativeData, target, pending)
+            is Function1<*, *> ->
+                runCatching {
+                    @Suppress("UNCHECKED_CAST")
+                    (nativeData as (DataPackage) -> Unit).invoke(target)
+                }.isSuccess
+            is Map<*, *> -> {
+                var wroteData = false
+                nativeData.forEach { (format, value) ->
+                    if (format is String && value != null) {
+                        if (runCatching { target.setData(format, value) }.isSuccess) {
+                            wroteData = true
+                        }
+                    }
+                }
+                wroteData
+            }
+            else -> false
+        }
+
+    private fun forwardDataPackage(
+        source: DataPackage,
+        target: DataPackage,
+        pending: WinUIPendingSourceTransfer,
+    ): Boolean {
+        val sourceView = runCatching { source.getView() }.getOrNull() ?: return false
+        val formats = runCatching { sourceView.availableFormats.toList() }.getOrDefault(emptyList())
+        if (formats.isEmpty()) return false
+        runCatching { target.requestedOperation = source.requestedOperation }
+        var forwardedFormat = false
+        formats.forEach { format ->
+            val handler = DataProviderHandler { request ->
+                val deferral = runCatching { request.getDeferral() }.getOrNull()
+                val scope = eventCoroutineScope()
+                if (scope == null) {
+                    runCatching { deferral?.complete() }
+                } else {
+                    scope.launch {
+                        try {
+                            runCatching {
+                                val value = sourceView.getDataAsync(format).await()
+                                request.setData(value)
+                            }
+                        } finally {
+                            runCatching { deferral?.complete() }
+                        }
+                    }
+                }
+            }
+            if (runCatching { target.setDataProvider(format, handler) }.isSuccess) {
+                pending.dataProviders += handler
+                forwardedFormat = true
+            }
+        }
+        return forwardedFormat
+    }
+
+    private fun clearPendingSourceTransfer() {
+        pendingSourceTransfer?.decoration?.let { runCatching { it.close() } }
+        pendingSourceTransfer = null
+    }
+
+    private fun closeActiveDragOperation(cancel: Boolean = true) {
+        if (cancel) {
+            activeDragOperation?.let { runCatching { it.cancel() } }
+        }
+        activeDragOperation?.let { runCatching { it.close() } }
+        activeDragOperation = null
+    }
+
+    internal fun updateSourcePointerPoint(pointerPoint: PointerPoint?): WinUIOwnedResourceUpdate =
+        if (isDisposed) {
+            WinUIOwnedResourceUpdate(ownsIncoming = false)
+        } else {
+            sourcePointerPoint.replace(pointerPoint)
+        }
+
+    private fun clearSourcePointerPoint() {
+        sourcePointerPoint.clear().failure?.let { throw it }
+    }
+
+    private fun disposeSourcePointerPoint() {
+        sourcePointerPoint.dispose().failure?.let { throw it }
+    }
+
+    internal fun isSourceElementForTest(element: UIElement): Boolean = source === element
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    private fun DragEventArgs.toComposeDragAndDropDispatch(): WinUIComposeDragAndDropDispatch? {
+        val currentDataView = runCatching { dataView }.getOrNull() ?: return null
+        val transfer = activeTransferFor(currentDataView)
+        val position = runCatching { getPosition(root) }.getOrNull()
+        val positionInRoot =
+            if (position != null) {
+                winUIPositionToComposeOffset(position.x, position.y, owner.density)
+            } else {
+                Offset.Zero
+            }
+        val event =
+            DragAndDropEvent(
+                nativeEvent = this,
+                positionInRootImpl = positionInRoot,
+                action =
+                    runCatching {
+                            winUIDragAction(
+                                allowedOperations = allowedOperations,
+                                isControlPressed = modifiers.hasFlag(DragDropModifiers.Control),
+                                isShiftPressed = modifiers.hasFlag(DragDropModifiers.Shift),
+                            )
+                        }
+                        .getOrNull(),
+            )
+        return WinUIComposeDragAndDropDispatch(
+            event = event,
+            data =
+                PlatformDragAndDropData(
+                    clipEntry = transfer.clipEntry,
+                    clipMetadata = transfer.clipEntry.clipMetadata,
+                    positionInRoot = positionInRoot,
+                ),
+            transfer = transfer,
+        )
+    }
+
+    private fun activeTransferFor(dataView: DataPackageView): WinUIActiveDragTransfer {
+        activeTransfer
+            ?.takeIf { it.dataView == dataView }
+            ?.let {
+                return it
+            }
+        clearActiveTransfer()
+        return WinUIActiveDragTransfer(
+                dataView = dataView,
+                metadata = WinUIDataPackageViewClipMetadata(dataView),
+            )
+            .also { transfer -> activeTransfer = transfer }
+    }
+
+    private fun startPlainTextRead(transfer: WinUIActiveDragTransfer) {
+        if (!transfer.metadata.containsPlainText || transfer.plainTextRead != null) return
+        val scope = eventCoroutineScope() ?: return
+        transfer.plainTextRead = scope.async { transfer.metadata.loadPlainText() }
+    }
+
+    private fun eventCoroutineScope(): CoroutineScope? {
+        if (isDisposed) return null
+        eventScope?.let {
+            return it
+        }
+        val context = coroutineContextProvider()
+        if (context == EmptyCoroutineContext || context[ContinuationInterceptor] == null)
+            return null
+        return CoroutineScope(context.minusKey(Job) + lifecycleJob).also { eventScope = it }
+    }
+
+    private fun finishSynchronousDrop(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+    ): Boolean = createDropTermination(args, dispatch).finish() ?: false
+
+    private fun createDropTermination(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+        completeDeferral: () -> Unit = {},
+        onTerminated: () -> Unit = {},
+    ): WinUIDropTermination =
+        WinUIDropTermination(
+            finishDrop = { dispatchDropAndTerminate(dispatch) },
+            abortDrop = { abortDrop(dispatch) },
+            publishResult = { handled -> publishDropResult(args, dispatch, handled) },
+            completeDeferral = completeDeferral,
+            onTerminated = onTerminated,
+        )
+
+    private fun dispatchDropAndTerminate(dispatch: WinUIComposeDragAndDropDispatch): Boolean {
+        var handled = false
+        runWinUIDragAndDropCleanup(
+            { handled = dispatch.withPlatformData { dragAndDropManager.onDrop(dispatch.event) } },
+            { dispatch.withPlatformData { dragSession.terminate(dispatch.event) } },
+        )
+        return handled
+    }
+
+    private fun publishDropResult(
+        args: DragEventArgs,
+        dispatch: WinUIComposeDragAndDropDispatch,
+        handled: Boolean,
+    ) {
+        runWinUIDragAndDropCleanup(
+            // The source learns the action from the accepted operation.
+            {
+                args.acceptedOperation =
+                    dispatch.event.action.takeIf { handled }.toDataPackageOperation()
+            },
+            { args.handled = handled },
+        )
+    }
+
+    private fun abortDrop(dispatch: WinUIComposeDragAndDropDispatch) {
+        dispatch.withPlatformData { dragSession.terminate(dispatch.event) }
+    }
+
+    private fun cancelPendingDrop() {
+        val pending = pendingDrop ?: return
+        pending.termination.abort()
+        pending.job?.cancel()
+    }
+
+    private fun clearActiveTransfer() {
+        activeTransfer?.plainTextRead?.cancel()
+        activeTransfer = null
+    }
+
+    private inline fun <T> WinUIComposeDragAndDropDispatch.withPlatformData(block: () -> T): T {
+        PlatformDragAndDropEventData.set(event, data)
+        return try {
+            block()
+        } finally {
+            PlatformDragAndDropEventData.clear(event)
+        }
     }
 }
 
-private class OutgoingTransfer(
-    val transferData: DragAndDropTransferData,
-    val decorationSize: Size,
-    val drawDragDecoration: DrawScope.() -> Unit,
+internal fun runWinUIDragSourceCleanup(
+    closeActiveDragOperation: () -> Unit,
+    clearPendingSourceTransfer: () -> Unit,
+    clearPointerPoint: () -> Unit,
 ) {
-    // Kept so that the operation and its completion handler live as long as the drag.
-    var operation: WinRTAsyncOperationReference<DataPackageOperation>? = null
-    var completedHandle: WinRTDelegateHandle? = null
+    runWinUIDragAndDropCleanup(
+        closeActiveDragOperation,
+        clearPendingSourceTransfer,
+        clearPointerPoint,
+    )
+}
+
+internal enum class WinUIDragStartingDecision {
+    Ignore,
+    Cancel,
+    Start,
+}
+
+internal fun winUIDragStartingDecision(
+    hasPendingSourceTransfer: Boolean,
+    hasDataPackage: Boolean,
+    populatedDataPackage: Boolean,
+): WinUIDragStartingDecision =
+    when {
+        !hasPendingSourceTransfer -> WinUIDragStartingDecision.Ignore
+        !hasDataPackage || !populatedDataPackage -> WinUIDragStartingDecision.Cancel
+        else -> WinUIDragStartingDecision.Start
+    }
+
+internal fun shouldHandleWinUIDropCompleted(
+    hasPendingSourceTransfer: Boolean,
+    hasActiveDragOperation: Boolean,
+): Boolean = hasPendingSourceTransfer || hasActiveDragOperation
+
+private class WinUIActiveDragTransfer(
+    val dataView: DataPackageView,
+    val metadata: WinUIDataPackageViewClipMetadata,
+) {
+    val clipEntry: ClipEntry = ClipEntry(metadata)
+    var plainTextRead: Deferred<String?>? = null
+}
+
+private data class WinUIComposeDragAndDropDispatch(
+    val event: DragAndDropEvent,
+    val data: PlatformDragAndDropData,
+    val transfer: WinUIActiveDragTransfer,
+)
+
+private class WinUIPendingDrop(val termination: WinUIDropTermination) {
+    var job: Job? = null
+}
+
+private class WinUIPendingSourceTransfer(
+    val transferData: DragAndDropTransferData,
+    val decoration: SoftwareBitmap?,
+) {
+    val dataProviders = mutableListOf<DataProviderHandler>()
+}
+
+private data class WinUIDragAndDropEventRegistration(
+    val event: WinRTEvent<DragEventHandler>,
+    val token: EventRegistrationToken,
+    val handler: DragEventHandler,
+)
+
+internal data class WinUIDragDecoration(val width: Int, val height: Int, val bgraPixels: ByteArray)
+
+internal fun renderWinUIDragDecoration(
+    decorationSize: Size,
+    density: androidx.compose.ui.unit.Density,
+    layoutDirection: LayoutDirection = LayoutDirection.Ltr,
+    drawDragDecoration: DrawScope.() -> Unit,
+): WinUIDragDecoration {
+    val width = ceil(decorationSize.width.toDouble()).toInt().coerceAtLeast(1)
+    val height = ceil(decorationSize.height.toDouble()).toInt().coerceAtLeast(1)
+    val imageBitmap = ImageBitmap(width, height)
+    CanvasDrawScope()
+        .draw(
+            density = density,
+            layoutDirection = layoutDirection,
+            canvas = Canvas(imageBitmap),
+            size = Size(width.toFloat(), height.toFloat()),
+            block = drawDragDecoration,
+        )
+    val argbPixels = IntArray(width * height)
+    imageBitmap.readPixels(argbPixels)
+    val bgraPixels = ByteArray(argbPixels.size * 4)
+    argbPixels.forEachIndexed { index, argb ->
+        val offset = index * 4
+        val alpha = argb ushr 24 and 0xff
+        bgraPixels[offset] = premultiplyWinUIColorChannel(argb and 0xff, alpha)
+        bgraPixels[offset + 1] = premultiplyWinUIColorChannel(argb ushr 8 and 0xff, alpha)
+        bgraPixels[offset + 2] = premultiplyWinUIColorChannel(argb ushr 16 and 0xff, alpha)
+        bgraPixels[offset + 3] = alpha.toByte()
+    }
+    return WinUIDragDecoration(width, height, bgraPixels)
+}
+
+private fun premultiplyWinUIColorChannel(channel: Int, alpha: Int): Byte =
+    ((channel * alpha + 127) / 255).toByte()
+
+@OptIn(ExperimentalUnsignedTypes::class)
+private fun WinUIDragDecoration.toSoftwareBitmap(scale: Float): SoftwareBitmap {
+    val writer = DataWriter()
+    return try {
+        writer.writeBytes(Array(bgraPixels.size) { index -> bgraPixels[index].toUByte() })
+        SoftwareBitmap.createCopyFromBuffer(
+            writer.detachBuffer(),
+            BitmapPixelFormat.Bgra8,
+            width,
+            height,
+            BitmapAlphaMode.Premultiplied,
+        ).also { bitmap ->
+            // Show the bitmap at its size in physical pixels, as Compose drew it.
+            val dpi = 96.0 * validateWinUIRasterizationScale(scale)
+            runCatching {
+                bitmap.dpiX = dpi
+                bitmap.dpiY = dpi
+            }
+        }
+    } finally {
+        runCatching { writer.close() }
+    }
 }
 
 /**
@@ -378,18 +790,3 @@ internal fun Iterable<DragAndDropTransferAction>.toDataPackageOperation(): DataP
     fold(DataPackageOperation.None) { operations, action ->
         operations or action.toDataPackageOperation()
     }
-
-/**
- * Returns a bitmap with the given premultiplied BGRA [pixels], or `null` if it can't be created.
- */
-internal expect fun createSoftwareBitmap(
-    width: Int,
-    height: Int,
-    pixels: ByteArray,
-): SoftwareBitmap?
-
-private data class WinUIDragAndDropEventRegistration(
-    val event: WinRTEvent<DragEventHandler>,
-    val token: EventRegistrationToken,
-    val handler: DragEventHandler,
-)

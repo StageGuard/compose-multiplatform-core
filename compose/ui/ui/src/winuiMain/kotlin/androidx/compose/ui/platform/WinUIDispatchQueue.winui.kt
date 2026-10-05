@@ -26,7 +26,6 @@ import windows.foundation.TypedEventHandler
 internal class WinUIDispatchQueue(
     private val dispatcherQueue: DispatcherQueue,
 ) {
-    private val lock = Any()
     private val pending = ArrayDeque<() -> Unit>()
     private var isScheduled = false
     private var isDraining = false
@@ -45,20 +44,16 @@ internal class WinUIDispatchQueue(
     private val tickToken: EventRegistrationToken = timer.tick.add(tickHandler)
 
     fun dispatch(block: () -> Unit): Boolean {
-        synchronized(lock) {
-            if (isClosed) return false
-            pending.addLast(block)
-            if (isScheduled || isDraining) return true
-            isScheduled = true
-        }
+        if (isClosed) return false
+        pending.addLast(block)
+        if (isScheduled || isDraining) return true
+        isScheduled = true
         return if (scheduleDrain()) {
             true
         } else {
-            val task = synchronized(lock) {
-                pending.removeLastOrNull().also {
-                    if (pending.isEmpty()) {
-                        isScheduled = false
-                    }
+            val task = pending.removeLastOrNull().also {
+                if (pending.isEmpty()) {
+                    isScheduled = false
                 }
             }
             if (task === block) {
@@ -68,14 +63,35 @@ internal class WinUIDispatchQueue(
         }
     }
 
+    fun postDelayed(delayMillis: Long, block: () -> Unit): WinUIDelayedTask {
+        val delayedTimer = dispatcherQueue.createTimer().also { timer ->
+            timer.interval = delayMillis.coerceAtLeast(1L).milliseconds
+            timer.isRepeating = false
+        }
+        lateinit var delayedTask: WinUIDelayedTask
+        val handler: TypedEventHandler<DispatcherQueueTimer, Any?> = { _, _ ->
+            delayedTask.cancel()
+            runCatching(block).onFailure { throwable ->
+                logDispatchFailure(throwable)
+            }
+        }
+        val token = delayedTimer.tick.add(handler)
+        delayedTask = WinUIDelayedTask(delayedTimer, token)
+        try {
+            delayedTimer.start()
+        } catch (throwable: Throwable) {
+            delayedTask.cancel()
+            throw throwable
+        }
+        return delayedTask
+    }
+
     private fun drain() {
-        val tasks = synchronized(lock) {
-            isScheduled = false
-            isDraining = true
-            buildList {
-                while (pending.isNotEmpty()) {
-                    add(pending.removeFirst())
-                }
+        isScheduled = false
+        isDraining = true
+        val tasks = buildList {
+            while (pending.isNotEmpty()) {
+                add(pending.removeFirst())
             }
         }
         try {
@@ -87,14 +103,12 @@ internal class WinUIDispatchQueue(
                 }
             }
         } finally {
-            val shouldSchedule = synchronized(lock) {
-                isDraining = false
-                if (!isClosed && pending.isNotEmpty() && !isScheduled) {
-                    isScheduled = true
-                    true
-                } else {
-                    false
-                }
+            isDraining = false
+            val shouldSchedule = if (!isClosed && pending.isNotEmpty() && !isScheduled) {
+                isScheduled = true
+                true
+            } else {
+                false
             }
             if (shouldSchedule) {
                 scheduleDrain()
@@ -122,18 +136,30 @@ internal class WinUIDispatchQueue(
         }
 
     fun close() {
-        synchronized(lock) {
-            if (isClosed) return
-            isClosed = true
-            isScheduled = false
-            pending.clear()
-        }
+        if (isClosed) return
+        isClosed = true
+        isScheduled = false
+        pending.clear()
         runCatching { timer.stop() }
         runCatching { timer.tick.remove(tickToken) }
     }
 
     private fun logDispatchFailure(throwable: Throwable) {
-        System.err.println("WinUIDispatchQueue task failed: ${throwable::class.qualifiedName}: ${throwable.message}")
-        throwable.printStackTrace(System.err)
+        println("WinUIDispatchQueue task failed: ${throwable::class.qualifiedName}: ${throwable.message}")
+        throwable.printStackTrace()
+    }
+}
+
+internal class WinUIDelayedTask(
+    private val timer: DispatcherQueueTimer,
+    private val tickToken: EventRegistrationToken,
+) {
+    private var isCancelled = false
+
+    fun cancel() {
+        if (isCancelled) return
+        isCancelled = true
+        runCatching { timer.stop() }
+        runCatching { timer.tick.remove(tickToken) }
     }
 }

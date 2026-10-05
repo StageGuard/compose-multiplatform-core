@@ -31,9 +31,10 @@ internal val LocalScrollConfig = compositionLocalOf<ScrollConfig> { WindowsWinUI
 internal actual fun CompositionLocalConsumerModifierNode.platformScrollConfig(): ScrollConfig =
     currentValueOf(LocalScrollConfig)
 
+internal expect fun isWinUISmoothScrollingEnabled(): Boolean
+
 internal object WindowsWinUIConfig : ScrollConfig {
-    override var isSmoothScrollingEnabled =
-        System.getProperty("compose.scrolling.smooth.enabled") != "false"
+    override var isSmoothScrollingEnabled = isWinUISmoothScrollingEnabled()
 
     override fun isPreciseWheelScroll(event: PointerEvent): Boolean = false
 

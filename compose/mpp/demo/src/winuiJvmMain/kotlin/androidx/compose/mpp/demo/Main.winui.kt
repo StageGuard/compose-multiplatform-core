@@ -16,6 +16,13 @@
 
 package androidx.compose.mpp.demo
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.captionBar
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.titleBarLeftInset
+import androidx.compose.foundation.layout.titleBarRightInset
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -24,10 +31,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.WinUIComposeView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Application
 import androidx.compose.ui.window.ApplicationScope
@@ -50,12 +59,19 @@ import org.jetbrains.skiko.GraphicsApi
 @OptIn(InternalComposeUiApi::class)
 fun main(args: Array<String>) {
     val validation = WinUIMppSampleValidationReport.fromSystemProperties()
+    val extendsContentIntoTitleBar = java.lang.Boolean.getBoolean(
+        "compose.winui.mpp.sample.extendsContentIntoTitleBar"
+    )
+    val validateTitleBarInsets = java.lang.Boolean.getBoolean(
+        "compose.winui.mpp.sample.validateTitleBarInsets"
+    )
     Application {
         val applicationScope = this
         Window(
             title = "Compose MPP demo",
             state = rememberWindowState(width = 1024.dp, height = 850.dp),
             onCloseRequest = { exitApplication() },
+            extendsContentIntoTitleBar = extendsContentIntoTitleBar,
         ) {
             DisposableEffect(Unit) {
                 validation.record("window-content-composed")
@@ -69,18 +85,77 @@ fun main(args: Array<String>) {
                 if (size.width > 0 && size.height > 0) {
                     validation.record("window-positive-size")
                 }
+                if (validateTitleBarInsets) {
+                    if (window.extendsContentIntoTitleBar) {
+                        validation.record("window-extends-content-into-titlebar")
+                    }
+                    val titleBar = appWindow.titleBar
+                    if (titleBar != null) {
+                        validation.record(
+                            "titlebar-raw:${titleBar.height}:${titleBar.leftInset}:" +
+                                titleBar.rightInset
+                        )
+                        if (titleBar.height > 0) {
+                            validation.record("titlebar-raw-positive")
+                        }
+                    }
+                }
             }
             val fontFamilyResolver = LocalFontFamilyResolver.current
+            val density = LocalDensity.current
             val fontsLoaded = remember { mutableStateOf(false) }
             val composeView = currentComposeViewForTest
             val app = remember { App(initialScreenName = args.getOrNull(0)) }
             val navController = rememberNavController()
+            val topAppBarValidationRecorder: ((Int, Int) -> Unit)? =
+                if (validateTitleBarInsets) {
+                    { systemBarsTop, topAppBarHeight ->
+                        validation.record("topappbar-layout:$systemBarsTop:$topAppBarHeight")
+                        if (systemBarsTop > 0 && topAppBarHeight > systemBarsTop) {
+                            validation.record("topappbar-extends-below-titlebar")
+                        }
+                    }
+                } else {
+                    null
+                }
 
+            if (validateTitleBarInsets) {
+                val captionBarTop = WindowInsets.captionBar.getTop(density)
+                val systemBarsTop = WindowInsets.systemBars.getTop(density)
+                val safeDrawingTop = WindowInsets.safeDrawing.getTop(density)
+                val systemBarsLeft = WindowInsets.systemBars.getLeft(density, LayoutDirection.Ltr)
+                val systemBarsRight = WindowInsets.systemBars.getRight(density, LayoutDirection.Ltr)
+                val titleBarLeft = WindowInsets.titleBarLeftInset.getLeft(density, LayoutDirection.Ltr)
+                val titleBarRight = WindowInsets.titleBarRightInset.getRight(density, LayoutDirection.Ltr)
+                SideEffect {
+                    validation.record(
+                        "window-insets-top:$captionBarTop:$systemBarsTop:$safeDrawingTop"
+                    )
+                    validation.record("window-insets-horizontal:$systemBarsLeft:$systemBarsRight")
+                    validation.record("titlebar-insets-horizontal:$titleBarLeft:$titleBarRight")
+                    if (captionBarTop > 0) {
+                        validation.record("captionbar-inset-positive")
+                    }
+                    if (captionBarTop > 0 && systemBarsTop >= captionBarTop) {
+                        validation.record("systembars-inset-includes-caption")
+                    }
+                    if (captionBarTop > 0 && safeDrawingTop >= captionBarTop) {
+                        validation.record("safedrawing-inset-includes-caption")
+                    }
+                }
+            }
+
+            // No theme around the content: the desktop demo has none either, and the two are
+            // compared screen by screen.
             if (fontsLoaded.value) {
                 SideEffect {
                     validation.record("app-content-composed")
                 }
-                app.Content(navController)
+                CompositionLocalProvider(
+                    LocalSampleTopAppBarValidationRecorder provides topAppBarValidationRecorder
+                ) {
+                    app.Content(navController)
+                }
             }
 
             LaunchedEffect(Unit) {
