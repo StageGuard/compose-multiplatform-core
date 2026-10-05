@@ -89,13 +89,11 @@ Found and fixed with real input:
 - [x] After a copy, a native application whose window was closed within a few
   seconds never ended: `KWINRT-081` in `kotlin-winrt-issues.md`, a deadlock of
   the finalizer drain of the native kotlin-winrt runtime with the UI thread.
-  Compose releases its clipboard projections on the UI thread now, which
-  avoids it for the clipboard; the runtime problem is open.
+  Fixed in kotlin-winrt (`7bd31fd48`); the workaround that Compose had for a
+  day (releasing its clipboard projections on the UI thread) is removed.
 
 Differences that stay:
 
-- `KWINRT-081`: any other object whose last release calls into the UI thread
-  can still keep a native process from ending.
 - Both WinUI targets against desktop, seen in these checks: `Key.toString()`
   is "Key(25)" where desktop says "Key: B" (the FocusAndKeyInput screen prints
   it), and the drag image has the "Copy" badge of the system.
