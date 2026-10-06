@@ -1,5 +1,41 @@
 # compose-winui implementation plan
 
+## Windows App SDK components of the native demo 2026-10-06
+
+The toolkit stages the whole self-contained Windows App SDK next to the native
+demo: 195.7 MB in 281 files for the release executable. Most of it is never
+loaded by a Compose application. `Microsoft.WindowsAppSDK` is a metapackage
+that references every component of the SDK (WinUI, Foundation,
+InteractiveExperiences, DWrite, AI, ML, Widgets, the runtime), and NuGet's way
+to carry part of it is to reference the component packages.
+
+- [x] The demo references `Microsoft.WindowsAppSDK.WinUI`, `.Runtime` (the
+  version of the runtime) and `.DWrite` in `windows { packageReferences }`
+  instead of the metapackage, and no longer declares `skiko_winui.dll` as a
+  runtime asset (the bridge of the JVM target, which the native application
+  links statically and never loads). The release package is 125.7 MB in 237
+  files: without ONNX Runtime, DirectML, the Windows AI libraries, Widgets and
+  the JVM Skiko bridge.
+- [x] Verified with the release package: the 105 captures and the fifteen
+  real-input checks of the native demo are those of the full package (the
+  screens with random or animated content aside), the context menu opens; the
+  JVM demo's packaging validation and sample run pass, and its drag and drop,
+  bottom sheet, menu keys and text editing checks are unchanged.
+- [x] kotlin-winrt `7d1367a1c` (PR #20): a component package that the
+  application declares replaces the metapackage that a library declared, in
+  every package list of the application (restore, staging, projections,
+  deployment). Before that the metapackage of `compose:ui:ui` and of
+  skiko-winui, which both declare it to ask for the runtime, was staged
+  whatever the application declared. A component package of a library is kept.
+- [x] Not changed: the libraries keep the metapackage, which says "needs the
+  Windows App SDK runtime"; the application decides which components it
+  carries. `Microsoft.UI.Xaml` and its controls are needed: the window, the
+  input and the menus of Compose are XAML elements. WebView2 comes with the
+  WinUI package, and the XAML resources of 85 languages, `WinUIEdit` and
+  `Microsoft.UI.Xaml.Phone` with WinUI too; a package is staged whole.
+- [x] An earlier version of this work (the first commit of fork PR #7) copied a
+  measured list of files after staging; it is replaced by the declarations.
+
 ## Native demo against the desktop demo 2026-10-05
 
 The MPP demo of the native WinUI target (`winuiMingw`) was compared with the

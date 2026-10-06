@@ -39,6 +39,15 @@ val composeWinUiWindowsAppSdkVersion = providers
     .gradleProperty("composeWinUi.windowsAppSdkVersion")
     .orElse(providers.gradleProperty("kotlinWinRt.samples.windowsAppSdkVersion"))
     .orElse("2.2.0")
+// The component packages of the Windows App SDK that the demo references instead of the
+// Microsoft.WindowsAppSDK metapackage (see packageReferences below); the Runtime package has the
+// version of the metapackage.
+val composeWinUiWindowsAppSdkWinUiVersion = providers
+    .gradleProperty("composeWinUi.windowsAppSdkWinUiVersion")
+    .orElse("2.2.1")
+val composeWinUiWindowsAppSdkDWriteVersion = providers
+    .gradleProperty("composeWinUi.windowsAppSdkDWriteVersion")
+    .orElse("2.1.0")
 val kotlinWinRtVersion = providers
     .gradleProperty("kotlinWinRt.version")
     .orElse("0.1.0-SNAPSHOT")
@@ -213,7 +222,9 @@ val unpackSkikoWinuiWindowsRuntime = tasks.register<Sync>("unpackSkikoWinuiWindo
     include("icudtl.dat")
     into(skikoWinuiWindowsRuntimeDir)
 }
-val skikoWinuiMingwRuntimeAssets = listOf("skiko_winui.dll", "skiko_winui_skia.dll").map { name ->
+// Skia and the ICU data. The runtime jar also has skiko_winui.dll, the bridge of the JVM target,
+// which the native application links statically and never loads.
+val skikoWinuiMingwRuntimeAssets = listOf("skiko_winui_skia.dll").map { name ->
     skikoWinuiMingwRuntimeDir.map { it.file("winui-mingw/windows-x64/$name").asFile }
 } + skikoWinuiWindowsRuntimeDir.map { it.file("icudtl.dat").asFile }
 
@@ -462,8 +473,19 @@ windows {
             includeExtensions = false,
             generateProjection = true,
         )
-        nugetPackage("Microsoft.WindowsAppSDK", composeWinUiWindowsAppSdkVersion.get()) {
+        // The metapackage Microsoft.WindowsAppSDK, which the libraries declare, references every
+        // component of the SDK, and a self-contained application carries the runtime of each
+        // one: 196 MB, of which ONNX Runtime, DirectML, the Windows AI libraries and Widgets are
+        // never loaded by this demo. The demo references the components it uses instead; the
+        // toolkit then leaves the metapackage of the libraries out. WebView2 comes with WinUI.
+        nugetPackage("Microsoft.WindowsAppSDK.WinUI", composeWinUiWindowsAppSdkWinUiVersion.get()) {
             generateProjection = true
+        }
+        nugetPackage("Microsoft.WindowsAppSDK.Runtime", composeWinUiWindowsAppSdkVersion.get()) {
+            generateProjection = false
+        }
+        nugetPackage("Microsoft.WindowsAppSDK.DWrite", composeWinUiWindowsAppSdkDWriteVersion.get()) {
+            generateProjection = false
         }
         type("Windows.Foundation.Uri")
     }
