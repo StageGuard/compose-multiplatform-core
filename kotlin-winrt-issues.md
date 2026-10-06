@@ -12,8 +12,11 @@ baseline, not every retest attempt.
 - **kotlin-winrt build in use:** `xaml-support` `7bd31fd48`:
   `origin/xaml-support` `d5aaeed6b`, which has kotlin-winrt PRs #15 to #18
   (`KWINRT-066`, `KWINRT-067`, `KWINRT-070`, `KWINRT-071`, `KWINRT-073`,
-  `KWINRT-075` to `KWINRT-080`), plus the fix of PR #19 (`KWINRT-081`), open.
-  skiko-winui was rebuilt against it on 2026-10-06. Published to Maven
+  `KWINRT-075` to `KWINRT-080`), plus the fix of PR #19 (`KWINRT-081`, merged
+  with `xaml-support` into `master`) and the Windows App SDK component
+  package rule of PR #20 (`7d1367a1c` on `xaml-support`, `d486de5d0` on
+  `master`, open), which the demo's `packageReferences` need. skiko-winui was
+  rebuilt against it on 2026-10-06. Published to Maven
   Local from the local checkout
   (since 2026-10-04; before that the `0.1.0-SNAPSHOT` published from
   `master`). The `external/kotlin-winrt` submodule of `winui_dev` pins a commit
