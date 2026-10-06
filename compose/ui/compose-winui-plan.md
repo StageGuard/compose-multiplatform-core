@@ -9,29 +9,32 @@ that references every component of the SDK (WinUI, Foundation,
 InteractiveExperiences, DWrite, AI, ML, Widgets, the runtime), and NuGet's way
 to carry part of it is to reference the component packages.
 
-- [x] The demo references `Microsoft.WindowsAppSDK.WinUI`, `.Runtime` (the
-  version of the runtime) and `.DWrite` in `windows { packageReferences }`
-  instead of the metapackage, and no longer declares `skiko_winui.dll` as a
-  runtime asset (the bridge of the JVM target, which the native application
-  links statically and never loads). The release package is 125.7 MB in 237
-  files: without ONNX Runtime, DirectML, the Windows AI libraries, Widgets and
-  the JVM Skiko bridge.
+- [x] Every library and application that needs the SDK declares components
+  in `windows { packageReferences }` instead of the metapackage: skiko-winui
+  (`skiko/gradle/winui.gradle.kts`, PR compose-fluent/skiko #3) and
+  `compose:ui:ui` declare `Microsoft.WindowsAppSDK.WinUI` (which brings
+  Foundation and InteractiveExperiences, every `Microsoft.UI.*` namespace they
+  project) and `.DWrite` (DWriteCore, the text engine of WinUI 3); the demo
+  and `winui-samples` declare those and `.Runtime`, which has the version of
+  the runtime. The demo also no longer declares `skiko_winui.dll` as a runtime
+  asset (the bridge of the JVM target, which the native application links
+  statically and never loads). The release package is 125.7 MB in 237 files:
+  without ONNX Runtime, DirectML, the Windows AI libraries, Widgets and the JVM
+  Skiko bridge. No change of the kotlin-winrt plugin is needed for this: the
+  toolkit restores the union of the declared packages, and nothing declares
+  the metapackage any more.
 - [x] Verified with the release package: the 105 captures and the fifteen
   real-input checks of the native demo are those of the full package (the
   screens with random or animated content aside), the context menu opens; the
   JVM demo's packaging validation and sample run pass, and its drag and drop,
   bottom sheet, menu keys and text editing checks are unchanged.
-- [x] kotlin-winrt `7d1367a1c` (PR #20): a component package that the
-  application declares replaces the metapackage that a library declared, in
-  every package list of the application (restore, staging, projections,
-  deployment). Before that the metapackage of `compose:ui:ui` and of
-  skiko-winui, which both declare it to ask for the runtime, was staged
-  whatever the application declared. A component package of a library is kept.
-- [x] Not changed: the libraries keep the metapackage, which says "needs the
-  Windows App SDK runtime"; the application decides which components it
-  carries. `Microsoft.UI.Xaml` and its controls are needed: the window, the
-  input and the menus of Compose are XAML elements. WebView2 comes with the
-  WinUI package, and the XAML resources of 85 languages, `WinUIEdit` and
+- [x] kotlin-winrt PR #20 (`7d1367a1c`) had let an application's component
+  packages replace a metapackage that a library declared. With the libraries
+  declaring components themselves it is not needed; it stays a general
+  improvement for a library outside these repositories.
+- [x] `Microsoft.UI.Xaml` and its controls are needed: the window, the input
+  and the menus of Compose are XAML elements. WebView2 comes with the WinUI
+  package, and the XAML resources of 85 languages, `WinUIEdit` and
   `Microsoft.UI.Xaml.Phone` with WinUI too; a package is staged whole.
 - [x] An earlier version of this work (the first commit of fork PR #7) copied a
   measured list of files after staging; it is replaced by the declarations.
@@ -97,7 +100,11 @@ demo and the desktop demo, and the captures after every step were compared.
   window focus state, the date picker (a day, the next month, the year list,
   a year, the input mode, a typed date).
 - [x] The clipboard has the same text after every copy and cut on the three
-  targets.
+  targets. In a few runs the first copy or paste right after another process
+  had written the clipboard did nothing: `OpenClipboard Failed (0x800401D0)`,
+  the clipboard held by that process (or by the clipboard history reading it).
+  The suspending clipboard operations of `WinUIClipboard` repeat such an
+  operation now (up to ten times, 20 ms apart; `WinUIClipboardRetryTest`).
 - [x] Cursors over the areas of the PointerIcon screen and over a text field:
   arrow, cross, I-beam, hand on the three targets (`GetCursorInfo`).
 - [x] The context menu of a text field opens on the right click. On WinUI it
