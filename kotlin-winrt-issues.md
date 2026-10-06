@@ -14,7 +14,8 @@ baseline, not every retest attempt.
   (`KWINRT-066`, `KWINRT-067`, `KWINRT-070`, `KWINRT-071`, `KWINRT-073`,
   `KWINRT-075` to `KWINRT-080`), plus the fix of PR #19 (`KWINRT-081`, merged
   with `xaml-support` into `master`). The plugin in Maven Local is published
-  from `origin/master` `f1046bb50`; PR #20 (an application's component
+  from `origin/master` `f1046bb50` plus the `KWINRT-082` fix (`0eeb83ce2`,
+  PR #21); PR #20 (an application's component
   packages replacing a library's metapackage) is not needed since skiko-winui
   and `compose:ui:ui` declare components themselves. skiko-winui was rebuilt
   against it on 2026-10-06. Published to Maven
@@ -74,7 +75,43 @@ baseline, not every retest attempt.
   `KWINRT-057`, `KWINRT-058`, `KWINRT-059`, `KWINRT-060`, `KWINRT-062`,
   `KWINRT-063`, `KWINRT-064`, `KWINRT-066`, `KWINRT-067`, `KWINRT-068`,
   `KWINRT-069`, `KWINRT-070`, `KWINRT-071`, `KWINRT-073`, `KWINRT-075`,
-  `KWINRT-076`, `KWINRT-077`, `KWINRT-078`, `KWINRT-079`, and `KWINRT-080`.
+  `KWINRT-076`, `KWINRT-077`, `KWINRT-078`, `KWINRT-079`, `KWINRT-080`, and
+  `KWINRT-082`.
+
+## KWINRT-082: Metadata tasks read the projection outputs without a task dependency
+
+- **Status:** Closed. Fixed on kotlin-winrt `kwinrt-082-metadata-task-order`
+  by `0eeb83ce2` (https://github.com/compose-fluent/kotlin-winrt/pull/21,
+  open). mingwX64 only; no fork-side workaround kept.
+- **Observed in:** publishing the root (`KotlinMultiplatform`) publication of
+  a library with a `winuiMingw` target
+  (`publishKotlinMultiplatformPublicationToMavenLocal`, 2026-10-06). The
+  per-target publications never run the metadata tasks, so the regular
+  builds do not see it. Gradle 9 fails the build with "uses this output of
+  task ... without declaring an explicit or implicit dependency" for:
+  - `compile<SourceSet>KotlinMetadata` of the shared source sets, which read
+    the generated `kotlin-winrt-authoring` sources that
+    `generateWinRTProjections` writes into the source set (only
+    `compileWinuiMainKotlinMetadata` depended on it);
+  - `transform<SourceSet>DependenciesMetadata` and
+    `transform<SourceSet>CInteropDependenciesMetadata` of the projects that
+    depend on the library, which read the projection klib that
+    `compileWinRTProjectionKotlin<Target>` publishes on the Native variant
+    (`material3-window-size-class` and `adaptive` read the one of
+    `ui-text`; neither applies the plugin). The plugin ordered only the
+    transforms of the library's own project after the projection.
+- **Cause:** the plugin keeps ordering edges, not producer edges, for the
+  projection klib (a producer edge on the source-set file dependency makes
+  IDE import compile the projection), and had the edges for the platform
+  compilations and the local transforms only.
+- **Fix:** every `compile*KotlinMetadata` task of a plugin project depends on
+  `generateWinRTProjections`, and the projection compilation orders the
+  metadata transforms of every project in the build after itself.
+- **Validation:** 2026-10-06: `WindowsToolkitPluginTest.metadata_tasks_follow_the_projection_outputs_of_this_and_the_dependency_projects`
+  (new); the fork's mingw chain (`runtime` to `material3`, root and
+  `winuiMingw` / `mingwX64` publications) publishes to Maven Local from a
+  build with `-Pandroidx.enabled.kmp.target.platforms=-js,-wasm,-linux,-mac`
+  and without `kotlin.mpp.enableCInteropCommonization=false`.
 
 ## KWINRT-081: A native application does not end when a finalizer releases into the UI thread
 
