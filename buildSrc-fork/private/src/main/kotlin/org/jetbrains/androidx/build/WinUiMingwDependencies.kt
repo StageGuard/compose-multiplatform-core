@@ -16,6 +16,7 @@
 
 package org.jetbrains.androidx.build
 
+import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 
@@ -51,6 +52,19 @@ internal fun Project.configureWinUiMingwDependencies() {
     // The library plugin and the Compose plugin both ask for this; an application has the second.
     if (extensions.extraProperties.has(ConfiguredMarker)) return
     extensions.extraProperties.set(ConfiguredMarker, true)
+    // compose:ui:ui creates its WinUI targets, the native one included, only with the JVM flag:
+    // winuiMain is wired for both. The other modules create winuiMingw on the native flag alone,
+    // so a build with that flag only has the target in some modules and not in ui, and fails in
+    // the middle of the dependency chain.
+    val jvmTargetEnabled = providers.gradleProperty("composeWinUi.enableJvmTarget")
+        .map { it.toBoolean() }
+        .getOrElse(false)
+    if (!jvmTargetEnabled) {
+        throw GradleException(
+            "composeWinUi.enableMingwTarget=true requires composeWinUi.enableJvmTarget=true: " +
+                "the WinUI native target is built alongside the WinUI JVM target."
+        )
+    }
 
     configurations.configureEach { configuration ->
         if (!configuration.name.contains("mingw", ignoreCase = true)) return@configureEach
