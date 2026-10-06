@@ -20,9 +20,18 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.InternalComposeUiApi
 import microsoft.ui.xaml.FrameworkElement
 import microsoft.ui.xaml.Window
+import org.jetbrains.skiko.winui.WinUISkiaLayer
 
 @InternalComposeUiApi
 val LocalWinUIRoot = staticCompositionLocalOf<FrameworkElement?> { null }
 
 @InternalComposeUiApi
 val LocalWinUIWindow = staticCompositionLocalOf<Window?> { null }
+
+/**
+ * The Skiko layer this composition renders through, for libraries that draw their own GPU
+ * resources via [WinUISkiaLayer.direct3DInterop] (a video backend, for example). Null outside a
+ * WinUI render host.
+ */
+@InternalComposeUiApi
+val LocalWinUISkiaLayer = staticCompositionLocalOf<WinUISkiaLayer?> { null }

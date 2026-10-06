@@ -451,6 +451,7 @@ class WinUIComposeView internal constructor(
                 LocalPlatformPrefetchScheduler provides NoOpPlatformPrefetchScheduler,
                 LocalWinUIRoot provides rootContentControl,
                 LocalWinUIWindow provides window,
+                LocalWinUISkiaLayer provides renderHost.skiaLayer,
                 LocalSystemTheme provides systemEnvironment.systemTheme,
                 LocalWinUIComposeLayerHost provides layerHost,
             ) {

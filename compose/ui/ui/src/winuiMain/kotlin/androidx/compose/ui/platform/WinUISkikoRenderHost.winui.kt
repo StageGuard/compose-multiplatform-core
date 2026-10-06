@@ -60,6 +60,10 @@ internal class WinUISkikoRenderHost(
     val component: FrameworkElement
         get() = layer.component
 
+    /** The Skiko layer of this host, for [LocalWinUISkiaLayer]. */
+    val skiaLayer: WinUISkiaLayer?
+        get() = layer.skiaLayer
+
     /**
      * The elements whose key events are Compose key events: the host and the swap chain panel in
      * it, which has the XAML focus after a click into the content.
@@ -317,6 +321,10 @@ internal data class WinUISkikoRenderHostDiagnostics(
 internal interface WinUISkikoLayerAdapter : AutoCloseable {
     val component: FrameworkElement
 
+    /** The Skiko layer behind this adapter, when it is a real one (null for fakes). */
+    val skiaLayer: WinUISkiaLayer?
+        get() = null
+
     val keyEventSources: List<FrameworkElement>
         get() = listOf(component)
 
@@ -366,6 +374,9 @@ private class DefaultWinUISkikoLayerAdapter(
     renderDelegate: SkikoRenderDelegate?,
 ) : WinUISkikoLayerAdapter {
     private val layer = WinUISkiaLayer(renderDelegate)
+
+    override val skiaLayer: WinUISkiaLayer
+        get() = layer
 
     override val component: FrameworkElement
         get() = layer.component
