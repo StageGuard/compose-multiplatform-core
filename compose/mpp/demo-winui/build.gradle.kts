@@ -39,9 +39,8 @@ val composeWinUiWindowsAppSdkVersion = providers
     .gradleProperty("composeWinUi.windowsAppSdkVersion")
     .orElse(providers.gradleProperty("kotlinWinRt.samples.windowsAppSdkVersion"))
     .orElse("2.2.0")
-// The component packages of the Windows App SDK that the demo references instead of the
-// Microsoft.WindowsAppSDK metapackage (see packageReferences below); the Runtime package has the
-// version of the metapackage.
+// The component packages of the Windows App SDK that the demo references (see packageReferences
+// below); the Runtime package has the version of the metapackage.
 val composeWinUiWindowsAppSdkWinUiVersion = providers
     .gradleProperty("composeWinUi.windowsAppSdkWinUiVersion")
     .orElse("2.2.1")
@@ -473,11 +472,11 @@ windows {
             includeExtensions = false,
             generateProjection = true,
         )
-        // The metapackage Microsoft.WindowsAppSDK, which the libraries declare, references every
-        // component of the SDK, and a self-contained application carries the runtime of each
-        // one: 196 MB, of which ONNX Runtime, DirectML, the Windows AI libraries and Widgets are
-        // never loaded by this demo. The demo references the components it uses instead; the
-        // toolkit then leaves the metapackage of the libraries out. WebView2 comes with WinUI.
+        // The metapackage Microsoft.WindowsAppSDK references every component of the SDK, and a
+        // self-contained application carries the runtime of each package that it or its
+        // libraries declare: 196 MB, of which ONNX Runtime, DirectML, the Windows AI libraries
+        // and Widgets are never loaded by this demo. The demo, compose-ui and skiko-winui
+        // reference the components they use instead. WebView2 comes with WinUI.
         nugetPackage("Microsoft.WindowsAppSDK.WinUI", composeWinUiWindowsAppSdkWinUiVersion.get()) {
             generateProjection = true
         }

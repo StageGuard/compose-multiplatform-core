@@ -49,10 +49,13 @@ def composeWinUiGradlePluginAvailable =
 def composeWinUiWindowsSdkVersion = providers
         .gradleProperty("composeWinUi.windowsSdkVersion")
         .orElse("10.0.26100.0")
-def composeWinUiWindowsAppSdkVersion = providers
-        .gradleProperty("composeWinUi.windowsAppSdkVersion")
-        .orElse(providers.gradleProperty("kotlinWinRt.samples.windowsAppSdkVersion"))
-        .orElse("2.2.0")
+// The Windows App SDK components that compose-ui uses (see packageReferences below).
+def composeWinUiWindowsAppSdkWinUiVersion = providers
+        .gradleProperty("composeWinUi.windowsAppSdkWinUiVersion")
+        .orElse("2.2.1")
+def composeWinUiWindowsAppSdkDWriteVersion = providers
+        .gradleProperty("composeWinUi.windowsAppSdkDWriteVersion")
+        .orElse("2.1.0")
 def kotlinWinRtVersion = providers
         .gradleProperty("kotlinWinRt.version")
         .orElse("0.1.0-SNAPSHOT")
@@ -426,8 +429,16 @@ if (composeWinUiGradlePluginAvailable) {
                     .map { it.toBoolean() }
                     .orElse(true)
             windowsSdk(composeWinUiWindowsSdkVersion.get(), false, true)
-            nugetPackage("Microsoft.WindowsAppSDK", composeWinUiWindowsAppSdkVersion.get()) {
+            // Microsoft.WindowsAppSDK is a metapackage that references every component of the
+            // SDK (AI, ML, Widgets, ...), and a self-contained application stages the runtime of
+            // each package that any of its libraries declares. compose-ui projects Microsoft.UI.*
+            // only: the WinUI package, which brings Foundation and InteractiveExperiences, and
+            // DWriteCore, the text engine of WinUI 3. skiko-winui declares the same two.
+            nugetPackage("Microsoft.WindowsAppSDK.WinUI", composeWinUiWindowsAppSdkWinUiVersion.get()) {
                 generateProjection = true
+            }
+            nugetPackage("Microsoft.WindowsAppSDK.DWrite", composeWinUiWindowsAppSdkDWriteVersion.get()) {
+                generateProjection = false
             }
             type("Windows.Foundation.IStringable")
             type("Windows.Foundation.Point")
