@@ -43,6 +43,7 @@ private const val ConfiguredMarker = "composeWinUiMingwDependenciesConfigured"
  *   replaced by its project in this build, the only place where the variant exists.
  */
 internal fun Project.configureWinUiMingwDependencies() {
+    declareSkikoWinUiInWinUiOnlySourceSets()
     val mingwTargetEnabled = providers.gradleProperty("composeWinUi.enableMingwTarget")
         .map { it.toBoolean() }
         .getOrElse(false)
