@@ -66,13 +66,30 @@ androidXMultiplatform {
         commonMain.dependencies {
             api(project(":navigation:navigation-runtime"))
             api(project(":navigation:navigation-common"))
+            if (composeWinUiMingwTargetEnabled) {
+                // The navigation projects build mingwX64 from their sources and redirect every
+                // other target to the androidx artifact with an empty leaf. The metadata of
+                // commonMain sees the source sets a project dependency exposes on all the
+                // platforms of commonMain, the JVM one included, where the leaf exposes none,
+                // so the API comes from the redirect artifact here. The MinGW configurations
+                // substitute it by the project (WinUiMingwDependencies.kt).
+                def navigationVersion = project.redirectVersions.get('androidx.navigation')
+                compileOnly("androidx.navigation:navigation-runtime:$navigationVersion")
+                compileOnly("androidx.navigation:navigation-common:$navigationVersion")
+            }
             implementation("androidx.annotation:annotation:1.8.0")
-            api("org.jetbrains.compose.runtime:runtime:1.11.0")
-            api("org.jetbrains.compose.ui:ui:1.11.0")
-            api("org.jetbrains.compose.animation:animation:1.11.0")
-            api("org.jetbrains.compose.runtime:runtime-saveable:1.11.0")
-            implementation("org.jetbrains.compose.animation:animation-core:1.11.0")
-            implementation("org.jetbrains.compose.foundation:foundation-layout:1.11.0")
+            // The WinUI build compiles against the Compose modules of this build: the MinGW
+            // configurations substitute the published ones by the projects anyway, and the
+            // metadata of commonMain needs the project structure of what the platforms resolve.
+            def compose = { String projectPath, String published ->
+                composeWinUiMingwTargetEnabled ? project(projectPath) : published
+            }
+            api(compose(":compose:runtime:runtime", "org.jetbrains.compose.runtime:runtime:1.11.0"))
+            api(compose(":compose:ui:ui", "org.jetbrains.compose.ui:ui:1.11.0"))
+            api(compose(":compose:animation:animation", "org.jetbrains.compose.animation:animation:1.11.0"))
+            api(compose(":compose:runtime:runtime-saveable", "org.jetbrains.compose.runtime:runtime-saveable:1.11.0"))
+            implementation(compose(":compose:animation:animation-core", "org.jetbrains.compose.animation:animation-core:1.11.0"))
+            implementation(compose(":compose:foundation:foundation-layout", "org.jetbrains.compose.foundation:foundation-layout:1.11.0"))
             implementation("androidx.collection:collection:1.5.0")
             implementation("org.jetbrains.androidx.lifecycle:lifecycle-common:2.11.0")
             implementation("org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose:2.11.0")

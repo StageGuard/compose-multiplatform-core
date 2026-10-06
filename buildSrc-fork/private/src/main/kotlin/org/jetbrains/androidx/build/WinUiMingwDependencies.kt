@@ -40,8 +40,9 @@ private const val ConfiguredMarker = "composeWinUiMingwDependenciesConfigured"
  *
  * - a JetBrains artifact that redirects to an androidx one is replaced by that one, which has
  *   the variant;
- * - a published Compose module that a library pins (`org.jetbrains.compose.ui:ui:1.10.0`) is
- *   replaced by its project in this build, the only place where the variant exists.
+ * - a published Compose module that a library pins (`org.jetbrains.compose.ui:ui:1.10.0`), or
+ *   an androidx navigation artifact that the navigation projects redirect their other targets
+ *   to, is replaced by its project in this build, the only place where the variant exists.
  */
 internal fun Project.configureWinUiMingwDependencies() {
     declareSkikoWinUiInWinUiOnlySourceSets()
@@ -76,14 +77,19 @@ internal fun Project.configureWinUiMingwDependencies() {
             }
             substitutions.all { dependency ->
                 val requested = dependency.requested as? ModuleComponentSelector ?: return@all
-                if (!requested.group.startsWith(ComposeGroupPrefix)) return@all
-                val projectPath = ":compose:" +
-                    requested.group.removePrefix(ComposeGroupPrefix).replace('.', ':') +
-                    ":" + requested.module
+                val projectPath = when {
+                    requested.group.startsWith(ComposeGroupPrefix) -> ":compose:" +
+                        requested.group.removePrefix(ComposeGroupPrefix).replace('.', ':') +
+                        ":" + requested.module
+                    // The navigation projects build mingwX64 from their sources and redirect the
+                    // other targets to this artifact (navigation-compose names it as well).
+                    requested.group == "androidx.navigation" -> ":navigation:" + requested.module
+                    else -> return@all
+                }
                 if (rootProject.findProject(projectPath) != null) {
                     dependency.useTarget(
                         substitutions.project(projectPath),
-                        "The published Compose module has no mingwX64 variant.",
+                        "The published module has no mingwX64 variant.",
                     )
                 }
             }
