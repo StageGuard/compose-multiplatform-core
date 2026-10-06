@@ -170,11 +170,12 @@ fun configureDarwinFlags(project: Project) {
              it.freeCompilerArgs += flags
         }
     }
-    project.multiplatformExtension!!.run {
-        macosArm64 { configureFreeCompilerArgs() }
-        iosArm64 { configureFreeCompilerArgs() }
-        iosSimulatorArm64 { configureFreeCompilerArgs() }
-    }
+    // Only the Darwin targets the module declared: `macosArm64 { }` on the extension would create
+    // the target, bypassing -Pandroidx.enabled.kmp.target.platforms=-mac.
+    project.multiplatformExtension!!.targets
+        .withType(KotlinNativeTarget::class.java)
+        .matching { it.konanTarget.family.isAppleFamily }
+        .configureEach { it.configureFreeCompilerArgs() }
 }
 
 /**
@@ -201,10 +202,11 @@ fun addIosInstrumentedTestSourceset(project: Project) {
                 isStatic = true
             }
         }
-        testableTargets.getByName(
-            "iosSimulatorArm64",
-            KotlinNativeTargetWithSimulatorTests::class,
-            KotlinNativeTargetWithSimulatorTests::configureTestRun
-        )
+        // The target is absent when the Mac platforms are disabled
+        // (-Pandroidx.enabled.kmp.target.platforms=-mac).
+        testableTargets
+            .withType(KotlinNativeTargetWithSimulatorTests::class.java)
+            .matching { it.name == "iosSimulatorArm64" }
+            .configureEach(KotlinNativeTargetWithSimulatorTests::configureTestRun)
     }
 }
