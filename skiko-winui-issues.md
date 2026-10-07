@@ -342,6 +342,26 @@ baseline, not every retest attempt.
   and pointer/navigation path. Keep this entry as upstream evidence because
   `WinUISkiaLayer.needRender()` can synchronously enter
   `flushAndSubmit(surface, true)` when called from a WinUI event callback.
+- **2026-10-07 the continuous scheduler is gone:** `WinUIComposeView` no longer
+  starts `WinUISkiaLayer.startFrameScheduler()` (`d37fe6dd154`); skiko-winui
+  renders throttled requests on `CompositionTarget.Rendering` frames and
+  without a CPU sync (compose-fluent/skiko PR #5), so `needRender()` no longer
+  presents from the caller's stack. The running scheduler rendered a full frame
+  every 16 ms while nothing changed and capped frames near 64 Hz. Checked on
+  the native MPP demo: all 105 screens against the shots of 2026-10-06 (the
+  static ones identical; lazy grids, pager, mesh gradient, image viewer and the
+  random-color lists differ on every run), the 15 input checks of
+  `verify-target.ps1` (same text results), and window state changes on
+  `InteropOrder` and `Dialog destination` with `compose.winui.render.debug`:
+  the render size follows every resize (900, 640, 1100, maximized, 1100) and
+  minimize/restore keeps the presented frame. No frame that only Skiko needed
+  showed up. (A device removal, e.g. a driver reset, is recovered neither way:
+  skiko-winui resets its device only when the layer closes.)
+- **2026-10-07 found while checking that:** after shrinking the window so that
+  an interop view of `InteropOrder` lies outside the window, the native view is
+  shown at (0,0) over the content instead of being clipped. It reproduces with
+  the scheduler and the interop sync of `214641d8e6c` reverted, so it predates
+  both.
 
 ## SKIKO-001: skiko-winui artifact coordinates were not obvious
 
