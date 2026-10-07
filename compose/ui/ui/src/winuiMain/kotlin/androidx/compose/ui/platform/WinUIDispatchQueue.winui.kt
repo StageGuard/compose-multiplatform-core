@@ -28,6 +28,11 @@ import windows.foundation.TypedEventHandler
  *
  * [dispatch] is called from any thread (it backs `Dispatchers.Main`), so the pending blocks and the
  * scheduling state are guarded by [lock]. The blocks themselves run outside the lock.
+ *
+ * A drain is always a dispatcher queue item, also when [dispatch] is called on the thread of the
+ * queue: the blocks leave the current WinUI callback, but run as soon as the message loop gets to
+ * them. (A DispatcherQueueTimer, even with a 1 ms interval, fires on the next tick of the system
+ * timer, 15.6 ms by default, which capped the frame loop of Compose at 64 Hz.)
  */
 internal class WinUIDispatchQueue(
     private val dispatcherQueue: DispatcherQueue,
@@ -37,18 +42,13 @@ internal class WinUIDispatchQueue(
     private var isScheduled = false
     private var isDraining = false
     private var isClosed = false
-    private val tickHandler: TypedEventHandler<DispatcherQueueTimer, Any?> = { _, _ ->
+    private val drainHandler = DispatcherQueueHandler {
         runCatching {
             drain()
         }.onFailure { throwable ->
             logDispatchFailure(throwable)
         }
     }
-    private val timer = dispatcherQueue.createTimer().also { timer ->
-        timer.interval = 1.milliseconds
-        timer.isRepeating = false
-    }
-    private val tickToken: EventRegistrationToken = timer.tick.add(tickHandler)
 
     fun dispatch(block: () -> Unit): Boolean {
         synchronized(lock) {
@@ -130,18 +130,7 @@ internal class WinUIDispatchQueue(
 
     private fun scheduleDrain(): Boolean =
         runCatching {
-            if (dispatcherQueue.hasThreadAccess) {
-                timer.start()
-                true
-            } else {
-                dispatcherQueue.tryEnqueue(DispatcherQueueHandler {
-                    runCatching {
-                        drain()
-                    }.onFailure { throwable ->
-                        logDispatchFailure(throwable)
-                    }
-                })
-            }
+            dispatcherQueue.tryEnqueue(drainHandler)
         }.getOrElse { throwable ->
             logDispatchFailure(throwable)
             false
@@ -154,8 +143,6 @@ internal class WinUIDispatchQueue(
             isScheduled = false
             pending.clear()
         }
-        runCatching { timer.stop() }
-        runCatching { timer.tick.remove(tickToken) }
     }
 
     private fun logDispatchFailure(throwable: Throwable) {
