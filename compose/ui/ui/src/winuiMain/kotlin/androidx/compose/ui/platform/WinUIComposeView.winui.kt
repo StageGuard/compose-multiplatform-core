@@ -676,7 +676,7 @@ class WinUIComposeView internal constructor(
         titleBarLeftInset = leftInset
         titleBarRightInset = rightInset
         updatePlatformWindowInsets()
-        titleBarPassthrough?.setTitleBarHeight(height)
+        titleBarPassthrough?.setTitleBar(height, leftInset, rightInset)
     }
 
     private fun updatePlatformWindowInsets() {
