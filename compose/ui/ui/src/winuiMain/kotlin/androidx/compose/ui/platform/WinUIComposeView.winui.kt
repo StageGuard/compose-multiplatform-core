@@ -282,7 +282,12 @@ class WinUIComposeView internal constructor(
         retainedValuesStore = retainedValuesStore,
         coroutineContextProvider = { ownerCoroutineContext },
         onMeasureAndLayoutRequested = ::scheduleRootContentSync,
-        onInteropTreeChanged = ::syncRootContent,
+        // The owner reports interop tree changes for every layout node that is deactivated or
+        // reused, from inside the Recomposer's apply phase. Measuring there would subcompose
+        // compositions of the same frame that are composed but not applied yet ("pending
+        // composition has not been applied"), and a lazy list would re-measure the whole root for
+        // each recycled item: sync once, after the apply, instead.
+        onInteropTreeChanged = ::scheduleRootContentSync,
         onRootInvalidated = ::invalidateRootLayer,
         onInteropTransactionScheduled = ::scheduleInteropTransaction,
         onAccessibilityUpdate = renderHost::notifyAccessibilityChanged,
