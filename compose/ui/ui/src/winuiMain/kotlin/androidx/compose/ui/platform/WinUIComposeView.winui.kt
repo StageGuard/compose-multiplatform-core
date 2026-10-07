@@ -837,9 +837,13 @@ class WinUIComposeView internal constructor(
         }
     }
 
+    // No continuously running frame scheduler: Compose asks for every frame it needs
+    // (recomposition, animation frames, size changes) and the layer renders those on the next frame
+    // of the compositor. A running scheduler renders every frame of the display, changed or not.
     private fun startRenderScheduler() {
         if (!isDisposed && content != null) {
-            renderHost.startFrameScheduler()
+            renderHost.attachSurface()
+            requestRender()
         }
     }
 
