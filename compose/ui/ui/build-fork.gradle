@@ -504,6 +504,9 @@ if (composeWinUiGradlePluginAvailable) {
             type("Microsoft.UI.Xaml.Style")
             type("Microsoft.UI.Xaml.Thickness")
             type("Microsoft.UI.Xaml.Window")
+            // WinUITitleBarPassthrough: passthrough regions of an extended title bar
+            type("Microsoft.UI.Input.InputNonClientPointerSource")
+            type("Microsoft.UI.Input.NonClientRegionKind")
             type("Microsoft.UI.Xaml.Controls.Button")
             type("Microsoft.UI.Xaml.Controls.Canvas")
             type("Microsoft.UI.Xaml.Controls.ContentControl")
