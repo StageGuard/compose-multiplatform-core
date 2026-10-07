@@ -338,6 +338,9 @@ class WinUIComposeView internal constructor(
     private var captionBarHeight = 0
     private var titleBarLeftInset = 0
     private var titleBarRightInset = 0
+    private val titleBarPassthrough = window?.let { owningWindow ->
+        WinUITitleBarPassthrough(owningWindow) { owner.semanticsOwner }
+    }
     private var inputPaneOccludedRect: WinUIInputPaneOccludedRect? = null
     private var inputPaneController: WinUIInputPaneController? = null
     private var currentInteropRoots: List<UIElement> = emptyList()
@@ -505,6 +508,7 @@ class WinUIComposeView internal constructor(
             { dragAndDropAdapter.dispose() },
             { pointerCursorAdapter.dispose() },
             { retainedValuesStore.dispose() },
+            { titleBarPassthrough?.close() },
             {
                 architectureComponentsOwner.navigationEventDispatcherOwner
                     .navigationEventDispatcher.removeInput(backNavigationEventInput)
@@ -672,6 +676,7 @@ class WinUIComposeView internal constructor(
         titleBarLeftInset = leftInset
         titleBarRightInset = rightInset
         updatePlatformWindowInsets()
+        titleBarPassthrough?.setTitleBarHeight(height)
     }
 
     private fun updatePlatformWindowInsets() {
@@ -741,6 +746,7 @@ class WinUIComposeView internal constructor(
             measureAndLayout()
             owner.sendAndPerformSnapshotChanges()
             updateRootContent(rootNode.collectWinUIInteropRoots())
+            titleBarPassthrough?.onLayout()
             requestRender()
         }
     }
@@ -801,6 +807,7 @@ class WinUIComposeView internal constructor(
                     // The work of the frame can close the window, which disposes this view and
                     // the surface of the canvas.
                     if (isDisposed) return@applyOwnerChanges
+                    titleBarPassthrough?.onLayout()
                     frameBackgroundColor?.let(canvas::clear)
                     owner.draw(canvas.asComposeCanvas())
                 }
